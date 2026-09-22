@@ -106,4 +106,13 @@
     <Copy SourceFiles="$(OutputPath)$(AssemblyName).dll"
           DestinationFiles="$(GameDir)\BepInEx\plugins\$(AssemblyName).dll" />
   </Target>
+
+  <!-- Keep the live config's defaults in sync with source: BepInEx only ever adds keys
+       that don't exist yet, so a stale key from a build two commits ago silently survives
+       otherwise. This file is the source of truth for defaults — overwritten on every
+       build. -->
+  <Target Name="DeployConfig" AfterTargets="Build" Condition="Exists('$(GameDir)\BepInEx')">
+    <Copy SourceFiles="com.sodvr.mod.cfg"
+          DestinationFiles="$(GameDir)\BepInEx\config\com.sodvr.mod.cfg" />
+  </Target>
 </Project>
