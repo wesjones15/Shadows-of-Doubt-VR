@@ -59,6 +59,7 @@ public class VRCamera : MonoBehaviour
     private readonly Rooms.VoidRoomController _voidRoom = new(UILayer);
     private readonly HeldItemTracker _heldItem = new();
     private readonly HudController _hud = new();
+    private readonly LocomotionController _locomotion = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
     // The swapchain copy still runs every frame, so head tracking stays smooth via ATW.
@@ -264,7 +265,6 @@ public class VRCamera : MonoBehaviour
     private bool       _minimapBBtnHasOffset;      // true after first B-button minimap placement or grip-drag
     private Vector3    _minimapBBtnLocalOffset;     // position offset in VROrigin-local space (yaw-aligned)
     private Quaternion _minimapBBtnLocalRot = Quaternion.identity; // rotation in VROrigin-local space
-    private bool       _minimapInBBtnContext;       // true while B is held and minimap shown (not case board)
     // ── Individual nested note grip-drag ─────────────────────────────────────
     // Allows dragging individual Note canvases apart inside WindowCanvas.
     // Uses full 6DOF world-space tracking (same as regular grip-drag) converted to local space.
@@ -288,11 +288,6 @@ public class VRCamera : MonoBehaviour
     // WindowCanvas nested canvases (notes, notebook) cached during scan for per-frame Z-separation.
     // Game layout resets localPosition.z every frame → must re-apply Z offsets in LateUpdate.
     private readonly List<Canvas> _windowNestedList = new();
-
-    // Pause-mode locomotion: allow limited movement within a radius, warp back on unpause.
-    private bool    _pauseMovementActive;     // true while game is paused (case board / ESC menu)
-    private Vector3 _pauseOriginPos;          // player position when pause started
-    private const float PauseMoveRadius = 2.0f; // max distance (metres) from pause origin
 
 
     // Canvas instance IDs that belong to VRMod itself (settings panel, cursor, etc.).
@@ -364,29 +359,13 @@ public class VRCamera : MonoBehaviour
     private int     _gameCamSavedMask;     // original cullingMask, restored during Render()
     private int     _gameCamDisableDelay;  // frames remaining before disable
 
-    // ── Snap turn ─────────────────────────────────────────────────────────────
-    private const float SnapTurnDeadZone = 0.6f;  // stick threshold to trigger
-    private const float SnapTurnRearm    = 0.3f;  // stick must drop below this to re-arm
-    private const float SnapTurnCooldown = 0.25f; // seconds between snaps
-    private float _snapCooldown;
-    private bool  _snapArmed = true;
-
-    // ── Movement discovery + locomotion ──────────────────────────────────────
+    // ── Movement discovery ──────────────────────────────────────
     private bool              _movementDiscoveryDone;
-    private CharacterController? _playerCC;    // FPSController CharacterController (primary locomotion driver)
-    private Rigidbody?        _playerRb;       // FPSController Rigidbody (kept for null-check / reset only)
     private Transform?        _fpsControllerTransform; // FPSController — controls player yaw
     private Transform?        _cameraPivotTransform;   // first child above Main Camera for pitch (CamTransitionModifier or CameraLeanPivot)
     private bool              _cameraLookDisabled;     // true after we've disabled the game's mouse-look components
     private FirstPersonItemController? _fpsItemController; // cached for item hand tracking
     private InteractionController? _interactionController;  // cached for carried-object tracking
-    private const float MoveDeadZone = 0.15f;
-
-    // ── Air vent / duct traversal ────────────────────────────────────
-    private Player?  _playerRef;          // cached Player component (for inAirVent flag)
-    private bool     _inAirVent;          // mirrors Player.inAirVent each frame
-    private bool     _wasInAirVent;       // previous frame — edge detection
-    private const float DuctSpeedFraction = 0.3f; // matches game's 0.3× walk speed in ducts
 
     // Cursor: ScreenSpaceOverlay canvas "VRCursorCanvasInternal" created at rig-build time.
     // ScanAndConvertCanvases converts it to WorldSpace via the normal pipeline — giving it proper
@@ -424,19 +403,11 @@ public class VRCamera : MonoBehaviour
     // ── New controller button state (edge detection) ──────────────────────────
     private bool _jumpBtnPrev;
     private bool _crouchBtnPrev;
-    private bool _interactBtnPrev;
     private bool  _notebookBtnPrev;
-    private bool  _tabHeldDown;              // true while we are holding Tab key down for the game
-    private float _jumpCooldownUntil;
-    private bool  _jumpBtnNeedsRelease;
     private float _cbACooldownUntil;
     private bool  _cbANeedsRelease;
     private float _cbBCooldownUntil;
     private bool  _cbBNeedsRelease;
-    private bool _flashlightBtnPrev;
-    private bool _inventoryBtnPrev;
-    private bool _sprintThumbPrev;
-    private bool _sprintActive;       // true while Shift key is held down
 
     private bool        _prevTrigger;
     private bool        _triggerNeedsRelease;  // latch: must fully release before next click fires
@@ -510,8 +481,6 @@ public class VRCamera : MonoBehaviour
     // so we need independent tracking for edge detection here.
     private bool _cbABtnPrev;
     private bool _cbBBtnPrev;
-    private float       _menuBtnCooldownUntil;   // Time.realtimeSinceStartup when lockout expires (wall-clock, not dt-scaled)
-    private bool        _menuBtnNeedsRelease;    // true after fire; cleared only once button is physically released
     private int         _poseFrameCount;
     private bool        _poseEverValid;
 
@@ -556,8 +525,7 @@ public class VRCamera : MonoBehaviour
                 _sceneLoadGrace = 120;  // ~2 s at 60 fps
                 _canvasTick     = 0;
                 _movementDiscoveryDone = false;
-                _hasBeenGrounded = false;
-                _pauseMovementActive = false;
+                _locomotion.ResetForRealSceneChange();
 
                 Log.LogInfo($"[VRCamera] Scene changed (handle {_lastSceneHandle}→{sh}) — canvas scan paused for 120 frames.");
             }
@@ -577,21 +545,14 @@ public class VRCamera : MonoBehaviour
                 _sceneLoadGrace = 120;
                 _canvasTick     = 0;
                 _movementDiscoveryDone = false;
-                _hasBeenGrounded = false;
-                _pauseMovementActive = false;
 
-                _playerRb       = null;
-                _playerCC       = null;
                 _fpsControllerTransform = null;
                 _cameraPivotTransform   = null;
                 _cameraLookDisabled     = false;
                 _fpsItemController      = null;
                 _interactionController  = null;
-                _playerRef              = null;
-                _inAirVent              = false;
-                _wasInAirVent           = false;
+                _locomotion.ResetForSceneReload();
                 _heldItem.ResetForSceneReload();
-                StopSprint();
                 Log.LogInfo("[VRCamera] Game camera lost — same-scene reload detected; canvas scan paused 120 frames, movement state reset.");
             }
             _prevGameCamValid = gcValid;
@@ -610,7 +571,7 @@ public class VRCamera : MonoBehaviour
             // Only schedule rediscovery if playerCC was lost (null).
             // When playerCC is still valid (same-scene reload, e.g. opening case board),
             // keep _movementDiscoveryDone=true so jump/locomotion continue working.
-            if (_movementDiscoveryDone && _playerCC == null)
+            if (_movementDiscoveryDone && !_locomotion.HasPlayerController)
             {
                 // For same-scene save/load: cullingMask is already 0 (we suppressed the camera),
                 // so the per-frame cullingMask gate would block rediscovery forever.
@@ -826,25 +787,53 @@ public class VRCamera : MonoBehaviour
                 UpdateControllerPose(_displayTime);
 
                 // ── Vent state ───────────────────────────────────────────
-                _wasInAirVent = _inAirVent;
-                try { _inAirVent = _playerRef != null && _playerRef.inAirVent; }
-                catch { _inAirVent = false; }
-                if (_inAirVent && !_wasInAirVent)
-                    Log.LogInfo("[VRCamera] Player entered air vent — switching to 3D duct movement");
-                if (!_inAirVent && _wasInAirVent)
-                    Log.LogInfo("[VRCamera] Player exited air vent — restoring normal movement");
+                _locomotion.UpdateVentState();
 
-                UpdateSnapTurn();
-                UpdateLocomotion();
-                UpdateMenuButton();
-                UpdateJump();
-                UpdateInteract();
-                UpdateCrouch();
-                UpdateYButton();
-                UpdateSprint();
-                UpdateNotebook();
-                UpdateFlashlight();
-                UpdateInventory();
+                bool caseBoardOpenForInput = _actionPanelCanvas != null && _actionPanelCanvas.gameObject.activeSelf;
+                bool isPausedForLocomotion = caseBoardOpenForInput
+                                           || (_menuCanvasRef != null && !IsCanvasEffectivelyHidden(_menuCanvasRef));
+                bool vrSettingsOpenForInput = VRSettingsPanel.RootGO?.activeSelf == true;
+
+                _locomotion.UpdateSnapTurn(transform, _voidRoom.InVoidMode);
+                _locomotion.UpdateLocomotion(_leftCam, _voidRoom.InVoidMode, isPausedForLocomotion, _sceneLoadGrace);
+                if (_locomotion.UpdateMenuButton()) _canvasTick = UICanvasScanRate;
+                _locomotion.UpdateJump(caseBoardOpenForInput, _cursorHasTarget, _movementDiscoveryDone, _sceneLoadGrace);
+                _locomotion.UpdateInteract();
+                _locomotion.UpdateCrouch();
+                _locomotion.UpdateYButton();
+                _locomotion.UpdateSprint();
+
+                var notebookOutcome = _locomotion.UpdateNotebook(vrSettingsOpenForInput, caseBoardOpenForInput,
+                    _rightControllerGO, _leftCam, _cursorHasTarget, _minimapCanvasRef, transform);
+                if (notebookOutcome.TabJustReleased)
+                {
+                    if (notebookOutcome.HasMinimapOffset)
+                    {
+                        _minimapBBtnLocalOffset = notebookOutcome.MinimapOffset;
+                        _minimapBBtnLocalRot = notebookOutcome.MinimapRotation;
+                        _minimapBBtnHasOffset = true;
+                    }
+                    // Remove map/notebook canvases from _positionedCanvases so they get
+                    // fresh placement next time they open.
+                    try
+                    {
+                        foreach (var kvp in _managedCanvases)
+                        {
+                            if (kvp.Value == null) continue;
+                            string cn = kvp.Value.gameObject.name ?? "";
+                            if (cn.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase)
+                                || cn.Equals("WindowCanvas", StringComparison.OrdinalIgnoreCase))
+                            {
+                                _positionedCanvases.Remove(kvp.Key);
+                                _gripDragEnforce.Remove(kvp.Key);
+                            }
+                        }
+                    }
+                    catch { }
+                }
+
+                _locomotion.UpdateFlashlight();
+                _locomotion.UpdateInventory();
                 UpdateHeldItemTracking();
             }
             catch (Exception ex)
@@ -857,11 +846,7 @@ public class VRCamera : MonoBehaviour
         // movement via CC.Move), so its per-frame UpdateMovementPhysics/UpdateGameLocation
         // call doesn't run.  Without this, room culling uses a stale currentRoom and areas
         // don't load properly when the player moves between rooms.
-        if (_playerRef != null && _sceneLoadGrace <= 0)
-        {
-            try { _playerRef.UpdateGameLocation(); }
-            catch { }
-        }
+        _locomotion.UpdateGameLocationIfActive(_sceneLoadGrace);
 
         // -- Prevent popup/tutorial desktop-mode hang ---------------------
         _hud.GuardAgainstPopupDesktopMode(_movementDiscoveryDone);
@@ -877,7 +862,7 @@ public class VRCamera : MonoBehaviour
             try
             {
                 bool shouldDiscover = _gameCamRef.cullingMask != 0;
-                if (!shouldDiscover && _playerCC == null)
+                if (!shouldDiscover && !_locomotion.HasPlayerController)
                 {
                     // Post-save/load path: wait for menu to close before discovering.
                     bool menuGone = (_menuCanvasRef == null || IsCanvasEffectivelyHidden(_menuCanvasRef))
@@ -3199,7 +3184,7 @@ public class VRCamera : MonoBehaviour
             // instead of the standard head+forward Panel logic. Marked positioned so it doesn't
             // fall through to default placement. Per-frame body-lock update happens in Update().
             string nameForBBtn = canvas.gameObject.name ?? "";
-            if (_minimapInBBtnContext && nameForBBtn.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase))
+            if (_locomotion.MinimapInBBtnContext && nameForBBtn.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase))
             {
                 if (IsCanvasVisible(canvas))
                 {
@@ -3569,7 +3554,7 @@ public class VRCamera : MonoBehaviour
         }
 
         // ── B-button minimap body-lock: update VROrigin-relative position every frame ──
-        if (_minimapInBBtnContext && _minimapBBtnHasOffset && _minimapCanvasRef != null
+        if (_locomotion.MinimapInBBtnContext && _minimapBBtnHasOffset && _minimapCanvasRef != null
             && _minimapCanvasRef.gameObject.activeSelf)
         {
             int mmId = _minimapCanvasRef.GetInstanceID();
@@ -5493,7 +5478,7 @@ public class VRCamera : MonoBehaviour
             // B-button minimap: save as VROrigin-relative offset (body-locked context).
             // Skip the ActionPanelCanvas-relative save so case board context is unaffected.
             string releasedName = _gripDragCanvas.gameObject.name ?? "";
-            bool isMinimapBBtn = _minimapInBBtnContext
+            bool isMinimapBBtn = _locomotion.MinimapInBBtnContext
                 && releasedName.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase);
             if (isMinimapBBtn)
             {
@@ -5541,385 +5526,6 @@ public class VRCamera : MonoBehaviour
             Log.LogInfo($"[VRCamera] GripDrag end: '{_gripDragCanvas.gameObject.name}'");
             _gripDragCanvas = null;
         }
-    }
-
-    /// <summary>
-    /// Rotates VROrigin around Y via snap or smooth turning (configurable in VR Settings).
-    /// Skipped while the VR settings panel is open (right stick Y is used for scrolling there).
-    /// </summary>
-    private void UpdateSnapTurn()
-    {
-        _snapCooldown -= Time.deltaTime;
-
-        // Don't turn while settings panel is open (right stick scrolls it instead)
-        if (VRSettingsPanel.RootGO?.activeSelf == true) return;
-        // Nor in the void room: there is no world to turn to look at.
-        if (_voidRoom.InVoidMode) return;
-
-        if (!OpenXRManager.GetThumbstickState(true, out float tx, out float _)) return;
-
-        if (VRSettingsPanel.SmoothTurnEnabled)
-        {
-            // Smooth turn: rotate proportionally to stick deflection
-            if (Mathf.Abs(tx) > MoveDeadZone)
-            {
-                float speed = VRSettingsPanel.SmoothTurnSpeed * Time.deltaTime;
-                transform.Rotate(Vector3.up, tx * speed, Space.World);
-            }
-            return;
-        }
-
-        // Snap turn
-        float absTx = Mathf.Abs(tx);
-
-        // Re-arm when stick returns to centre
-        if (!_snapArmed && absTx < SnapTurnRearm)
-        {
-            _snapArmed = true;
-            return;
-        }
-
-        if (_snapArmed && absTx > SnapTurnDeadZone && _snapCooldown <= 0f)
-        {
-            float angle = Mathf.Sign(tx) * VRSettingsPanel.SnapTurnAngle;
-            transform.Rotate(Vector3.up, angle, Space.World);
-            _snapCooldown = SnapTurnCooldown;
-            _snapArmed    = false;
-            Log.LogInfo($"[VRCamera] Snap turn {angle:+0;-0}° (stick={tx:F2})");
-        }
-    }
-
-    /// <summary>
-    /// One-shot: logs Rewired action names and walks up from the game camera to find
-    /// CharacterController / Rigidbody / RigidbodyFirstPersonController.
-    /// Results are read from LogOutput.log to choose the locomotion approach.
-    /// </summary>
-    /// <summary>
-    /// Drives the player character via left thumbstick. Head-relative: forward/back follows
-    /// HMD yaw, strafe follows HMD right. Preserves Rigidbody Y velocity (gravity/jumping).
-    /// Skipped when VR settings panel is open.
-    /// </summary>
-    private void UpdateLocomotion()
-    {
-        if (_playerCC == null) return;
-        // Refuse to drive the CharacterController during any reload grace period.
-        if (_sceneLoadGrace > 0) return;
-        if (VRSettingsPanel.RootGO?.activeSelf == true) return;
-        // Nor in the void room — the menu is not a place you walk around in.
-        if (_voidRoom.InVoidMode) return;
-
-        // Pause-mode locomotion: allow limited movement within PauseMoveRadius.
-        // When pause starts, record origin. When pause ends, warp player back.
-        bool isPaused = (_actionPanelCanvas != null && _actionPanelCanvas.gameObject.activeSelf)
-                     || (_menuCanvasRef != null && !IsCanvasEffectivelyHidden(_menuCanvasRef));
-        if (isPaused)
-        {
-            if (!_pauseMovementActive)
-            {
-                // Pause just started — record origin
-                _pauseMovementActive = true;
-                _pauseOriginPos = _playerCC.transform.position;
-            }
-        }
-        else
-        {
-            if (_pauseMovementActive)
-            {
-                _pauseMovementActive = false;
-                // No warp-back: the 2 m clamp during pause already prevents VR locomotion
-                // exploits, and teleporting back on unpause caused visual snaps on save loads.
-                Log.LogInfo("[VRCamera] Pause ended — movement unlocked (no warp-back).");
-            }
-        }
-
-        if (!OpenXRManager.GetThumbstickState(false, out float lx, out float ly)) return;
-        if (Mathf.Abs(lx) <= MoveDeadZone && Mathf.Abs(ly) <= MoveDeadZone)
-            return; // idle — gravity is handled by UpdateJump's idle Move()
-
-        // Apply dead-zone scaling so motion starts smoothly at the threshold
-        float dx = Mathf.Abs(lx) > MoveDeadZone ? lx : 0f;
-        float dy = Mathf.Abs(ly) > MoveDeadZone ? ly : 0f;
-
-        // ── Air duct 3D movement ─────────────────────────────────────
-        // In ghost mode: camera-relative 3D (look up + push forward = move upward).
-        // Matches game's FirstPersonController ghost mode which uses m_Camera.forward.
-        if (_inAirVent)
-        {
-            Vector3 camFwd   = _leftCam != null ? _leftCam.transform.forward : transform.forward;
-            Vector3 camRight = _leftCam != null ? _leftCam.transform.right   : transform.right;
-            Vector3 moveDir  = (camFwd * dy + camRight * dx);
-
-            bool alwaysRunV = PlayerPrefs.GetInt("alwaysRun", 0) != 0;
-            float msV = VRSettingsPanel.MoveSpeed * DuctSpeedFraction;
-            float smV = VRSettingsPanel.SprintMultiplier;
-            float baseSpeedV = alwaysRunV ? msV * smV : msV;
-            float altSpeedV  = alwaysRunV ? msV : msV * smV;
-            float speedV     = _sprintActive ? altSpeedV : baseSpeedV;
-
-            try
-            {
-                if (_playerCC.gameObject == null || !_playerCC.gameObject.activeInHierarchy)
-                { _playerCC = null; return; }
-                // No gravity component — duct movement is fully input-driven (3 axes).
-                _playerCC.Move(moveDir * speedV * Time.deltaTime);
-            }
-            catch (Exception ex)
-            {
-                Log.LogWarning($"[Movement] CC.Move (duct) failed: {ex.Message}");
-                _playerCC = null;
-            }
-            return; // skip normal horizontal-only movement below
-        }
-
-        // Head-relative direction: use HMD yaw (left eye camera world yaw)
-        float headYaw = _leftCam != null ? _leftCam.transform.eulerAngles.y : transform.eulerAngles.y;
-        Vector3 fwd   = Quaternion.Euler(0f, headYaw, 0f) * Vector3.forward;
-        Vector3 right = Quaternion.Euler(0f, headYaw, 0f) * Vector3.right;
-        bool alwaysRun = PlayerPrefs.GetInt("alwaysRun", 0) != 0;
-        float ms = VRSettingsPanel.MoveSpeed;
-        float sm = VRSettingsPanel.SprintMultiplier;
-        float baseSpeed  = alwaysRun ? ms * sm : ms;
-        float altSpeed   = alwaysRun ? ms : ms * sm;
-        float speed = _sprintActive ? altSpeed : baseSpeed;
-        Vector3 hMove = (fwd * dy + right * dx) * speed;
-
-        // Call CharacterController.Move() to drive player locomotion.
-        // Guard: verify CC is still alive before touching it (destroyed objects aren't null
-        // in IL2CPP — the managed wrapper lingers after the native object is gone).
-        try
-        {
-            if (_playerCC.gameObject == null || !_playerCC.gameObject.activeInHierarchy)
-            {
-                Log.LogInfo("[Movement] CC gameObject inactive/null — invalidating");
-                _playerCC = null;
-                return;
-            }
-            // Combine horizontal (scaled time) + vertical jump/gravity (unscaled time) into
-            // one Move() call.  Splitting them into two calls was causing isGrounded to be
-            // false when UpdateJump ran, because Unity updates isGrounded after each Move()
-            // and the horizontal-only first call gave no downward component.
-            float vDt = Time.unscaledDeltaTime;
-            if (vDt > 0.2f) vDt = 0.2f;
-            Vector3 fullMove = hMove * Time.deltaTime
-                             + new Vector3(0f, _jumpVerticalVelocity * vDt, 0f);
-            _playerCC.Move(fullMove);
-
-            // Clamp position to PauseMoveRadius during pause mode
-            if (_pauseMovementActive)
-            {
-                Vector3 pos = _playerCC.transform.position;
-                Vector3 delta = pos - _pauseOriginPos;
-                delta.y = 0f; // only clamp horizontal distance
-                if (delta.sqrMagnitude > PauseMoveRadius * PauseMoveRadius)
-                {
-                    Vector3 clamped = _pauseOriginPos + delta.normalized * PauseMoveRadius;
-                    clamped.y = pos.y; // preserve vertical
-                    _playerCC.enabled = false;
-                    _playerCC.transform.position = clamped;
-                    _playerCC.enabled = true;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.LogWarning($"[Movement] CC.Move failed: {ex.Message} — invalidating CC");
-            _playerCC = null;
-        }
-    }
-
-    /// <summary>
-    /// Left-controller menu/Y button → ESC simulation.
-    ///
-    /// State machine (avoids rapid-fire from OpenXR button oscillation):
-    ///   Idle          → on press: fire ESC, go to Held
-    ///   Held          → on release: start 0.5 s post-release cooldown
-    ///   ReleaseCooldown → after 0.5 s: back to Idle
-    ///
-    /// Canvas repositioning is handled automatically by PositionCanvases active-state
-    /// tracking: when the pause-menu canvas transitions inactive→active it is removed
-    /// from _positionedCanvases and placed at the current head pose next frame.
-    /// We only need to force a scan tick so that any brand-new canvas (not yet in
-    /// _managedCanvases) is discovered quickly rather than waiting up to 90 frames.
-    /// </summary>
-    private void UpdateMenuButton()
-    {
-        // Phase 1 — post-fire lockout (WALL-CLOCK time, NOT Time.deltaTime).
-        // Time.deltaTime can be >> 1s when the game drops to <1fps processing the pause menu's
-        // 2000+ canvas elements, which would evaporate a deltaTime-based 1s countdown in one frame.
-        // Time.realtimeSinceStartup always advances at real-world speed regardless of frame rate.
-        if (Time.realtimeSinceStartup < _menuBtnCooldownUntil) return;
-
-        OpenXRManager.GetMenuButtonState(out bool menuNow);
-
-        // Phase 2 — wait for physical release: after lockout, require the button to actually
-        // read NOT-pressed before re-arming (guards against sustained oscillation post-lockout).
-        if (_menuBtnNeedsRelease)
-        {
-            if (!menuNow) _menuBtnNeedsRelease = false;
-            return;
-        }
-
-        // Phase 3 — armed: fire on press.
-        if (!menuNow) return;
-
-        _menuBtnNeedsRelease = true;
-        _menuBtnCooldownUntil = Time.realtimeSinceStartup + 1.5f;  // 1.5 s real-time lockout
-        FireMenuButton();
-    }
-
-    private void FireMenuButton()
-    {
-        try
-        {
-            const byte VK_ESCAPE = 0x1B;
-            const uint KEYEVENTF_KEYUP = 0x0002;
-            keybd_event(VK_ESCAPE, 0, 0,               UIntPtr.Zero); // key down
-            keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, UIntPtr.Zero); // key up
-            Log.LogInfo("[VRCamera] Menu button → ESC");
-        }
-        catch (Exception ex) { Log.LogWarning($"[VRCamera] UpdateMenuButton: {ex.Message}"); }
-
-        // Force immediate canvas scan to discover any brand-new pause-menu canvas.
-        // Existing canvases are repositioned automatically when they become active
-        // (see _canvasWasActive tracking in PositionCanvases).
-        _canvasTick = UICanvasScanRate;
-    }
-
-    /// <summary>
-    /// Right A → Jump.
-    /// Drives CharacterController.Move() with upward velocity directly, since we've disabled
-    /// FirstPersonController (which would normally process Space key jump).
-    /// Also sends Space key as fallback for any other game systems that check it.
-    /// </summary>
-    private float _jumpVerticalVelocity;
-    private bool  _hasBeenGrounded;          // true once isGrounded was true in current scene
-    private const float JumpForce = 5.0f;   // m/s upward impulse
-    private const float Gravity   = -15.0f; // m/s² (slightly stronger than real for game feel)
-    private void UpdateJump()
-    {
-        if (_sceneLoadGrace > 0) { _jumpVerticalVelocity = 0f; return; }
-        if (_playerCC == null) return;
-        // Only apply gravity/jump when movement discovery is done (= we're in-game, not main menu)
-        if (!_movementDiscoveryDone) { _jumpVerticalVelocity = 0f; return; }
-
-        // In air vents: no gravity, no jump (player uses 3D camera-relative movement).
-        if (_inAirVent) { _jumpVerticalVelocity = 0f; return; }
-
-        // Use unscaledDeltaTime so gravity works even when game is paused (timeScale=0).
-        // Without this, the player floats in the air while ESC menu is open and doesn't
-        // come back down when the menu is closed.
-        float dt = Time.unscaledDeltaTime;
-        if (dt <= 0f || dt > 0.2f) return; // skip on zero-dt or huge spikes
-
-        // Guard: verify CC is still alive (needed for gravity even if button suppressed)
-        try
-        {
-            if (_playerCC.gameObject == null || !_playerCC.gameObject.activeInHierarchy)
-            { _playerCC = null; return; }
-        }
-        catch { _playerCC = null; return; }
-
-        // Track whether player has ever been grounded in this scene.
-        // Problem: isGrounded only updates after Move(), but we gate Move() on _hasBeenGrounded.
-        // Fix: use a raycast to detect ground below. At main menu there's no ground geometry,
-        // so the raycast fails and _hasBeenGrounded stays false → no gravity → no falling through void.
-        if (_playerCC.isGrounded) _hasBeenGrounded = true;
-        if (!_hasBeenGrounded)
-        {
-            try
-            {
-                var ccPos = _playerCC.transform.position;
-                if (Physics.Raycast(ccPos, Vector3.down, 5f))
-                    _hasBeenGrounded = true;
-            }
-            catch { }
-        }
-
-        // Apply gravity every frame (only once we've confirmed ground exists)
-        if (!_hasBeenGrounded)
-        {
-            _jumpVerticalVelocity = 0f;
-        }
-        else if (_playerCC.isGrounded)
-            _jumpVerticalVelocity = -0.5f; // small downward to keep grounded
-        else
-            _jumpVerticalVelocity += Gravity * dt;
-        if (_jumpVerticalVelocity < -20f) _jumpVerticalVelocity = -20f;
-
-        // When thumbstick is idle, UpdateLocomotion doesn't call Move().
-        // Apply a gravity-only Move() here so isGrounded stays updated for jump.
-        // Always call Move() once _hasBeenGrounded is true — this pushes the CC
-        // to the ground and keeps isGrounded updated.
-        if (_hasBeenGrounded)
-        {
-            try { _playerCC.Move(new Vector3(0f, _jumpVerticalVelocity * dt, 0f)); }
-            catch { }
-        }
-
-        // ── 3-phase button debounce (same proven pattern as menu button) ──
-        // Only read jump button when VR settings panel AND case board are NOT open.
-        bool cbOpenJ = false;
-        try { cbOpenJ = _actionPanelCanvas != null && _actionPanelCanvas.gameObject.activeSelf; }
-        catch { cbOpenJ = false; }
-        bool vrSettingsOpen = VRSettingsPanel.RootGO != null && VRSettingsPanel.RootGO.activeSelf;
-
-        float now = Time.realtimeSinceStartup;
-        OpenXRManager.GetButtonAState(out bool aStateNow);
-
-        if (vrSettingsOpen || cbOpenJ || _cursorHasTarget)
-            return; // gravity applied above; suppress jump/right-click handled by UpdateUIInput
-
-        // Phase 1: time lockout — don't read button at all (prevents bounce corruption)
-        if (now < _jumpCooldownUntil) return;
-
-        // Phase 2: wait for physical release
-        if (_jumpBtnNeedsRelease) { if (!aStateNow) _jumpBtnNeedsRelease = false; return; }
-
-        // Phase 3: fire on press, only when grounded
-        if (!aStateNow) return;
-        if (_playerCC.isGrounded)
-        {
-            _jumpVerticalVelocity = JumpForce;
-            _jumpBtnNeedsRelease = true;
-            _jumpCooldownUntil = now + 0.3f;
-            Log.LogInfo("[VRCamera] Jump!");
-        }
-        else
-        {
-            Log.LogInfo($"[VRCamera] Jump pressed but NOT grounded (vel={_jumpVerticalVelocity:F2})");
-        }
-    }
-
-    /// <summary>
-    /// Left trigger → world interaction via left controller aiming.
-    /// While trigger is held: points the game camera (Camera.main) at the left controller's
-    /// aim direction so the game's InteractionController raycast follows the left hand.
-    /// On press edge: simulates left mouse button click.
-    /// On release: restores camera to VR head direction.
-    /// </summary>
-    private bool _interactAiming;  // true while left trigger is held and camera is redirected
-    private void UpdateInteract()
-    {
-        if (VRSettingsPanel.RootGO?.activeSelf == true) return;
-        OpenXRManager.GetTriggerState(false, out bool pressed);
-
-        // Camera.main rotation is always redirected to controller in UpdateLeftInteractMarker.
-        if (pressed) _interactAiming = true;
-        else if (_interactAiming && !pressed) _interactAiming = false;
-
-        bool edge = pressed && !_interactBtnPrev;
-        _interactBtnPrev = pressed;
-        if (!edge) return;
-        try
-        {
-            // Primary: left mouse button (game uses LMB for pick up, interact, attack)
-            const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
-            const uint MOUSEEVENTF_LEFTUP   = 0x0004;
-            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
-            mouse_event(MOUSEEVENTF_LEFTUP,   0, 0, 0, UIntPtr.Zero);
-            Log.LogInfo("[VRCamera] Interact (LMB via left controller aim)");
-        }
-        catch (Exception ex) { Log.LogWarning($"[VRCamera] UpdateInteract: {ex.Message}"); }
     }
 
     /// <summary>
@@ -6081,280 +5687,6 @@ public class VRCamera : MonoBehaviour
         catch { }
     }
 
-
-    /// <summary>Left X → C (crouch toggle).</summary>
-    private float _crouchCooldownUntil;
-    private bool  _crouchNeedsRelease;
-    private float _yBtnCooldownUntil;
-    private bool  _yBtnNeedsRelease;
-    private void UpdateCrouch()
-    {
-        if (_inAirVent) return; // already crawling — crouch is meaningless in ducts
-        if (VRSettingsPanel.RootGO?.activeSelf == true) return;
-        // 3-phase debounce (same as menu button)
-        if (Time.realtimeSinceStartup < _crouchCooldownUntil) return;
-        OpenXRManager.GetButtonXState(out bool pressed);
-        if (_crouchNeedsRelease) { if (!pressed) _crouchNeedsRelease = false; return; }
-        if (!pressed) return;
-        _crouchNeedsRelease = true;
-        _crouchCooldownUntil = Time.realtimeSinceStartup + 0.3f;
-        try
-        {
-            const byte VK_C = 0x43;
-            const uint KEYEVENTF_KEYUP = 0x0002;
-            keybd_event(VK_C, 0, 0,               UIntPtr.Zero);
-            keybd_event(VK_C, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-            Log.LogInfo("[VRCamera] Crouch (C)");
-        }
-        catch (Exception ex) { Log.LogWarning($"[VRCamera] UpdateCrouch: {ex.Message}"); }
-    }
-
-    /// <summary>
-    /// Left Y button → Alternate (F key by default).
-    /// Same 3-phase debounce as Crouch/Menu.
-    /// </summary>
-    private void UpdateYButton()
-    {
-        if (VRSettingsPanel.RootGO?.activeSelf == true) return;
-        if (Time.realtimeSinceStartup < _yBtnCooldownUntil) return;
-        OpenXRManager.GetButtonYState(out bool pressed);
-        if (_yBtnNeedsRelease) { if (!pressed) _yBtnNeedsRelease = false; return; }
-        if (!pressed) return;
-        _yBtnNeedsRelease    = true;
-        _yBtnCooldownUntil   = Time.realtimeSinceStartup + 0.3f;
-        try
-        {
-            const byte VK_F = 0x46;
-            const uint KEYEVENTF_KEYUP = 0x0002;
-            keybd_event(VK_F, 0, 0,               UIntPtr.Zero);
-            keybd_event(VK_F, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-            Log.LogInfo("[VRCamera] Y button → Alternate (F)");
-        }
-        catch (Exception ex) { Log.LogWarning($"[VRCamera] UpdateYButton: {ex.Message}"); }
-    }
-
-    /// <summary>
-    /// Left thumbstick click → Sprint toggle (Shift held/released).
-    /// Also auto-stops sprint when the left stick returns to centre.
-    /// </summary>
-    private void UpdateSprint()
-    {
-        if (_playerCC == null) return;
-        if (VRSettingsPanel.RootGO?.activeSelf == true)
-        {
-            StopSprint();
-            return;
-        }
-
-        // Auto-stop when stick returns to centre (player stopped moving)
-        if (_sprintActive)
-        {
-            OpenXRManager.GetThumbstickState(false, out float lx, out float ly);
-            if (Mathf.Abs(lx) < MoveDeadZone && Mathf.Abs(ly) < MoveDeadZone)
-            {
-                StopSprint();
-                return;
-            }
-        }
-
-        OpenXRManager.GetThumbClickState(false, out bool clicked);
-        bool edge = clicked && !_sprintThumbPrev;
-        _sprintThumbPrev = clicked;
-        if (!edge) return;
-
-        if (_sprintActive) StopSprint();
-        else               StartSprint();
-    }
-
-    private void StartSprint()
-    {
-        if (_sprintActive) return;
-        _sprintActive = true;
-        Log.LogInfo("[VRCamera] Sprint start");
-    }
-
-    private void StopSprint()
-    {
-        if (!_sprintActive) return;
-        _sprintActive = false;
-        Log.LogInfo("[VRCamera] Sprint stop");
-    }
-
-    /// <summary>Right B → Tab (notebook/map), or X (inventory) if controller is behind shoulder.</summary>
-    private bool _backpackBtnPrev;  // edge detection for backpack gesture
-    private void UpdateNotebook()
-    {
-        if (VRSettingsPanel.RootGO?.activeSelf == true)
-        {
-            // Release Tab if held while VR settings opened
-            if (_tabHeldDown) ReleaseTabKey();
-            return;
-        }
-
-        OpenXRManager.GetButtonBState(out bool pressed);
-
-        // When case board is open, B = middle-click — suppress Tab.
-        // Don't suppress based on _cursorHasTarget while Tab is held — the map/notebook
-        // itself becomes the cursor target, which would create a rapid toggle loop.
-        bool caseBoardOpen = _actionPanelCanvas != null && _actionPanelCanvas.gameObject.activeSelf;
-        if (caseBoardOpen)
-        {
-            if (_tabHeldDown) ReleaseTabKey();
-            return;
-        }
-
-        // ── Backpack gesture: B pressed with right controller behind shoulder → inventory (X key) ──
-        bool behindShoulder = false;
-        if (pressed && !_tabHeldDown && _rightControllerGO != null && _leftCam != null)
-        {
-            Vector3 headPos = _leftCam.transform.position;
-            Vector3 headFwd = _leftCam.transform.forward;
-            headFwd.y = 0; headFwd.Normalize(); // yaw-only forward
-            Vector3 headRight = _leftCam.transform.right;
-            headRight.y = 0; headRight.Normalize();
-            Vector3 toCtrl = _rightControllerGO.transform.position - headPos;
-            float fwdDot = Vector3.Dot(toCtrl, headFwd);   // negative = behind
-            float rightDot = Vector3.Dot(toCtrl, headRight); // positive = right side
-            float yOff = toCtrl.y;                           // relative to head
-            // Behind head, right side, roughly shoulder height
-            behindShoulder = fwdDot < -0.1f && rightDot > 0.05f && yOff > -0.5f && yOff < 0.15f;
-        }
-        if (behindShoulder)
-        {
-            bool backpackEdge = pressed && !_backpackBtnPrev;
-            _backpackBtnPrev = pressed;
-            if (backpackEdge)
-            {
-                try
-                {
-                    const byte VK_X = 0x58;
-                    const uint KEYEVENTF_KEYUP = 0x0002;
-                    keybd_event(VK_X, 0, 0,               UIntPtr.Zero);
-                    keybd_event(VK_X, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-                    Log.LogInfo("[VRCamera] Backpack gesture → Inventory (X)");
-                }
-                catch (Exception ex) { Log.LogWarning($"[VRCamera] Backpack: {ex.Message}"); }
-            }
-            return; // don't process Tab while in backpack zone
-        }
-        _backpackBtnPrev = pressed;
-
-        // When NOT holding Tab, suppress if aiming at a canvas (B = middle-click on canvas)
-        if (!_tabHeldDown && _cursorHasTarget)
-            return;
-
-        // Hold-to-show: hold Tab while B is physically held
-        if (pressed && !_tabHeldDown)
-        {
-            try
-            {
-                const byte VK_TAB = 0x09;
-                keybd_event(VK_TAB, 0, 0, UIntPtr.Zero); // key DOWN
-                _tabHeldDown = true;
-                _minimapInBBtnContext = true;
-                Log.LogInfo("[VRCamera] Notebook Tab DOWN (hold-to-show)");
-            }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] UpdateNotebook DOWN: {ex.Message}"); }
-        }
-        else if (!pressed && _tabHeldDown)
-        {
-            // Before clearing, save B-button minimap position as VROrigin-relative offset
-            // (only if we don't already have a grip-dragged offset — default placement is
-            // saved here so the minimap reopens at the same spot next time).
-            if (_minimapInBBtnContext && _minimapCanvasRef != null && _minimapCanvasRef.gameObject.activeSelf)
-            {
-                try
-                {
-                    Quaternion vrYaw = Quaternion.Euler(0, transform.eulerAngles.y, 0);
-                    Quaternion invVrYaw = Quaternion.Inverse(vrYaw);
-                    _minimapBBtnLocalOffset = invVrYaw * (_minimapCanvasRef.transform.position - transform.position);
-                    _minimapBBtnLocalRot = invVrYaw * _minimapCanvasRef.transform.rotation;
-                    _minimapBBtnHasOffset = true;
-                }
-                catch { }
-            }
-            _minimapInBBtnContext = false;
-
-            ReleaseTabKey();
-            // Remove map/notebook canvases from _positionedCanvases so they get
-            // fresh placement next time they open.
-            try
-            {
-                foreach (var kvp in _managedCanvases)
-                {
-                    if (kvp.Value == null) continue;
-                    string cn = kvp.Value.gameObject.name ?? "";
-                    if (cn.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase)
-                        || cn.Equals("WindowCanvas", StringComparison.OrdinalIgnoreCase))
-                    {
-                        _positionedCanvases.Remove(kvp.Key);
-                        _gripDragEnforce.Remove(kvp.Key);
-                    }
-                }
-            }
-            catch { }
-        }
-    }
-
-    private void ReleaseTabKey()
-    {
-        try
-        {
-            const byte VK_TAB = 0x09;
-            const uint KEYEVENTF_KEYUP = 0x0002;
-            keybd_event(VK_TAB, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
-            Log.LogInfo("[VRCamera] Notebook Tab UP");
-        }
-        catch { }
-        _tabHeldDown = false;
-    }
-
-    /// <summary>Right thumbstick click → middle mouse button (flashlight toggle).</summary>
-    private void UpdateFlashlight()
-    {
-        if (VRSettingsPanel.RootGO?.activeSelf == true) return;
-        OpenXRManager.GetThumbClickState(true, out bool pressed);
-        bool edge = pressed && !_flashlightBtnPrev;
-        _flashlightBtnPrev = pressed;
-        if (!edge) return;
-        try
-        {
-            const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
-            const uint MOUSEEVENTF_MIDDLEUP   = 0x0040;
-            mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, UIntPtr.Zero);
-            mouse_event(MOUSEEVENTF_MIDDLEUP,   0, 0, 0, UIntPtr.Zero);
-            Log.LogInfo("[VRCamera] Flashlight (middle mouse)");
-        }
-        catch (Exception ex) { Log.LogWarning($"[VRCamera] UpdateFlashlight: {ex.Message}"); }
-    }
-
-    /// <summary>Left grip → X (inventory).</summary>
-    private bool _gripAiming;  // unused — kept for compile compat
-    private void UpdateInventory()
-    {
-        if (VRSettingsPanel.RootGO?.activeSelf == true) return;
-        OpenXRManager.GetGripState(false, out bool pressed);
-
-        // NOTE: camera-to-controller redirect was removed from here — it ran in Update() every
-        // frame while grip was held, driving expensive HDRP shadow/volumetric recalculations
-        // and causing GPU TDR (nvlddmkm.sys Blackwell).  Camera.main is already redirected to
-        // controller direction in post-FrameEndStereo (LateUpdate), so raycasts from grip-RMB
-        // will use that value on the following frame's game Update().
-
-        bool edge = pressed && !_inventoryBtnPrev;
-        _inventoryBtnPrev = pressed;
-        if (!edge) return;
-        try
-        {
-            // Right mouse button (game uses RMB for pick up evidence, secondary interact)
-            const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
-            const uint MOUSEEVENTF_RIGHTUP   = 0x0010;
-            mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, UIntPtr.Zero);
-            mouse_event(MOUSEEVENTF_RIGHTUP,   0, 0, 0, UIntPtr.Zero);
-            Log.LogInfo("[VRCamera] World RMB (left grip + left controller aim)");
-        }
-        catch (Exception ex) { Log.LogWarning($"[VRCamera] UpdateInventory: {ex.Message}"); }
-    }
 
     private void UpdateHeldItemTracking() => _heldItem.Tick(_interactionController, _rightControllerGO, _leftControllerGO);
 
@@ -6577,17 +5909,19 @@ public class VRCamera : MonoBehaviour
         //    Also enumerate all MonoBehaviours for diagnostic purposes (camera-look identification).
         //    Locomotion is driven via CharacterController.Move() — Rigidbody velocity is
         //    ignored by the game's kinematic FPS controller.
+        CharacterController? cc = null;
+        Rigidbody? rb = null;
         try
         {
             var t = _gameCam;
             for (int i = 0; i < 10 && t != null; i++)
             {
-                var cc = t.GetComponent<CharacterController>();
-                var rb = t.GetComponent<Rigidbody>();
-                if (cc != null)
+                var foundCC = t.GetComponent<CharacterController>();
+                var foundRb = t.GetComponent<Rigidbody>();
+                if (foundCC != null)
                 {
-                    _playerCC = cc;
-                    _playerRb = rb; // may be null; kept only for reset-on-reload checks
+                    cc = foundCC;
+                    rb = foundRb; // may be null; kept only for reset-on-reload checks
                     Log.LogInfo($"[Movement] Cached playerCC on '{t.gameObject.name}'");
                     break;
                 }
@@ -6600,9 +5934,9 @@ public class VRCamera : MonoBehaviour
         //     Disable game's camera-look MonoBehaviours so VR head rotation takes over.
         try
         {
-            if (_playerCC != null)
+            if (cc != null)
             {
-                _fpsControllerTransform = _playerCC.transform;
+                _fpsControllerTransform = cc.transform;
 
                 // Walk DOWN from game camera to find the pitch pivot.
                 // Hierarchy: FPSController → CameraLeanPivot → CamTransitionModifier → Main Camera
@@ -6646,9 +5980,9 @@ public class VRCamera : MonoBehaviour
         // 5b. Cache FirstPersonItemController for VR hand item tracking.
         try
         {
-            if (_playerCC != null)
+            if (cc != null)
             {
-                var fpsIC = _playerCC.GetComponent<FirstPersonItemController>();
+                var fpsIC = cc.GetComponent<FirstPersonItemController>();
                 if (fpsIC != null)
                 {
                     _fpsItemController = fpsIC;
@@ -6666,9 +6000,9 @@ public class VRCamera : MonoBehaviour
         // to Camera.main. We need to override this to follow the VR hand controller instead.
         try
         {
-            if (_playerCC != null)
+            if (cc != null)
             {
-                var ic = _playerCC.GetComponent<InteractionController>();
+                var ic = cc.GetComponent<InteractionController>();
                 if (ic != null)
                 {
                     _interactionController = ic;
@@ -6757,20 +6091,15 @@ public class VRCamera : MonoBehaviour
         _hud.Discover(foundInterfaceCtrl, foundCompassContainer, foundDirArrowContainer, foundDirArrowTransform);
 
         // 5d. Cache Player for vent-state detection.
+        Player? playerComponent = null;
         try
         {
-            var player = _playerCC.GetComponent<Player>();
-            if (player != null)
-            {
-                _playerRef = player;
-                Log.LogInfo("[Movement] Player component found.");
-            }
-            else
-            {
-                Log.LogInfo("[Movement] Player component not found on FPSController.");
-            }
+            playerComponent = cc?.GetComponent<Player>();
+            Log.LogInfo(playerComponent != null ? "[Movement] Player component found." : "[Movement] Player component not found on FPSController.");
         }
         catch (Exception ex) { Log.LogWarning($"[Movement] Player lookup: {ex.Message}"); }
+
+        _locomotion.Discover(cc, rb, playerComponent);
 
         // 6. Camera.main diagnostic — confirm it's non-null so SaveStateController won't crash
     }
@@ -7623,19 +6952,10 @@ public class VRCamera : MonoBehaviour
                         {
                             _sceneLoadGrace = 180;   // ~3 s at 60 fps
                             _canvasTick     = 0;
-                            _pauseMovementActive = false;
-                            _hasBeenGrounded     = false;   // prevent gravity at default origin during load
-                            _jumpVerticalVelocity = 0f;
-
-                            _playerRb       = null;
-                            _playerCC       = null;
                             _fpsControllerTransform = null;
                             _cameraPivotTransform   = null;
                             _cameraLookDisabled     = false;
-                            _playerRef              = null;
-                            _inAirVent              = false;
-                            _wasInAirVent           = false;
-                            StopSprint();
+                            _locomotion.ResetForSaveLoadClick();
                             // NOTE: do NOT set _movementDiscoveryDone = false here.
                             // Doing so would trigger DiscoverMovementSystem() at the bottom of
                             // this same Update() frame (before SaveStateController runs in the
