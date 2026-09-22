@@ -536,34 +536,9 @@ public class VRCamera : MonoBehaviour
     private int         _poseFrameCount;
     private bool        _poseEverValid;
 
-    // Maps (origMaterialInstanceID << 5 | tier<<1 | isBackground) → patched clone.
-    // Lower 5 bits: tier (0-9, 4 bits) + isBackground (1 bit).
-    // isBackground selects between semi-transparent (UIBackgroundAlpha) and boosted (UIColorBoost) clones.
-    // Static so the table persists across scene loads and we never create duplicates.
-    private static readonly Dictionary<long, Material> s_uiZTestMats = new();
-    private const int MaxPatchedMaterials = 2000; // hard cap — stop creating materials beyond this
-    private static bool s_matCapWarned = false;
-    // Tracks Graphic instance IDs whose vertex alpha (g.color.a) has been forced to 1.
-    // Only set once per graphic to avoid per-frame canvas rebuilds.
-    private static readonly HashSet<int> s_vertexAlphaFixed = new();
-    // Instance IDs of every material clone WE created.  Used by RescanCanvasAlpha to
-    // detect already-patched elements without reading shader properties (which is
-    // unreliable for non-UI/Default shaders like Mobile/Particles/Additive).
-    private static readonly HashSet<int> s_patchedMaterialIds = new();
     // Tracks canvas instance IDs whose QueueMap has already been logged, so rescans
     // don't spam the log every 30 frames.
     private readonly HashSet<int> _queueMapLogged = new();
-    // Version stamp — bump to invalidate s_uiZTestMats cache and force material rebuild.
-    private const int UIMaterialVersion = 5;
-    private static readonly HashSet<int> s_shaderSwappedMats = new();
-    // (HDR boost tracking sets removed — UI overlay camera handles exposure isolation)
-    // Tracks material instance IDs that have been stencil-patched by RelaxMenuTextMaterials.
-    // Each new material instance (spawned when Unity rebuilds a canvas after a dirty-mark) is
-    // patched exactly once.  Without this guard, patching marks the material dirty → canvas
-    // rebuilds → new instance → patch again → exponential growth in "materials" count per scan.
-    private static readonly HashSet<int> s_stencilNeutralizedMats = new();
-    private static readonly HashSet<int> s_menuMaskRelaxedCanvases = new();
-    private static readonly HashSet<int> s_menuMaskabilityRelaxed = new();
     // (s_menuTmpReadableMats and s_menuTextFallbacks removed — duplicate text overlay system no longer needed)
     // ── Awake ─────────────────────────────────────────────────────────────────
 
@@ -723,7 +698,7 @@ public class VRCamera : MonoBehaviour
                 foreach (var g in graphics)
                 {
                     if (g == null || !g.gameObject.activeInHierarchy) continue;
-                    if (!IsTextGraphic(g)) continue;
+                    if (!TextMaterialPatcher.IsTextGraphic(g)) continue;
                     // g.material returns the Graphic property — for TMP this is our VRPatch mat (irrelevant).
                     // cr.GetMaterial(0) returns what CanvasRenderer actually renders with — TMP's font mat.
                     Material crMat = null;
@@ -821,8 +796,8 @@ public class VRCamera : MonoBehaviour
                         else tmpCast = "NULL";
                     }
                     catch (Exception ex) { tmpCast = $"ERR:{ex.GetType().Name}"; }
-                    bool patched = s_patchedGraphicPtrs.Contains(g.Pointer);
-                    bool matSwapped = crMat != null && s_shaderSwappedMats.Contains(crMat.GetInstanceID());
+                    bool patched = TextMaterialPatcher.s_patchedGraphicPtrs.Contains(g.Pointer);
+                    bool matSwapped = crMat != null && TextMaterialPatcher.s_shaderSwappedMats.Contains(crMat.GetInstanceID());
                     // _TextureSampleAdd and font texture format — key for Alpha8 white-text fix
                     Vector4 tsa = Vector4.zero;
                     try { if (crMat != null && crMat.HasProperty("_TextureSampleAdd")) tsa = crMat.GetVector("_TextureSampleAdd"); } catch { }
@@ -834,13 +809,13 @@ public class VRCamera : MonoBehaviour
                             texFmt = tmp2.font.atlasTexture.format.ToString();
                     }
                     catch { }
-                    string snippet = GetVisibleTextSnippet(g);
+                    string snippet = TextMaterialPatcher.GetVisibleTextSnippet(g);
                     bool watchTransform =
                         string.Equals(snippet, "Back", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(snippet, "Resolution", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(snippet, "Display Mode", StringComparison.OrdinalIgnoreCase);
-                    string trSummary = watchTransform ? GetTransformSummary(g) : "";
-                    string trParents = watchTransform ? GetParentChain(g) : "";
+                    string trSummary = watchTransform ? TextMaterialPatcher.GetTransformSummary(g) : "";
+                    string trParents = watchTransform ? TextMaterialPatcher.GetParentChain(g) : "";
                     Log.LogInfo($"[VRCamera] TXT '{cv.gameObject.name}'/{g.gameObject.name} " +
                                 $"text=\"{snippet}\" " +
                                 $"g.col=({vc.r:F2},{vc.g:F2},{vc.b:F2},a={vc.a:F2}) " +
@@ -869,7 +844,7 @@ public class VRCamera : MonoBehaviour
                 foreach (var g in graphics)
                 {
                     if (g == null || !g.gameObject.activeInHierarchy) continue;
-                    if (IsTextGraphic(g)) continue;
+                    if (TextMaterialPatcher.IsTextGraphic(g)) continue;
                     string nm2 = g.gameObject.name;
                     bool isBg2 = nm2.IndexOf("background", StringComparison.OrdinalIgnoreCase) >= 0;
                     Material m2 = null;
@@ -1165,12 +1140,12 @@ public class VRCamera : MonoBehaviour
     private void BuildCameraRig()
     {
         // Clear cached UI material clones so they're rebuilt with current boost settings.
-        s_uiZTestMats.Clear();
-        s_vertexAlphaFixed.Clear();
-        s_patchedMaterialIds.Clear();
-        s_patchedGraphicPtrs.Clear();
-        s_patchedMats.Clear();
-        s_matCapWarned = false;
+        TextMaterialPatcher.s_uiZTestMats.Clear();
+        TextMaterialPatcher.s_vertexAlphaFixed.Clear();
+        TextMaterialPatcher.s_patchedMaterialIds.Clear();
+        TextMaterialPatcher.s_patchedGraphicPtrs.Clear();
+        TextMaterialPatcher.s_patchedMats.Clear();
+        TextMaterialPatcher.s_matCapWarned = false;
         _lastRescanFrame.Clear();
 
         int w = OpenXRManager.SwapchainWidth;
@@ -1209,7 +1184,7 @@ public class VRCamera : MonoBehaviour
 
         // UI overlay cameras removed — HDRP ignores clearFlags=Depth on explicit
         // Camera.Render() calls, causing the scene to be overwritten with blue/black.
-        // UI visibility is handled by HDR text boost in StrengthenMenuTextMaterial().
+        // UI visibility is handled by HDR text boost in TextMaterialPatcher.StrengthenMenuTextMaterial().
         _leftUICam  = null!;
         _rightUICam = null!;
 
@@ -2238,33 +2213,6 @@ public class VRCamera : MonoBehaviour
             catch { }
         }
     }
-    // Native IL2CPP object pointers of Graphics we have already patched.
-    private static readonly HashSet<IntPtr> s_patchedGraphicPtrs = new();
-    private static readonly Dictionary<IntPtr, Material> s_patchedMats = new();
-
-    private static int ComputeDepth(Transform t, Transform root)
-    {
-        int depth = 0;
-        while (t != null && t != root && depth < 9)
-        {
-            depth++;
-            t = t.parent;
-        }
-        return depth;
-    }
-
-    private static bool IsTextGraphic(Graphic g)
-    {
-        try
-        {
-            if (g.TryCast<UnityEngine.UI.Text>() != null) return true;
-            string tn = g.GetIl2CppType()?.Name ?? "";
-            return tn.IndexOf("TextMeshPro", StringComparison.OrdinalIgnoreCase) >= 0
-                || tn == "TMP_Text" || tn == "TMP_SubMeshUI";
-        }
-        catch { return false; }
-    }
-
     private static bool ShouldRelaxMenuClipping(Canvas canvas)
     {
         if (canvas == null) return false;
@@ -2273,101 +2221,6 @@ public class VRCamera : MonoBehaviour
         // Panel canvases (e.g. CaseCanvas) use ScrollRect Viewports with Mask components
         // which break in WorldSpace — must be disabled so their content is visible.
         return cat == CanvasCategory.Menu || cat == CanvasCategory.Panel || cat == CanvasCategory.CaseBoard;
-    }
-
-    private static string GetVisibleTextSnippet(Graphic g)
-    {
-        try
-        {
-            var tmp = g.TryCast<TMP_Text>();
-            if (tmp != null)
-            {
-                string text = tmp.text ?? "";
-                text = text.Replace("\r", " ").Replace("\n", " ").Trim();
-                if (text.Length > 48) text = text[..48];
-                return text;
-            }
-        }
-        catch { }
-
-        try
-        {
-            var uguiText = g.TryCast<UnityEngine.UI.Text>();
-            if (uguiText != null)
-            {
-                string text = uguiText.text ?? "";
-                text = text.Replace("\r", " ").Replace("\n", " ").Trim();
-                if (text.Length > 48) text = text[..48];
-                return text;
-            }
-        }
-        catch { }
-
-        return "";
-    }
-
-    private static bool IsScrollViewMenuText(Graphic g)
-    {
-        if (g == null) return false;
-        try
-        {
-            for (Transform t = g.transform; t != null; t = t.parent)
-            {
-                string n = t.gameObject.name ?? "";
-                if (string.Equals(n, "Scroll View", StringComparison.OrdinalIgnoreCase)) return true;
-                if (string.Equals(n, "Viewport", StringComparison.OrdinalIgnoreCase)) return true;
-                if (string.Equals(n, "Content", StringComparison.OrdinalIgnoreCase)) return true;
-            }
-        }
-        catch { }
-        return false;
-    }
-
-    private static string GetTransformSummary(Graphic g)
-    {
-        if (g == null) return "n/a";
-        try
-        {
-            var rt = g.rectTransform;
-            var wp = rt.position;
-            var lp = rt.localPosition;
-            var sz = rt.rect.size;
-            var sc = rt.lossyScale;
-            return $"wp=({wp.x:F2},{wp.y:F2},{wp.z:F2}) lp=({lp.x:F2},{lp.y:F2},{lp.z:F2}) rs=({sz.x:F1},{sz.y:F1}) ls=({sc.x:F3},{sc.y:F3},{sc.z:F3})";
-        }
-        catch { return "n/a"; }
-    }
-
-    private static string GetParentChain(Graphic g, int maxDepth = 6)
-    {
-        if (g == null) return "n/a";
-        try
-        {
-            var parts = new List<string>();
-            int depth = 0;
-            for (Transform t = g.transform; t != null && depth < maxDepth; t = t.parent, depth++)
-                parts.Add(t.gameObject.name ?? "null");
-            return string.Join(" <- ", parts);
-        }
-        catch { return "n/a"; }
-    }
-
-    private static Transform FindAncestorByName(Transform start, params string[] names)
-    {
-        try
-        {
-            for (Transform t = start; t != null; t = t.parent)
-            {
-                string n = t.gameObject.name ?? "";
-                foreach (var want in names)
-                {
-                    if (string.Equals(n, want, StringComparison.OrdinalIgnoreCase))
-                        return t;
-                }
-            }
-        }
-        catch { }
-        return null;
     }
 
     // Set ZoomContent.zoomLimit.x and desiredZoom so the full city fits within the Viewport
@@ -2423,7 +2276,7 @@ public class VRCamera : MonoBehaviour
         if (!ShouldRelaxMenuClipping(canvas)) return;
 
         int canvasId = canvas.GetInstanceID();
-        bool firstPass = s_menuMaskRelaxedCanvases.Add(canvasId);
+        bool firstPass = TextMaterialPatcher.s_menuMaskRelaxedCanvases.Add(canvasId);
 
         int disabledMasks = 0;
         try
@@ -2529,7 +2382,7 @@ public class VRCamera : MonoBehaviour
             var graphics = canvas.GetComponentsInChildren<Graphic>(true);
             foreach (var g in graphics)
             {
-                if (g == null || !IsTextGraphic(g)) continue;
+                if (g == null || !TextMaterialPatcher.IsTextGraphic(g)) continue;
 
                 try
                 {
@@ -2555,13 +2408,13 @@ public class VRCamera : MonoBehaviour
                 if (maskable == null) continue;
 
                 int gid = g.GetInstanceID();
-                bool wasTracked = s_menuMaskabilityRelaxed.Contains(gid);
+                bool wasTracked = TextMaterialPatcher.s_menuMaskabilityRelaxed.Contains(gid);
                 if (maskable.maskable)
                 {
                     maskable.maskable = false;
                     textUnmasked++;
                 }
-                if (!wasTracked) s_menuMaskabilityRelaxed.Add(gid);
+                if (!wasTracked) TextMaterialPatcher.s_menuMaskabilityRelaxed.Add(gid);
             }
         }
         catch { }
@@ -2575,66 +2428,6 @@ public class VRCamera : MonoBehaviour
         }
     }
 
-    private static void NeutralizeStencilMasking(Material mat)
-    {
-        if (mat == null) return;
-
-        try { if (mat.HasProperty("_Stencil")) mat.SetInt("_Stencil", 0); } catch { }
-        try { if (mat.HasProperty("_StencilComp")) mat.SetInt("_StencilComp", (int)CompareFunction.Always); } catch { }
-        try { if (mat.HasProperty("_StencilOp")) mat.SetInt("_StencilOp", (int)StencilOp.Keep); } catch { }
-        try { if (mat.HasProperty("_StencilReadMask")) mat.SetInt("_StencilReadMask", 255); } catch { }
-        try { if (mat.HasProperty("_StencilWriteMask")) mat.SetInt("_StencilWriteMask", 255); } catch { }
-        try { if (mat.HasProperty("_ColorMask")) mat.SetInt("_ColorMask", 15); } catch { }
-        try { if (mat.HasProperty("_UseUIAlphaClip")) mat.SetInt("_UseUIAlphaClip", 0); } catch { }
-    }
-
-    private static void StrengthenMenuTextMaterial(Material mat)
-    {
-        if (mat == null) return;
-
-        // HDR boost: HDRP auto-exposure is inherited even with ExposureControl=off.
-        // 32× compensates EV≈5 (typical menu/indoor lighting).
-        try { if (mat.HasProperty("_FaceColor")) mat.SetColor("_FaceColor", new Color(16f, 16f, 16f, 1f)); } catch { }
-        try { if (mat.HasProperty("_Color"))     mat.SetColor("_Color",     new Color(16f, 16f, 16f, 1f)); } catch { }
-
-        try
-        {
-            if (mat.HasProperty("_OutlineColor"))
-                mat.SetColor("_OutlineColor", new Color(0f, 0f, 0f, 1f));
-        }
-        catch { }
-
-        try
-        {
-            if (mat.HasProperty("_OutlineWidth"))
-                mat.SetFloat("_OutlineWidth", 0.2f);
-        }
-        catch { }
-
-        try
-        {
-            if (mat.HasProperty("_UnderlayColor"))
-                mat.SetColor("_UnderlayColor", new Color(0f, 0f, 0f, 0.95f));
-        }
-        catch { }
-
-        try
-        {
-            if (mat.HasProperty("_UnderlayOffsetX"))
-                mat.SetFloat("_UnderlayOffsetX", 0.05f);
-            if (mat.HasProperty("_UnderlayOffsetY"))
-                mat.SetFloat("_UnderlayOffsetY", -0.05f);
-            if (mat.HasProperty("_UnderlayDilate"))
-                mat.SetFloat("_UnderlayDilate", 0.2f);
-            if (mat.HasProperty("_UnderlaySoftness"))
-                mat.SetFloat("_UnderlaySoftness", 0f);
-        }
-        catch { }
-
-        try { mat.EnableKeyword("OUTLINE_ON"); } catch { }
-        try { mat.EnableKeyword("UNDERLAY_ON"); } catch { }
-    }
-
     private void RelaxMenuTextMaterials(Canvas canvas)
     {
         if (!ShouldRelaxMenuClipping(canvas)) return;
@@ -2646,7 +2439,7 @@ public class VRCamera : MonoBehaviour
             var graphics = canvas.GetComponentsInChildren<Graphic>(true);
             foreach (var g in graphics)
             {
-                if (g == null || !IsTextGraphic(g)) continue;
+                if (g == null || !TextMaterialPatcher.IsTextGraphic(g)) continue;
 
                 // Only neutralize stencil masking here — do NOT call
                 // StrengthenMenuTextMaterial. Text HDR boost is already handled
@@ -2660,9 +2453,9 @@ public class VRCamera : MonoBehaviour
                     if (mat != null)
                     {
                         int mid = mat.GetInstanceID();
-                        if (s_stencilNeutralizedMats.Add(mid))
+                        if (TextMaterialPatcher.s_stencilNeutralizedMats.Add(mid))
                         {
-                            NeutralizeStencilMasking(mat);
+                            TextMaterialPatcher.NeutralizeStencilMasking(mat);
                             patchedMaterials++;
                         }
                     }
@@ -2675,9 +2468,9 @@ public class VRCamera : MonoBehaviour
                     if (crMat != null)
                     {
                         int mid = crMat.GetInstanceID();
-                        if (s_stencilNeutralizedMats.Add(mid))
+                        if (TextMaterialPatcher.s_stencilNeutralizedMats.Add(mid))
                         {
-                            NeutralizeStencilMasking(crMat);
+                            TextMaterialPatcher.NeutralizeStencilMasking(crMat);
                             patchedMaterials++;
                         }
                     }
@@ -2777,7 +2570,7 @@ public class VRCamera : MonoBehaviour
                 // z-fight and obscure content in VR. Not needed with VR controllers.
                 bool isControllerOverlay = nm.Equals("ControllerSelection", StringComparison.OrdinalIgnoreCase)
                                         || nm.Equals("Hatching", StringComparison.OrdinalIgnoreCase);
-                bool isText = IsTextGraphic(g);
+                bool isText = TextMaterialPatcher.IsTextGraphic(g);
                 // Reduce alpha on button highlight backgrounds — sprites with diagonal
                 // hatching that become very prominent in VR with HDR boost.
                 if (!isBg && !isText)
@@ -2801,7 +2594,7 @@ public class VRCamera : MonoBehaviour
                 if (isControllerOverlay)
                 {
                     try { g.color = new Color(g.color.r, g.color.g, g.color.b, 0f); } catch { }
-                    s_patchedGraphicPtrs.Add(g.Pointer);
+                    TextMaterialPatcher.s_patchedGraphicPtrs.Add(g.Pointer);
                     continue;
                 }
 
@@ -2833,12 +2626,12 @@ public class VRCamera : MonoBehaviour
                 }
 
                 IntPtr ptr = g.Pointer;
-                if (s_patchedGraphicPtrs.Contains(ptr))
+                if (TextMaterialPatcher.s_patchedGraphicPtrs.Contains(ptr))
                 {
                     // Already patched — but TMP_Text regenerates materials when text
                     // content changes, silently replacing our patched material. Detect
                     // drift and re-apply the cached patch.
-                    if (s_patchedMats.TryGetValue(ptr, out var cachedMat) && cachedMat != null)
+                    if (TextMaterialPatcher.s_patchedMats.TryGetValue(ptr, out var cachedMat) && cachedMat != null)
                     {
                         try
                         {
@@ -2869,17 +2662,17 @@ public class VRCamera : MonoBehaviour
                     int queue = isBg ? 3000 : (isText ? 3009 : (isAdditive ? 3001 : 3008));
                     long matKey = ((long)origId << 2) | (long)boostType;
 
-                    if (!s_uiZTestMats.TryGetValue(matKey, out var mat))
+                    if (!TextMaterialPatcher.s_uiZTestMats.TryGetValue(matKey, out var mat))
                     {
                         // Hard cap: stop creating materials to prevent D3D device loss
-                        if (s_uiZTestMats.Count >= MaxPatchedMaterials)
+                        if (TextMaterialPatcher.s_uiZTestMats.Count >= TextMaterialPatcher.MaxPatchedMaterials)
                         {
-                            if (!s_matCapWarned)
+                            if (!TextMaterialPatcher.s_matCapWarned)
                             {
-                                Log.LogWarning($"[VRCamera] Material cache cap ({MaxPatchedMaterials}) reached — skipping new materials");
-                                s_matCapWarned = true;
+                                Log.LogWarning($"[VRCamera] Material cache cap ({TextMaterialPatcher.MaxPatchedMaterials}) reached — skipping new materials");
+                                TextMaterialPatcher.s_matCapWarned = true;
                             }
-                            s_patchedGraphicPtrs.Add(ptr); // mark as processed so we don't retry
+                            TextMaterialPatcher.s_patchedGraphicPtrs.Add(ptr); // mark as processed so we don't retry
                             continue;
                         }
                         mat = new Material(orig);
@@ -2913,7 +2706,7 @@ public class VRCamera : MonoBehaviour
                                 // HDR boost for ALL text — compensate HDRP auto-exposure.
                                 // Previously only applied via RelaxMenuTextMaterials for
                                 // Menu/Panel/CaseBoard canvases; now covers Default etc.
-                                StrengthenMenuTextMaterial(mat);
+                                TextMaterialPatcher.StrengthenMenuTextMaterial(mat);
                             }
                             else
                             {
@@ -2922,12 +2715,12 @@ public class VRCamera : MonoBehaviour
                                 // non-text elements look correct at their native colors.
                             }
                         }
-                        s_uiZTestMats[matKey] = mat;
+                        TextMaterialPatcher.s_uiZTestMats[matKey] = mat;
                     }
 
                     try { g.material = mat; } catch { continue; }
-                    s_patchedGraphicPtrs.Add(ptr);
-                    s_patchedMats[ptr] = mat;
+                    TextMaterialPatcher.s_patchedGraphicPtrs.Add(ptr);
+                    TextMaterialPatcher.s_patchedMats[ptr] = mat;
                     newCount++;
                 }
 
@@ -2949,7 +2742,7 @@ public class VRCamera : MonoBehaviour
                         var rt = g.rectTransform;
                         var lp = rt.localPosition;
                         float targetZ = ShouldRelaxMenuClipping(canvas)
-                            ? (IsScrollViewMenuText(g) ? -0.08f : -0.03f)
+                            ? (TextMaterialPatcher.IsScrollViewMenuText(g) ? -0.08f : -0.03f)
                             : -0.005f;
                         if (lp.z > targetZ + 0.001f) rt.localPosition = new Vector3(lp.x, lp.y, targetZ);
                     }
@@ -2990,7 +2783,7 @@ public class VRCamera : MonoBehaviour
                 int washFixed = 0;
                 foreach (var g2 in allG)
                 {
-                    if (g2 == null || IsTextGraphic(g2)) continue;
+                    if (g2 == null || TextMaterialPatcher.IsTextGraphic(g2)) continue;
                     try
                     {
                         var m2 = g2.material;
@@ -3143,7 +2936,7 @@ public class VRCamera : MonoBehaviour
     private int ForceUIZTestAlways(Canvas canvas, bool logQueueMap = true)
     {
         // Discover MinimapCanvas Viewport via ScrollRect regardless of whether masks have
-        // already been processed (s_menuMaskRelaxedCanvases skips the Mask loop on re-runs).
+        // already been processed (TextMaterialPatcher.s_menuMaskRelaxedCanvases skips the Mask loop on re-runs).
         if (_minimapViewportTransform == null)
         {
             try
@@ -3231,7 +3024,7 @@ public class VRCamera : MonoBehaviour
                 if (isMask)
                 {
                     try { g.color = new Color(g.color.r, g.color.g, g.color.b, 0f); } catch { }
-                    s_patchedGraphicPtrs.Add(g.Pointer);
+                    TextMaterialPatcher.s_patchedGraphicPtrs.Add(g.Pointer);
                     count++;
                     continue;
                 }
@@ -3274,7 +3067,7 @@ public class VRCamera : MonoBehaviour
                 }
                 bool isAdditive = shaderName.IndexOf("Additive", StringComparison.OrdinalIgnoreCase) >= 0
                                || shaderName.IndexOf("Particle", StringComparison.OrdinalIgnoreCase) >= 0;
-                bool isText = !isBg && !isAdditive && IsTextGraphic(g);
+                bool isText = !isBg && !isAdditive && TextMaterialPatcher.IsTextGraphic(g);
                 // Reduce alpha on button highlight backgrounds — sprites with diagonal
                 // hatching that become very prominent in VR with HDR boost.
                 if (!isBg && !isText && !isAdditive)
@@ -3299,14 +3092,14 @@ public class VRCamera : MonoBehaviour
                 int queue = isBg ? 3000 : (isText ? 3009 : (isAdditive ? 3001 : 3008));
                 long matKey = ((long)origId << 2) | (long)boostType;
 
-                if (!s_uiZTestMats.TryGetValue(matKey, out var mat))
+                if (!TextMaterialPatcher.s_uiZTestMats.TryGetValue(matKey, out var mat))
                 {
-                    if (s_uiZTestMats.Count >= MaxPatchedMaterials)
+                    if (TextMaterialPatcher.s_uiZTestMats.Count >= TextMaterialPatcher.MaxPatchedMaterials)
                     {
-                        if (!s_matCapWarned)
+                        if (!TextMaterialPatcher.s_matCapWarned)
                         {
-                            Log.LogWarning($"[VRCamera] Material cache cap ({MaxPatchedMaterials}) reached — skipping new materials");
-                            s_matCapWarned = true;
+                            Log.LogWarning($"[VRCamera] Material cache cap ({TextMaterialPatcher.MaxPatchedMaterials}) reached — skipping new materials");
+                            TextMaterialPatcher.s_matCapWarned = true;
                         }
                         continue;
                     }
@@ -3332,7 +3125,7 @@ public class VRCamera : MonoBehaviour
                         }
                         else if (isText)
                         {
-                            StrengthenMenuTextMaterial(mat);
+                            TextMaterialPatcher.StrengthenMenuTextMaterial(mat);
                         }
                         else
                         {
@@ -3341,7 +3134,7 @@ public class VRCamera : MonoBehaviour
                             // non-text elements look correct at their native colors.
                         }
                     }
-                    s_uiZTestMats[matKey] = mat;
+                    TextMaterialPatcher.s_uiZTestMats[matKey] = mat;
                 }
 
                 try { g.material = mat; }
@@ -3365,7 +3158,7 @@ public class VRCamera : MonoBehaviour
                         var rt = g.rectTransform;
                         var lp = rt.localPosition;
                         float targetZ = ShouldRelaxMenuClipping(canvas)
-                            ? (IsScrollViewMenuText(g) ? -0.08f : -0.03f)
+                            ? (TextMaterialPatcher.IsScrollViewMenuText(g) ? -0.08f : -0.03f)
                             : -0.005f;
                         if (lp.z > targetZ + 0.001f) rt.localPosition = new Vector3(lp.x, lp.y, targetZ);
                     }
@@ -3383,8 +3176,8 @@ public class VRCamera : MonoBehaviour
                     catch { }
                 }
 
-                s_patchedGraphicPtrs.Add(g.Pointer);
-                s_patchedMats[g.Pointer] = mat;
+                TextMaterialPatcher.s_patchedGraphicPtrs.Add(g.Pointer);
+                TextMaterialPatcher.s_patchedMats[g.Pointer] = mat;
 
                 if (isText)
                 {
