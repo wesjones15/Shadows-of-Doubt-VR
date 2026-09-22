@@ -57,6 +57,7 @@ public class VRCamera : MonoBehaviour
     // The void room shares the UI layer, so laser pointers and controller visuals still show
     // over it while the eye cameras are masked down to just this layer.
     private readonly Rooms.VoidRoomController _voidRoom = new(UILayer);
+    private readonly HeldItemTracker _heldItem = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
     // The swapchain copy still runs every frame, so head tracking stays smooth via ATW.
@@ -398,8 +399,6 @@ public class VRCamera : MonoBehaviour
     private Transform?        _cameraPivotTransform;   // first child above Main Camera for pitch (CamTransitionModifier or CameraLeanPivot)
     private bool              _cameraLookDisabled;     // true after we've disabled the game's mouse-look components
     private FirstPersonItemController? _fpsItemController; // cached for item hand tracking
-    private Transform? _lagPivotTransform;                  // LagPivot — reparented to controller
-    private Transform? _lagPivotOrigParent;                 // original parent (3DUI) for restore
     private InteractionController? _interactionController;  // cached for carried-object tracking
     private const float MoveDeadZone = 0.15f;
 
@@ -606,25 +605,12 @@ public class VRCamera : MonoBehaviour
                 _fpsControllerTransform = null;
                 _cameraPivotTransform   = null;
                 _cameraLookDisabled     = false;
-                // Restore LagPivot to original parent before clearing references
-                if (_lagPivotTransform != null && _lagPivotOrigParent != null)
-                {
-                    try { _lagPivotTransform.SetParent(_lagPivotOrigParent, false); } catch { }
-                }
                 _fpsItemController      = null;
                 _interactionController  = null;
                 _playerRef              = null;
                 _inAirVent              = false;
                 _wasInAirVent           = false;
-                _lagPivotTransform      = null;
-                _lagPivotOrigParent     = null;
-                _armsActivated          = false;
-                _armsTransform          = null;
-                _firstPersonModelsTransform = null;
-                _leftArmTransform       = null;
-                _rightArmTransform      = null;
-                _leftFistTransform      = null;
-                _rightFistTransform     = null;
+                _heldItem.ResetForSceneReload();
                 StopSprint();
                 Log.LogInfo("[VRCamera] Game camera lost — same-scene reload detected; canvas scan paused 120 frames, movement state reset.");
             }
@@ -1007,6 +993,7 @@ public class VRCamera : MonoBehaviour
         CameraRig.SetupEyeCam(_rightCam, _rightRT, isUiOverlay: false);
 
         _voidRoom.CaptureNeutralEnv(_leftCam);
+        _heldItem.SetOrigin(transform);
 
         // UI overlay cameras removed — HDRP ignores clearFlags=Depth on explicit
         // Camera.Render() calls, causing the scene to be overwritten with blue/black.
@@ -6643,206 +6630,7 @@ public class VRCamera : MonoBehaviour
         catch (Exception ex) { Log.LogWarning($"[VRCamera] UpdateInventory: {ex.Message}"); }
     }
 
-    /// <summary>
-    /// Syncs carried world objects to the VR controller.
-    /// The game has two item systems:
-    /// 1. First-person arms (LagPivot → Arms) — for inventory items (small, no world model)
-    /// 2. Carried objects (InteractionController.carryingObject) — for large world items
-    /// This method handles BOTH by overriding the carried object's transform.
-    /// </summary>
-    private bool _lagPivotReparented;
-    private int _carryDiagCounter;
-    private bool _armsActivated;
-    private Transform? _armsTransform;              // 'Arms' GO (has Animator)
-    private Transform? _firstPersonModelsTransform;  // 'FirstPersonModels' GO
-    private Transform? _leftArmTransform;            // 'LeftArm' — tracks left VR controller
-    private Transform? _rightArmTransform;           // 'RightArm' — tracks right VR controller
-    private Transform? _leftFistTransform;           // 'LeftFist' — hand position (child of LeftArm)
-    private Transform? _rightFistTransform;          // 'RightFist' — hand position (child of RightArm)
-    private const float ArmScale = 0.0002f;          // pixel-space → world meters (tune as needed)
-    // Rotation offset to align the arm model with the VR controller aim pose.
-    // The game's arm mesh is oriented for flat-screen FPS (arm extends along local Y-down).
-    // VR controller aim pose has Z-forward. These Euler offsets rotate each arm to match.
-    // Right arm confirmed good at (90,90,0); left arm is mirrored so needs (90,-90,0).
-    private static readonly Quaternion ArmRotOffsetRight = Quaternion.Euler(90f, 90f, 0f);
-    private static readonly Quaternion ArmRotOffsetLeft  = Quaternion.Euler(90f, -90f, 0f);
-    // Additional forward offset along controller forward to shift arm back so game hand
-    // aligns with real hand (positive = push hand forward away from player).
-    private const float ArmForwardOffset = -0.25f;
-    private int _armsDiagCounter;
-    private void UpdateHeldItemTracking()
-    {
-        // Strategy 1: Override carried world objects (InteractionController.carryingObject)
-        if (_interactionController != null)
-        {
-            try
-            {
-                var co = _interactionController.carryingObject;
-                if (co != null)
-                {
-                    var ctrlGO = VRSettingsPanel.ItemHandRight ? _rightControllerGO : _leftControllerGO;
-                    if (ctrlGO != null)
-                    {
-                        var ctrlT = ctrlGO.transform;
-                        co.transform.position = ctrlT.position + ctrlT.forward * 0.3f;
-                        co.transform.rotation = ctrlT.rotation;
-
-                        _carryDiagCounter++;
-                        if (_carryDiagCounter % 300 == 1)
-                            Log.LogInfo($"[VRCamera] Carrying '{co.gameObject.name}' → controller");
-                    }
-                }
-            }
-            catch { }
-        }
-
-        // Strategy 2: VR arm display — each arm independently tracks its controller
-        if (_lagPivotTransform == null) return;
-        try
-        {
-            // One-time setup: reparent LagPivot to VROrigin (not a specific controller),
-            // activate Arms, cache LeftArm/RightArm, apply pixel→meter scale.
-            if (!_armsActivated)
-            {
-                // Parent LagPivot to VROrigin so it's in world space but not tied to one controller
-                if (!_lagPivotReparented)
-                {
-                    _lagPivotTransform.SetParent(transform, false); // this = VROrigin (VRCamera)
-                    _lagPivotTransform.localPosition = Vector3.zero;
-                    _lagPivotTransform.localRotation = Quaternion.identity;
-                    _lagPivotTransform.localScale = Vector3.one;
-                    _lagPivotReparented = true;
-                    Log.LogInfo("[VRCamera] LagPivot → VROrigin");
-                }
-
-                if (_lagPivotTransform.childCount > 0)
-                {
-                    _firstPersonModelsTransform = _lagPivotTransform.GetChild(0); // FirstPersonModels
-                    if (_firstPersonModelsTransform != null)
-                    {
-                        _firstPersonModelsTransform.localPosition = Vector3.zero;
-                        _firstPersonModelsTransform.localRotation = Quaternion.identity;
-                        // Scale: Animator drives bone positions in pixel-space (~100-3000 units).
-                        // ArmScale converts to meters. Human hand ≈ 0.18m, pixel arm ≈ ~450px.
-                        _firstPersonModelsTransform.localScale = new Vector3(ArmScale, ArmScale, ArmScale);
-
-                        for (int i = 0; i < _firstPersonModelsTransform.childCount; i++)
-                        {
-                            var child = _firstPersonModelsTransform.GetChild(i);
-                            if (child != null && child.gameObject.name == "Arms")
-                            {
-                                _armsTransform = child;
-                                child.gameObject.SetActive(true);
-                                child.localPosition = Vector3.zero;
-                                child.localRotation = Quaternion.identity;
-                                child.localScale = Vector3.one;
-
-                                // Cache LeftArm, RightArm, and their Fist children
-                                for (int j = 0; j < child.childCount; j++)
-                                {
-                                    var armChild = child.GetChild(j);
-                                    if (armChild == null) continue;
-                                    string armName = armChild.gameObject.name;
-                                    if (armName == "LeftArm")
-                                    {
-                                        _leftArmTransform = armChild;
-                                        // Find LeftFist child
-                                        for (int k = 0; k < armChild.childCount; k++)
-                                        {
-                                            var fistChild = armChild.GetChild(k);
-                                            if (fistChild != null && fistChild.gameObject.name == "LeftFist")
-                                            { _leftFistTransform = fistChild; break; }
-                                        }
-                                    }
-                                    else if (armName == "RightArm")
-                                    {
-                                        _rightArmTransform = armChild;
-                                        for (int k = 0; k < armChild.childCount; k++)
-                                        {
-                                            var fistChild = armChild.GetChild(k);
-                                            if (fistChild != null && fistChild.gameObject.name == "RightFist")
-                                            { _rightFistTransform = fistChild; break; }
-                                        }
-                                    }
-                                }
-
-                                Log.LogInfo($"[VRCamera] Arms activated — LeftArm={(_leftArmTransform != null ? "found" : "NULL")} " +
-                                            $"LeftFist={(_leftFistTransform != null ? "found" : "NULL")} " +
-                                            $"RightArm={(_rightArmTransform != null ? "found" : "NULL")} " +
-                                            $"RightFist={(_rightFistTransform != null ? "found" : "NULL")} scale={ArmScale}");
-                                break;
-                            }
-                        }
-                    }
-                    _armsActivated = true;
-                }
-            }
-
-            // Every frame: keep intermediate transforms zeroed, keep Arms active
-            if (_firstPersonModelsTransform != null)
-            {
-                _firstPersonModelsTransform.localPosition = Vector3.zero;
-                _firstPersonModelsTransform.localRotation = Quaternion.identity;
-            }
-            if (_armsTransform != null)
-            {
-                if (!_armsTransform.gameObject.activeSelf)
-                    _armsTransform.gameObject.SetActive(true);
-                _armsTransform.localPosition = Vector3.zero;
-                _armsTransform.localRotation = Quaternion.identity;
-            }
-
-            // Position each arm so its FIST (hand) aligns with the VR controller.
-            // The arm transform origin is at the elbow/upper arm, so we offset by the
-            // fist-to-arm vector to put the hand at the controller position.
-            PositionArmAtController(_leftArmTransform, _leftFistTransform, _leftControllerGO, ArmRotOffsetLeft);
-            PositionArmAtController(_rightArmTransform, _rightFistTransform, _rightControllerGO, ArmRotOffsetRight);
-
-            // Diagnostic
-            _armsDiagCounter++;
-            if (_armsDiagCounter % 300 == 1 && _leftArmTransform != null)
-            {
-                try
-                {
-                    var lp = _leftArmTransform.localPosition;
-                    var wp = _leftArmTransform.position;
-                    var rp = _rightArmTransform?.position ?? Vector3.zero;
-                    Log.LogInfo($"[VRCamera] Arms diag: L.local=({lp.x:F0},{lp.y:F0},{lp.z:F0}) " +
-                                $"L.world=({wp.x:F2},{wp.y:F2},{wp.z:F2}) R.world=({rp.x:F2},{rp.y:F2},{rp.z:F2}) " +
-                                $"scale={(_firstPersonModelsTransform != null ? _firstPersonModelsTransform.localScale.x : 0f):F4}");
-                }
-                catch { }
-            }
-        }
-        catch { }
-    }
-
-    /// <summary>
-    /// Positions an arm so its fist (hand) aligns with the VR controller aim point.
-    /// Uses per-arm rotation offset to align the flat-screen arm mesh with VR controller orientation.
-    /// Arm origin is at the elbow — we offset so the fist child sits at the controller position,
-    /// then apply ArmForwardOffset along the controller forward axis to fine-tune hand alignment.
-    /// </summary>
-    private static void PositionArmAtController(Transform? arm, Transform? fist, GameObject? ctrlGO, Quaternion rotOffset)
-    {
-        if (arm == null || ctrlGO == null) return;
-        var ctrlT = ctrlGO.transform;
-        // Apply rotation: controller aim rotation + model alignment offset
-        arm.rotation = ctrlT.rotation * rotOffset;
-        if (fist != null)
-        {
-            // After setting arm rotation, compute where the fist ended up,
-            // then shift the arm so the fist lands exactly at the controller.
-            Vector3 fistOffset = fist.position - arm.position;
-            arm.position = ctrlT.position - fistOffset;
-        }
-        else
-        {
-            arm.position = ctrlT.position;
-        }
-        // Slide arm along controller forward to align game hand with real hand
-        arm.position += ctrlT.forward * ArmForwardOffset;
-    }
+    private void UpdateHeldItemTracking() => _heldItem.Tick(_interactionController, _rightControllerGO, _leftControllerGO);
 
     /// <summary>Force CaseCanvas to follow ActionPanelCanvas. Called every frame because the game
     /// continuously repositions CaseCanvas to Camera.main-relative world coords.</summary>
@@ -6998,43 +6786,9 @@ public class VRCamera : MonoBehaviour
             }
         }
 
-        // Override carried world object position right before render
-        if (_interactionController != null)
-        {
-            try
-            {
-                var co = _interactionController.carryingObject;
-                if (co != null)
-                {
-                    var ctrlGO = VRSettingsPanel.ItemHandRight ? _rightControllerGO : _leftControllerGO;
-                    if (ctrlGO != null)
-                    {
-                        var ctrlT = ctrlGO.transform;
-                        co.transform.position = ctrlT.position + ctrlT.forward * 0.3f;
-                        co.transform.rotation = ctrlT.rotation;
-                    }
-                }
-            }
-            catch { }
-        }
-
-        // Final arm positioning right before render (Animator may have overwritten Update values)
-        try
-        {
-            if (_firstPersonModelsTransform != null)
-            {
-                _firstPersonModelsTransform.localPosition = Vector3.zero;
-                _firstPersonModelsTransform.localRotation = Quaternion.identity;
-            }
-            if (_armsTransform != null)
-            {
-                _armsTransform.localPosition = Vector3.zero;
-                _armsTransform.localRotation = Quaternion.identity;
-            }
-            PositionArmAtController(_leftArmTransform, _leftFistTransform, _leftControllerGO, ArmRotOffsetLeft);
-            PositionArmAtController(_rightArmTransform, _rightFistTransform, _rightControllerGO, ArmRotOffsetRight);
-        }
-        catch { }
+        // Override carried world object position AND final arm positioning right before render
+        // (Animator/game scripts may have overwritten what Update() set earlier this frame).
+        _heldItem.ReapplyBeforeRender(_interactionController, _rightControllerGO, _leftControllerGO);
 
         // (Note centering removed — we now shift WindowCanvas world position in Update
         // for aim dot alignment, not the Note child localPosition which RectTransform blocks.)
@@ -7173,16 +6927,7 @@ public class VRCamera : MonoBehaviour
                 {
                     _fpsItemController = fpsIC;
                     Log.LogInfo("[Movement] FirstPersonItemController found.");
-                    var lag = fpsIC.lagPivotTransform;
-                    if (lag != null)
-                    {
-                        // Cache LagPivot for per-frame position override in UpdateHeldItemTracking.
-                        // We do NOT reparent — the game's FirstPersonItemController sets LagPivot
-                        // position in Update(). We override it in LateUpdate() so our write wins.
-                        _lagPivotTransform = lag;
-                        _lagPivotOrigParent = lag.parent;
-                        Log.LogInfo("[Movement] Cached LagPivot for hand tracking.");
-                    }
+                    _heldItem.Discover(fpsIC.lagPivotTransform);
                 }
                 else
                     Log.LogInfo("[Movement] FirstPersonItemController not found on FPSController.");
