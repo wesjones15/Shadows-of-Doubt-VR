@@ -138,99 +138,6 @@ public class VRCamera : MonoBehaviour
     // Ignored: transient/world-space canvases — never converted, never in depth scan.
     // HUD: body-locked (VROrigin yaw only), non-interactable, excluded from ray system.
     // CaseBoard: recentres on open, remembers relative layout, grip-relocatable.
-    internal enum CanvasCategory { HUD, Menu, CaseBoard, Panel, Tooltip, Ignored, Default }
-
-    internal readonly struct CanvasCategoryDefaults
-    {
-        public readonly float Distance;             // metres in front of head
-        public readonly float VerticalOffset;       // metres above (+) / below (-) eye level
-        public readonly float TargetWorldWidth;     // desired world width in metres; scale = this / sizeDelta.x
-        public readonly bool  RecentreOnActivate;   // reposition when canvas becomes active
-        public readonly bool  RepositionEveryFrame; // never mark positioned (tooltip behaviour)
-        public readonly bool  IsHUD;                // body-locked; excluded from ray/click system
-        public readonly bool  IsGripRelocatable;    // CaseBoard grip-drag support
-        public CanvasCategoryDefaults(float dist, float vOff, float targetW,
-                                      bool recentre, bool everyFrame = false,
-                                      bool isHud = false, bool isGrip = false)
-        { Distance = dist; VerticalOffset = vOff; TargetWorldWidth = targetW;
-          RecentreOnActivate = recentre; RepositionEveryFrame = everyFrame;
-          IsHUD = isHud; IsGripRelocatable = isGrip; }
-    }
-
-    internal static CanvasCategory GetCanvasCategory(string name)
-        => s_canvasCategories.TryGetValue(name, out var c) ? c : CanvasCategory.Default;
-
-    internal static CanvasCategoryDefaults GetCategoryDefaults(CanvasCategory cat)
-        => s_categoryDefaults.TryGetValue(cat, out var d) ? d : s_categoryDefaults[CanvasCategory.Default];
-
-    // Canvas name → category.  Names are matched case-insensitively.
-    private static readonly Dictionary<string, CanvasCategory> s_canvasCategories =
-        new(StringComparer.OrdinalIgnoreCase)
-    {
-        // HUD — body-locked (VROrigin yaw), non-interactable, excluded from ray system
-        ["hudCanvas"]                 = CanvasCategory.HUD,
-        ["GameCanvas"]                = CanvasCategory.HUD,
-        ["statusCanvas"]              = CanvasCategory.HUD,
-        ["StatusDisplayCanvas"]       = CanvasCategory.HUD,
-        ["interactionProgressCanvas"] = CanvasCategory.HUD,
-        ["OverlayCanvas"]             = CanvasCategory.HUD,
-        ["MinimapCanvas"]             = CanvasCategory.Panel,  // was HUD — needs to be interactable
-        ["GameWorldDisplayCanvas"]    = CanvasCategory.Ignored,  // already WorldSpace, game manages position
-        ["CentreDisplayCanvas"]       = CanvasCategory.HUD,
-        ["MessageSystemCanvas"]       = CanvasCategory.HUD,
-
-        // Menu — recentres in front of head on activate; always in front of Panel canvases
-        ["MenuCanvas"]                = CanvasCategory.Menu,
-        ["DialogCanvas"]              = CanvasCategory.Menu,
-        ["WindowCanvas"]              = CanvasCategory.Menu,     // detail/notebook windows
-        ["PopupMessage"]              = CanvasCategory.Menu,     // exit/confirm dialogs — placed 0.2m closer
-        ["controlsCanvas"]            = CanvasCategory.Menu,
-        ["upgradesCanvas"]            = CanvasCategory.Menu,
-        ["VirtualCursorCanvas & EventSystem"] = CanvasCategory.Ignored, // game virtual cursor, not ours
-
-        // CaseBoard — recentres on open, remembers relative layout, grip-relocatable
-        ["CaseCanvas"]                = CanvasCategory.CaseBoard,
-        ["caseCanvas"]                = CanvasCategory.CaseBoard,
-        ["BioDisplayCanvas"]          = CanvasCategory.CaseBoard,
-        ["LocationDetailsCanvas"]     = CanvasCategory.CaseBoard,
-
-        // Panel — recentres on activate, interactable, behind Menu
-        ["ActionPanelCanvas"]         = CanvasCategory.Panel,    // action buttons for board elements
-        ["contentCanvas"]             = CanvasCategory.Panel,
-        ["osCanvas"]                  = CanvasCategory.Panel,
-        ["keyboardCanvas"]            = CanvasCategory.Panel,
-        ["fingerprintDisplayCanvas"]  = CanvasCategory.Panel,
-        ["mapLayerCanvas"]            = CanvasCategory.Panel,
-        ["PrototypeBuilderCanvas"]    = CanvasCategory.Panel,
-        ["ControlsDisplayCanvas"]     = CanvasCategory.Ignored,  // VR has own controls; keyboard hints block aim dot
-        ["UpgradesDisplayCanvas"]     = CanvasCategory.Panel,
-
-        // Tooltip — tracks cursor depth, repositions every frame
-        ["TooltipCanvas"]             = CanvasCategory.Tooltip,
-        ["tooltipsCanvas"]            = CanvasCategory.Tooltip,
-
-        // Ignored nested canvases — must NOT be converted to WorldSpace independently.
-        // These live inside a parent managed canvas and inherit its scale/position/rotation.
-        // Converting them separately breaks their scale (100px initial sizeDelta → 0.016 scale),
-        // positions them far from their parent, and breaks all tooltip logic.
-        ["ContextMenus"]              = CanvasCategory.Ignored,  // nested inside TooltipCanvas; context menu + fast-action icons
-    };
-
-    // Per-category placement defaults.
-    // TargetWorldWidth: canvas scale is computed as TargetWorldWidth / sizeDelta.x at runtime,
-    // so it's immune to CanvasScaler inflation (sizeDelta may be 2720 or 1280 — doesn't matter).
-    // Distance ordering (front to back): Menu (1.8m) → Panel (2.1m) → CaseBoard (2.3m) → HUD (2.5m back)
-    private static readonly Dictionary<CanvasCategory, CanvasCategoryDefaults> s_categoryDefaults = new()
-    {
-        [CanvasCategory.Menu]      = new(1.8f,  0.00f, 1.2f, recentre: true),
-        [CanvasCategory.CaseBoard] = new(2.3f,  0.00f, 2.5f, recentre: true,  isGrip: true),  // wider: pins/notes more readable
-        [CanvasCategory.Panel]     = new(2.1f,  0.00f, 2.0f, recentre: true),                 // wider: action panel buttons bigger
-        [CanvasCategory.HUD]       = new(2.5f, -0.15f, 1.5f, recentre: false, isHud: true),
-        [CanvasCategory.Tooltip]   = new(1.2f, -0.10f, 1.2f, recentre: false, everyFrame: true), // wider: context menu text readable
-        [CanvasCategory.Default]   = new(2.0f,  0.00f, 1.6f, recentre: false),
-        [CanvasCategory.Ignored]   = new(0f,    0.00f, 1.6f, recentre: false),  // placeholder; never used
-    };
-
     // ── CaseBoard grip-relocate ───────────────────────────────────────────────
     private bool       _dialogCanvasPlaced;       // true once dialog-mode tooltip is placed (world-lock until dialog closes)
     private Vector3    _contextMenuFreezePos;    // world position to enforce while context menu is frozen
@@ -662,7 +569,7 @@ public class VRCamera : MonoBehaviour
 
                 bool caseBoardOpenForInput = _actionPanelCanvas != null && _actionPanelCanvas.gameObject.activeSelf;
                 bool isPausedForLocomotion = caseBoardOpenForInput
-                                           || (_menuCanvasRef != null && !IsCanvasEffectivelyHidden(_menuCanvasRef, _noGroupInteractable));
+                                           || (_menuCanvasRef != null && !CanvasCategoryInfo.IsCanvasEffectivelyHidden(_menuCanvasRef, _noGroupInteractable));
                 bool vrSettingsOpenForInput = VRSettingsPanel.RootGO?.activeSelf == true;
 
                 _locomotion.UpdateSnapTurn(transform, _voidRoom.InVoidMode);
@@ -736,7 +643,7 @@ public class VRCamera : MonoBehaviour
                 if (!shouldDiscover && !_locomotion.HasPlayerController)
                 {
                     // Post-save/load path: wait for menu to close before discovering.
-                    bool menuGone = (_menuCanvasRef == null || IsCanvasEffectivelyHidden(_menuCanvasRef, _noGroupInteractable))
+                    bool menuGone = (_menuCanvasRef == null || CanvasCategoryInfo.IsCanvasEffectivelyHidden(_menuCanvasRef, _noGroupInteractable))
                                  && (_actionPanelCanvas == null || !_actionPanelCanvas.gameObject.activeSelf);
                     if (menuGone) shouldDiscover = true;
                 }
@@ -1336,7 +1243,7 @@ public class VRCamera : MonoBehaviour
                 continue;
 
             // Skip Ignored-category canvases — already WorldSpace or not relevant to VR UI.
-            if (GetCanvasCategory(cname) == CanvasCategory.Ignored)
+            if (CanvasCategoryInfo.GetCanvasCategory(cname) == CanvasCategory.Ignored)
                 continue;
 
             // CaseCanvas: convert to WorldSpace but suppress background elements
@@ -1438,7 +1345,7 @@ public class VRCamera : MonoBehaviour
             // Enforce correct scale — the game may reset localScale when it opens/closes
             // UI panels (e.g. WindowCanvas when opening notebook). Re-apply every scan.
             // Skip Tooltip canvases when dialog is active — PositionCanvases manages their scale.
-            var cd = GetCategoryDefaults(GetCanvasCategory(c.gameObject.name ?? ""));
+            var cd = CanvasCategoryInfo.GetCategoryDefaults(CanvasCategoryInfo.GetCanvasCategory(c.gameObject.name ?? ""));
             if (cd.RepositionEveryFrame)
             {
                 bool dlgUp = (_popupMessageGO != null && _popupMessageGO.activeSelf)
@@ -1651,7 +1558,7 @@ public class VRCamera : MonoBehaviour
     private static bool ShouldRelaxMenuClipping(Canvas canvas)
     {
         if (canvas == null) return false;
-        var cat = GetCanvasCategory(canvas.gameObject.name);
+        var cat = CanvasCategoryInfo.GetCanvasCategory(canvas.gameObject.name);
         // Relax stencil/clip masking for Menu and Panel canvases.
         // Panel canvases (e.g. CaseCanvas) use ScrollRect Viewports with Mask components
         // which break in WorldSpace — must be disabled so their content is visible.
@@ -1928,7 +1835,7 @@ public class VRCamera : MonoBehaviour
         string canvasName = canvas.gameObject.name;
         // Panel/Menu canvases: force raycastTarget=true on all Graphic children so the
         // VR controller ray can hit them (the game defaults many to false).
-        var canvasCat = GetCanvasCategory(canvasName);
+        var canvasCat = CanvasCategoryInfo.GetCanvasCategory(canvasName);
         bool forceRaycastTarget = canvasCat == CanvasCategory.Panel || canvasCat == CanvasCategory.Menu || canvasCat == CanvasCategory.CaseBoard;
         try
         {
@@ -2279,8 +2186,8 @@ public class VRCamera : MonoBehaviour
 
         canvas.renderMode = RenderMode.WorldSpace;
 
-        var cat    = GetCanvasCategory(canvas.gameObject.name);
-        var catDef = GetCategoryDefaults(cat);
+        var cat    = CanvasCategoryInfo.GetCanvasCategory(canvas.gameObject.name);
+        var catDef = CanvasCategoryInfo.GetCategoryDefaults(cat);
 
         // Dynamic scale: world width = TargetWorldWidth regardless of actual sizeDelta.
         // This is immune to CanvasScaler inflation — whatever the actual pixel dimensions are,
@@ -2777,7 +2684,7 @@ public class VRCamera : MonoBehaviour
         // Use _casePanelCanvas (CaseCanvas) — only active when pin board is open.
         // _actionPanelCanvas is always active during gameplay so cannot be used here.
         bool menuOpen      = _menuCanvasRef != null && _menuCanvasRef.isActiveAndEnabled;
-        bool caseBoardOpen = _casePanelCanvas != null && IsCanvasVisible(_casePanelCanvas);
+        bool caseBoardOpen = _casePanelCanvas != null && CanvasCategoryInfo.IsCanvasVisible(_casePanelCanvas);
         bool hudShouldShow = !menuOpen && !caseBoardOpen;
         if (_hudAnchor.gameObject.activeSelf != hudShouldShow)
             _hudAnchor.gameObject.SetActive(hudShouldShow);
@@ -2789,14 +2696,14 @@ public class VRCamera : MonoBehaviour
         {
             if (kvp.Value == null) continue;
             int tid = kvp.Key;
-            bool nowActive = IsCanvasVisible(kvp.Value);
+            bool nowActive = CanvasCategoryInfo.IsCanvasVisible(kvp.Value);
             bool wasActive;
             bool hadTracking = _canvasWasActive.TryGetValue(tid, out wasActive);
 
             if (hadTracking && !wasActive && nowActive)
             {
-                var cat = GetCanvasCategory(kvp.Value.gameObject.name);
-                var catDef = GetCategoryDefaults(cat);
+                var cat = CanvasCategoryInfo.GetCanvasCategory(kvp.Value.gameObject.name);
+                var catDef = CanvasCategoryInfo.GetCategoryDefaults(cat);
                 if (catDef.RecentreOnActivate && !catDef.IsHUD)
                     _positionedCanvases.Remove(tid);
 
@@ -2816,7 +2723,7 @@ public class VRCamera : MonoBehaviour
                     {
                         if (cb.Value == null) continue;
                         string cbName = cb.Value.gameObject.name ?? "";
-                        var cbCat = GetCanvasCategory(cbName);
+                        var cbCat = CanvasCategoryInfo.GetCanvasCategory(cbName);
                         if (cbCat == CanvasCategory.CaseBoard
                             || cbName.Equals("WindowCanvas", StringComparison.OrdinalIgnoreCase))
                         {
@@ -2859,8 +2766,8 @@ public class VRCamera : MonoBehaviour
 
             int id = kvp.Key;
             bool isCursorCanvas = (id == cursorId);
-            var cat     = GetCanvasCategory(canvas.gameObject.name);
-            var catDefs = GetCategoryDefaults(cat);
+            var cat     = CanvasCategoryInfo.GetCanvasCategory(canvas.gameObject.name);
+            var catDefs = CanvasCategoryInfo.GetCategoryDefaults(cat);
 
             // ── Per-frame scale enforcement ───────────────────────────────────
             // The game resets localScale on certain canvases (PopupMessage,
@@ -2996,7 +2903,7 @@ public class VRCamera : MonoBehaviour
                         var rtDlg = canvas.GetComponent<RectTransform>();
                         if (rtDlg != null)
                         {
-                            float popupScale = GetCategoryDefaults(CanvasCategory.Menu).TargetWorldWidth / rtDlg.sizeDelta.x;
+                            float popupScale = CanvasCategoryInfo.GetCategoryDefaults(CanvasCategory.Menu).TargetWorldWidth / rtDlg.sizeDelta.x;
                             if (!Mathf.Approximately(canvas.transform.localScale.x, popupScale))
                                 canvas.transform.localScale = Vector3.one * popupScale;
                         }
@@ -3029,7 +2936,7 @@ public class VRCamera : MonoBehaviour
             // Parent to HUDanchor once; after that it follows body movement automatically.
             if (catDefs.IsHUD)
             {
-                if (!_positionedCanvases.Contains(id) && IsCanvasVisible(canvas))
+                if (!_positionedCanvases.Contains(id) && CanvasCategoryInfo.IsCanvasVisible(canvas))
                 {
                     try
                     {
@@ -3062,7 +2969,7 @@ public class VRCamera : MonoBehaviour
             string nameForBBtn = canvas.gameObject.name ?? "";
             if (_locomotion.MinimapInBBtnContext && nameForBBtn.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase))
             {
-                if (IsCanvasVisible(canvas))
+                if (CanvasCategoryInfo.IsCanvasVisible(canvas))
                 {
                     Quaternion vrYaw = Quaternion.Euler(0, transform.eulerAngles.y, 0);
                     if (_minimapBBtnHasOffset)
@@ -3091,7 +2998,7 @@ public class VRCamera : MonoBehaviour
             // Skip if not currently visible (will be placed when it activates).
             // Exception: CaseBoard canvases are always positioned — the game may
             // fade them in via CanvasGroup after our positioning pass.
-            if (!IsCanvasVisible(canvas) && cat != CanvasCategory.CaseBoard) continue;
+            if (!CanvasCategoryInfo.IsCanvasVisible(canvas) && cat != CanvasCategory.CaseBoard) continue;
 
             float dist = catDefs.Distance;
             if (cat == CanvasCategory.Menu) dist = VRSettingsPanel.MenuDistance;
@@ -3101,7 +3008,7 @@ public class VRCamera : MonoBehaviour
             string cname = canvas.gameObject.name ?? "";
             // ActionPanelCanvas: 0.15m closer than CaseBoard so action buttons are in front
             if (cname.Equals("ActionPanelCanvas", StringComparison.OrdinalIgnoreCase))
-                dist = GetCategoryDefaults(CanvasCategory.CaseBoard).Distance - 0.15f;
+                dist = CanvasCategoryInfo.GetCategoryDefaults(CanvasCategory.CaseBoard).Distance - 0.15f;
 
             // CaseBoard: first canvas becomes primary anchor, others maintain relative offset
             if (cat == CanvasCategory.CaseBoard)
@@ -3188,53 +3095,6 @@ public class VRCamera : MonoBehaviour
                 cc.transform.rotation = caseRot;
             }
         }
-    }
-
-    // Returns true if the canvas is active, enabled, and not faded out via CanvasGroup.
-    internal static bool IsCanvasVisible(Canvas canvas)
-    {
-        if (canvas == null) return false;
-        if (!canvas.gameObject.activeSelf || !canvas.enabled) return false;
-        try
-        {
-            var cg = canvas.GetComponent<CanvasGroup>();
-            if (cg != null && cg.alpha < 0.1f) return false;
-        }
-        catch { }
-        return true;
-    }
-
-    /// <summary>
-    /// Returns true when a canvas should be skipped in the depth scan / click system.
-    /// Covers two cases:
-    ///   1. CanvasGroup on the canvas or any ancestor has alpha &lt; 0.1 or blocksRaycasts=false.
-    ///   2. No CanvasGroup at all AND not enough active Graphics to be considered "showing content"
-    ///      (e.g. MenuCanvas when the pause menu is hidden has ~3 decorative Graphics).
-    /// </summary>
-    internal static bool IsCanvasEffectivelyHidden(Canvas c, HashSet<int> noGroupInteractable)
-    {
-        bool hasCanvasGroup = false;
-        try
-        {
-            var groups = c.GetComponentsInParent<CanvasGroup>(true);
-            foreach (var cg in groups)
-            {
-                if (cg == null) continue;
-                hasCanvasGroup = true;
-                if (cg.alpha < 0.1f || !cg.blocksRaycasts) return true;
-            }
-        }
-        catch { }
-
-        // No CanvasGroup — use the cached active-Graphics count from the scan cycle.
-        // Canvases with fewer than MinActiveGraphicsForInteractable active Graphics
-        // are treated as hidden (e.g. MenuCanvas with only Border elements visible).
-        if (!hasCanvasGroup)
-        {
-            int cid = c.GetInstanceID();
-            if (!noGroupInteractable.Contains(cid)) return true;
-        }
-        return false;
     }
 
     /// <summary>
@@ -3422,7 +3282,7 @@ public class VRCamera : MonoBehaviour
             foreach (var kvpPR in _managedCanvases)
             {
                 if (kvpPR.Value == null) continue;
-                if (GetCanvasCategory(kvpPR.Value.gameObject.name) != CanvasCategory.Tooltip) continue;
+                if (CanvasCategoryInfo.GetCanvasCategory(kvpPR.Value.gameObject.name) != CanvasCategory.Tooltip) continue;
                 kvpPR.Value.transform.position = _contextMenuFreezePos;
                 kvpPR.Value.transform.rotation  = _contextMenuFreezeRot;
                 try

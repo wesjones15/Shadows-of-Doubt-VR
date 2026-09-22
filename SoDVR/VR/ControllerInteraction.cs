@@ -376,10 +376,10 @@ internal sealed class ControllerInteraction
                 var c = kvp.Value;
                 if (c == null) continue;
                 if (!c.gameObject.activeSelf || !c.enabled) continue;
-                if (VRCamera.IsCanvasEffectivelyHidden(c, noGroupInteractable)) continue;
+                if (CanvasCategoryInfo.IsCanvasEffectivelyHidden(c, noGroupInteractable)) continue;
                 if (cursorCanvas != null && c.GetInstanceID() == cursorCanvas.GetInstanceID()) continue;
                 if (c.gameObject.name?.IndexOf("VRCursor", StringComparison.OrdinalIgnoreCase) >= 0) continue;
-                if (VRCamera.GetCategoryDefaults(VRCamera.GetCanvasCategory(c.gameObject.name)).RepositionEveryFrame)
+                if (CanvasCategoryInfo.GetCategoryDefaults(CanvasCategoryInfo.GetCanvasCategory(c.gameObject.name)).RepositionEveryFrame)
                 {
                     // RepositionEveryFrame canvases (TooltipCanvas) are normally skip —
                     // EXCEPT when context menu is active (frozen in place, plane is valid)
@@ -391,8 +391,8 @@ internal sealed class ControllerInteraction
                         if (!dialogUp) continue;
                     }
                 }
-                var aimCat = VRCamera.GetCanvasCategory(c.gameObject.name);
-                if (aimCat == VRCamera.CanvasCategory.HUD) continue;
+                var aimCat = CanvasCategoryInfo.GetCanvasCategory(c.gameObject.name);
+                if (aimCat == CanvasCategory.HUD) continue;
                 // Allow grip-dragged notes through — they have independent world transforms
                 if (nestedCanvasIds.Contains(kvp.Key))
                 {

@@ -49,10 +49,10 @@ internal static class CanvasClickRouter
             var canvas = kvp.Value;
             if (canvas == null) continue;
             // Skip HUD and Ignored canvases — not interactable, must not steal clicks.
-            var clickCat = VRCamera.GetCanvasCategory(canvas.gameObject.name);
-            if (clickCat == VRCamera.CanvasCategory.HUD || clickCat == VRCamera.CanvasCategory.Ignored) continue;
+            var clickCat = CanvasCategoryInfo.GetCanvasCategory(canvas.gameObject.name);
+            if (clickCat == CanvasCategory.HUD || clickCat == CanvasCategory.Ignored) continue;
             // Skip canvases hidden via CanvasGroup OR all-children-inactive (MenuCanvas).
-            if (VRCamera.IsCanvasEffectivelyHidden(canvas, noGroupInteractable)) continue;
+            if (CanvasCategoryInfo.IsCanvasEffectivelyHidden(canvas, noGroupInteractable)) continue;
             // Include nested canvases in hit testing — they have their own GraphicRaycasters
             // and their graphics are NOT visible to the parent canvas's raycaster.
             var plane = new Plane(-canvas.transform.forward, canvas.transform.position);

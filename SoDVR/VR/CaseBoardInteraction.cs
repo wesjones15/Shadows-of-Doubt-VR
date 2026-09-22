@@ -269,7 +269,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         foreach (var kvpCtx in _ctxManagedCanvases)
         {
             if (kvpCtx.Value == null) continue;
-            if (VRCamera.GetCanvasCategory(kvpCtx.Value.gameObject.name) != VRCamera.CanvasCategory.Tooltip) continue;
+            if (CanvasCategoryInfo.GetCanvasCategory(kvpCtx.Value.gameObject.name) != CanvasCategory.Tooltip) continue;
             try
             {
                 var cmTr = kvpCtx.Value.transform.Find("ContextMenus");
@@ -294,7 +294,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             foreach (var kvpCtx in _ctxManagedCanvases)
             {
                 if (kvpCtx.Value == null) continue;
-                if (VRCamera.GetCanvasCategory(kvpCtx.Value.gameObject.name) == VRCamera.CanvasCategory.Tooltip)
+                if (CanvasCategoryInfo.GetCanvasCategory(kvpCtx.Value.gameObject.name) == CanvasCategory.Tooltip)
                     _ctxLastRescanFrame.Remove(kvpCtx.Key);
             }
         }
@@ -307,10 +307,10 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             foreach (var kvpVis in _ctxManagedCanvases)
             {
                 if (kvpVis.Value == null || !kvpVis.Value.gameObject.activeSelf) continue;
-                var visCat = VRCamera.GetCanvasCategory(kvpVis.Value.gameObject.name);
-                if (visCat == VRCamera.CanvasCategory.Menu || visCat == VRCamera.CanvasCategory.Panel)
+                var visCat = CanvasCategoryInfo.GetCanvasCategory(kvpVis.Value.gameObject.name);
+                if (visCat == CanvasCategory.Menu || visCat == CanvasCategory.Panel)
                 {
-                    if (!VRCamera.IsCanvasEffectivelyHidden(kvpVis.Value, _ctxNoGroupInteractable))
+                    if (!CanvasCategoryInfo.IsCanvasEffectivelyHidden(kvpVis.Value, _ctxNoGroupInteractable))
                     { anyInteractiveVisible = true; break; }
                 }
             }
@@ -393,12 +393,12 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 foreach (var kvp in _ctxManagedCanvases)
                 {
                     var c = kvp.Value;
-                    if (c == null || !VRCamera.IsCanvasVisible(c)) continue;
-                    var dragCat = VRCamera.GetCanvasCategory(c.gameObject.name);
+                    if (c == null || !CanvasCategoryInfo.IsCanvasVisible(c)) continue;
+                    var dragCat = CanvasCategoryInfo.GetCanvasCategory(c.gameObject.name);
                     // Allow grip-drag on CaseBoard, Panel, and Menu canvases.
                     // Also allow Tooltip canvas when a popup dialog or context menu is active.
-                    bool isGrabbableTooltip = dragCat == VRCamera.CanvasCategory.Tooltip && (dialogNowActive || contextMenuNowActive);
-                    if (!isGrabbableTooltip && dragCat != VRCamera.CanvasCategory.CaseBoard && dragCat != VRCamera.CanvasCategory.Panel && dragCat != VRCamera.CanvasCategory.Menu) continue;
+                    bool isGrabbableTooltip = dragCat == CanvasCategory.Tooltip && (dialogNowActive || contextMenuNowActive);
+                    if (!isGrabbableTooltip && dragCat != CanvasCategory.CaseBoard && dragCat != CanvasCategory.Panel && dragCat != CanvasCategory.Menu) continue;
                     string cName = c.gameObject.name ?? "";
                     if (cName.Equals("CaseCanvas",            StringComparison.OrdinalIgnoreCase)) continue;
                     if (cName.Equals("ActionPanelCanvas",      StringComparison.OrdinalIgnoreCase)) continue;
@@ -511,7 +511,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 foreach (var kvp in _ctxManagedCanvases)
                 {
                     if (kvp.Value == null) continue;
-                    if (VRCamera.GetCanvasCategory(kvp.Value.gameObject.name) == VRCamera.CanvasCategory.CaseBoard)
+                    if (CanvasCategoryInfo.GetCanvasCategory(kvp.Value.gameObject.name) == CanvasCategory.CaseBoard)
                     {
                         CaseBoardPrimaryId = kvp.Key;
                         break;
@@ -555,8 +555,8 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 // This means the offset rotates with the anchor — when the case board
                 // reopens facing a different direction, the arrangement is preserved.
                 // Skip Tooltip canvas (dialog host) — its position is transient; no persistence needed.
-                var releasedCat = VRCamera.GetCanvasCategory(releasedName);
-                bool isReleasedTooltip = releasedCat == VRCamera.CanvasCategory.Tooltip;
+                var releasedCat = CanvasCategoryInfo.GetCanvasCategory(releasedName);
+                bool isReleasedTooltip = releasedCat == CanvasCategory.Tooltip;
                 if (!isReleasedTooltip && _ctxActionPanelCanvas != null)
                 {
                     int dragId = _gripDragCanvas.GetInstanceID();
@@ -604,7 +604,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 kvpFz.Value.transform.rotation = vrPose.rot;
                 // Re-apply snapshotted scale — counteracts game resetting WindowCanvas.localScale
                 // to 1.0 every frame. Skip HUD canvases (they don't have per-frame scale resets).
-                if (!VRCamera.GetCategoryDefaults(VRCamera.GetCanvasCategory(kvpFz.Value.gameObject.name)).IsHUD)
+                if (!CanvasCategoryInfo.GetCategoryDefaults(CanvasCategoryInfo.GetCanvasCategory(kvpFz.Value.gameObject.name)).IsHUD)
                     kvpFz.Value.transform.localScale = vrPose.scale;
             }
             // Also zero ContextMenus + children (game resets to screen coords every frame).
@@ -614,7 +614,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 foreach (var kvpFz in _ctxManagedCanvases)
                 {
                     if (kvpFz.Value == null) continue;
-                    if (VRCamera.GetCanvasCategory(kvpFz.Value.gameObject.name) != VRCamera.CanvasCategory.Tooltip) continue;
+                    if (CanvasCategoryInfo.GetCanvasCategory(kvpFz.Value.gameObject.name) != CanvasCategory.Tooltip) continue;
                     try
                     {
                         var cmTrFz = kvpFz.Value.transform.Find("ContextMenus");
@@ -696,7 +696,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             {
                 if (kvpWc.Value == null || !kvpWc.Value.gameObject.activeSelf) continue;
                 if ((kvpWc.Value.gameObject.name ?? "").IndexOf("Window", StringComparison.OrdinalIgnoreCase) < 0) continue;
-                if (VRCamera.GetCanvasCategory(kvpWc.Value.gameObject.name) != VRCamera.CanvasCategory.Menu) continue;
+                if (CanvasCategoryInfo.GetCanvasCategory(kvpWc.Value.gameObject.name) != CanvasCategory.Menu) continue;
                 try
                 {
                     var wt = kvpWc.Value.transform;
@@ -758,7 +758,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             foreach (var kvpCmS in _ctxManagedCanvases)
             {
                 if (kvpCmS.Value == null) continue;
-                if (VRCamera.GetCanvasCategory(kvpCmS.Value.gameObject.name) != VRCamera.CanvasCategory.Tooltip) continue;
+                if (CanvasCategoryInfo.GetCanvasCategory(kvpCmS.Value.gameObject.name) != CanvasCategory.Tooltip) continue;
                 try
                 {
                     var ttTr = kvpCmS.Value.transform;
@@ -805,7 +805,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             {
                 if (kvpWc.Value == null || !kvpWc.Value.gameObject.activeSelf) continue;
                 if ((kvpWc.Value.gameObject.name ?? "").IndexOf("Window", StringComparison.OrdinalIgnoreCase) < 0) continue;
-                if (VRCamera.GetCanvasCategory(kvpWc.Value.gameObject.name) != VRCamera.CanvasCategory.Menu) continue;
+                if (CanvasCategoryInfo.GetCanvasCategory(kvpWc.Value.gameObject.name) != CanvasCategory.Menu) continue;
                 try { kvpWc.Value.transform.position -= _windowNoteWorldOffset; } catch { }
                 break;
             }
@@ -832,7 +832,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             foreach (var kvpCmU in _ctxManagedCanvases)
             {
                 if (kvpCmU.Value == null) continue;
-                if (VRCamera.GetCanvasCategory(kvpCmU.Value.gameObject.name) != VRCamera.CanvasCategory.Tooltip) continue;
+                if (CanvasCategoryInfo.GetCanvasCategory(kvpCmU.Value.gameObject.name) != CanvasCategory.Tooltip) continue;
                 try { kvpCmU.Value.transform.position -= _contextMenuWorldOffset; } catch { }
                 break;
             }
@@ -2139,7 +2139,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             foreach (var kvpCm in _ctxManagedCanvases)
             {
                 if (kvpCm.Value == null) continue;
-                if (VRCamera.GetCanvasCategory(kvpCm.Value.gameObject.name ?? "") != VRCamera.CanvasCategory.Tooltip) continue;
+                if (CanvasCategoryInfo.GetCanvasCategory(kvpCm.Value.gameObject.name ?? "") != CanvasCategory.Tooltip) continue;
                 try
                 {
                     var cmTr = kvpCm.Value.transform.Find("ContextMenus");
@@ -2507,12 +2507,12 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             if (c == null || !c.gameObject.activeSelf) continue;
             if (c == _ctxCasePanelCanvas) continue; // already added above
             if (c.renderMode != RenderMode.WorldSpace) continue;
-            var cCat = VRCamera.GetCanvasCategory(c.gameObject.name ?? "");
-            if (cCat == VRCamera.CanvasCategory.Menu)    continue; // WindowCanvas etc. handled by CanvasClickRouter
-            if (cCat == VRCamera.CanvasCategory.Panel)   continue; // Panel buttons use CanvasClickRouter
-            if (cCat == VRCamera.CanvasCategory.Tooltip) continue; // Tooltip must not intercept pin board raycasts
-            if (cCat == VRCamera.CanvasCategory.HUD)     continue; // HUD not interactive on case board
-            if (cCat == VRCamera.CanvasCategory.Ignored) continue;
+            var cCat = CanvasCategoryInfo.GetCanvasCategory(c.gameObject.name ?? "");
+            if (cCat == CanvasCategory.Menu)    continue; // WindowCanvas etc. handled by CanvasClickRouter
+            if (cCat == CanvasCategory.Panel)   continue; // Panel buttons use CanvasClickRouter
+            if (cCat == CanvasCategory.Tooltip) continue; // Tooltip must not intercept pin board raycasts
+            if (cCat == CanvasCategory.HUD)     continue; // HUD not interactive on case board
+            if (cCat == CanvasCategory.Ignored) continue;
             // Exclude canvases nested inside Menu-category canvases (e.g. Note inside WindowCanvas).
             // Their buttons (PinButton, CloseButton) are handled by CanvasClickRouter's button path.
             // Including them here routes clicks through the CB drag path, whose EventSystem drag
@@ -2526,7 +2526,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                     for (int w = 0; w < 10 && np != null; w++)
                     {
                         var npc = np.GetComponent<Canvas>();
-                        if (npc != null && VRCamera.GetCanvasCategory(npc.gameObject.name ?? "") == VRCamera.CanvasCategory.Menu)
+                        if (npc != null && CanvasCategoryInfo.GetCanvasCategory(npc.gameObject.name ?? "") == CanvasCategory.Menu)
                         { insideMenu = true; break; }
                         np = np.parent;
                     }
