@@ -27,6 +27,23 @@ public class Plugin : BasePlugin
             "being blurred by the scene's post-processing stack while the panel rewrite is in progress " +
             "— set false to restore normal depth of field.");
 
+        SoDVR.VR.Rooms.VoidRoomController.Enabled = Config.Bind(
+            "VoidRoom",
+            "Enabled",
+            true,
+            "Show a minimal reference room instead of a blank frame while there is no game camera " +
+            "(press-any-key screen, loading, early startup). Costs almost nothing since the eye " +
+            "cameras are masked to the room's own layer.");
+
+        SoDVR.VR.Rooms.VoidRoomController.ShowOnMainMenu = Config.Bind(
+            "VoidRoom",
+            "ShowOnMainMenu",
+            true,
+            "Keep the void room up through the main menu too, instead of only the pre-game screens. " +
+            "The main menu's real backdrop is the game's skybox, which costs more and runs worse in " +
+            "a headset than the room it replaces — same menu panel, same position, only what's " +
+            "behind it changes.");
+
         if (Array.Exists(Environment.GetCommandLineArgs(), a => a == "--disable-vr"))
         {
             Log.LogWarning("VR disabled via --disable-vr flag.");

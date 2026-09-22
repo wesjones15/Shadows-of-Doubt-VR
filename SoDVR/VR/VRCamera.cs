@@ -52,6 +52,10 @@ public class VRCamera : MonoBehaviour
 
     // Unity built-in UI layer.  Canvas GameObjects default to this layer.
     private const int UILayer       = 5;
+
+    // The void room shares the UI layer, so laser pointers and controller visuals still show
+    // over it while the eye cameras are masked down to just this layer.
+    private readonly Rooms.VoidRoomController _voidRoom = new(UILayer);
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
     // The swapchain copy still runs every frame, so head tracking stays smooth via ATW.
@@ -605,6 +609,7 @@ public class VRCamera : MonoBehaviour
         OpenXRManager.PollEventsPublic();
 
         PostProcessingOverride.Tick();
+        _voidRoom.UpdatePressAnyKeyClick(_gameCam == null);
 
         // Detect scene changes and apply a grace period during which we skip
         // ScanAndConvertCanvases.  This prevents us from touching canvas/camera
@@ -1220,6 +1225,8 @@ public class VRCamera : MonoBehaviour
         _rightRT.Create();
         SetupEyeCam(_rightCam, _rightRT, isUiOverlay: false);
 
+        _voidRoom.CaptureNeutralEnv(_leftCam);
+
         // UI overlay cameras removed — HDRP ignores clearFlags=Depth on explicit
         // Camera.Render() calls, causing the scene to be overwritten with blue/black.
         // UI visibility is handled by HDR text boost in StrengthenMenuTextMaterial().
@@ -1563,6 +1570,7 @@ public class VRCamera : MonoBehaviour
             // ── Copy game camera settings to VR eye cameras ──
             CopyGameCameraSettings(cam, _leftCam);
             CopyGameCameraSettings(cam, _rightCam);
+            _voidRoom.CaptureGameplayState(_leftCam);
             Log.LogInfo($"[VRCamera] VRCam after copy: clearFlags={_leftCam.clearFlags}" +
                         $" cullingMask=0x{_leftCam.cullingMask:X8}" +
                         $" near={_leftCam.nearClipPlane} far={_leftCam.farClipPlane}" +
@@ -1724,7 +1732,16 @@ public class VRCamera : MonoBehaviour
             //     because city generation runs during the reload.
             // ATW holds the last valid frame in the headset so the transition is invisible.
             bool inReloadGrace = _sceneLoadGrace > 0 && _prevGameCamValid;
-            if (_gameCam == null || inReloadGrace)
+
+            // No game camera means the pre-game screens (press-any-key, loading, early
+            // startup) — and the main menu counts too, since its real backdrop is the game's
+            // skybox, which costs more and looks worse in a headset than the void room it's
+            // otherwise replaced by. Tick() shows/hides the room and masks the eye cameras to
+            // it accordingly; when it reports void mode we still fall through to the normal
+            // render path below so the room itself gets rendered, rather than submitting an
+            // empty frame.
+            bool voidMode = _voidRoom.Tick(_gameCam, _leftCam, _rightCam, inReloadGrace);
+            if (!voidMode && (_gameCam == null || inReloadGrace))
             {
                 OpenXRManager.FrameEndEmpty(_displayTime);
                 return;
@@ -6189,6 +6206,8 @@ public class VRCamera : MonoBehaviour
 
         // Don't turn while settings panel is open (right stick scrolls it instead)
         if (VRSettingsPanel.RootGO?.activeSelf == true) return;
+        // Nor in the void room: there is no world to turn to look at.
+        if (_voidRoom.InVoidMode) return;
 
         if (!OpenXRManager.GetThumbstickState(true, out float tx, out float _)) return;
 
@@ -6239,6 +6258,8 @@ public class VRCamera : MonoBehaviour
         // Refuse to drive the CharacterController during any reload grace period.
         if (_sceneLoadGrace > 0) return;
         if (VRSettingsPanel.RootGO?.activeSelf == true) return;
+        // Nor in the void room — the menu is not a place you walk around in.
+        if (_voidRoom.InVoidMode) return;
 
         // Pause-mode locomotion: allow limited movement within PauseMoveRadius.
         // When pause starts, record origin. When pause ends, warp player back.
