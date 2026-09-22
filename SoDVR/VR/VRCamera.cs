@@ -9,6 +9,7 @@ using UnityEngine.Rendering.HighDefinition;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using TMPro;
+using static SoDVR.VR.NativeInput;
 
 namespace SoDVR.VR;
 
@@ -534,27 +535,6 @@ public class VRCamera : MonoBehaviour
     private bool        _menuBtnNeedsRelease;    // true after fire; cleared only once button is physically released
     private int         _poseFrameCount;
     private bool        _poseEverValid;
-
-    // Win32 keyboard simulation — used to forward left-controller menu button as ESC.
-    [DllImport("user32.dll")]
-    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
-
-    // Win32 mouse event simulation — used for flashlight toggle (middle mouse button).
-    [DllImport("user32.dll")]
-    private static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, UIntPtr dwExtraInfo);
-
-    // Win32 cursor positioning — used to feed correct Input.mousePosition during case board drag.
-    [DllImport("user32.dll")]
-    private static extern bool SetCursorPos(int X, int Y);
-
-    [DllImport("user32.dll")]
-    private static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetActiveWindow();
-
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
-    private struct POINT { public int X, Y; }
 
     // Maps (origMaterialInstanceID << 5 | tier<<1 | isBackground) → patched clone.
     // Lower 5 bits: tier (0-9, 4 bits) + isBackground (1 bit).

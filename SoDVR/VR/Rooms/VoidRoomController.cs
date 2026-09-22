@@ -2,9 +2,9 @@ using BepInEx.Configuration;
 using BepInEx.Logging;
 using SoDVR;
 using System;
-using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Rendering.HighDefinition;
+using static SoDVR.VR.NativeInput;
 
 namespace SoDVR.VR.Rooms;
 
@@ -21,8 +21,6 @@ namespace SoDVR.VR.Rooms;
 /// </summary>
 internal sealed class VoidRoomController
 {
-    [DllImport("user32.dll")]
-    private static extern void mouse_event(uint dwFlags, int dx, int dy, uint dwData, UIntPtr dwExtraInfo);
     private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     private const uint MOUSEEVENTF_LEFTUP = 0x0004;
 
