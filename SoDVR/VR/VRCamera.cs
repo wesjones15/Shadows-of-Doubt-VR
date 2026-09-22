@@ -800,10 +800,10 @@ public class VRCamera : MonoBehaviour
         {
             _locateErrors = 0;
             _posesValid   = true;
-            ApplyCameraPose(_leftCam.transform,  _leftEye);
-            ApplyCameraPose(_rightCam.transform, _rightEye);
-            SetProjection(_leftCam,  _leftEye);
-            SetProjection(_rightCam, _rightEye);
+            CameraRig.ApplyCameraPose(_leftCam.transform,  _leftEye);
+            CameraRig.ApplyCameraPose(_rightCam.transform, _rightEye);
+            CameraRig.SetProjection(_leftCam,  _leftEye);
+            CameraRig.SetProjection(_rightCam, _rightEye);
 
             // NOTE: Do NOT copy VR projectionMatrix to Camera.main — it breaks interaction.
             // VR projection is asymmetric for 2554x2756, while Camera.main is 1920x1080.
@@ -997,14 +997,14 @@ public class VRCamera : MonoBehaviour
         _leftCam = leftGO.AddComponent<Camera>();
         _leftRT  = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32) { name = "SoDVR_Left" };
         _leftRT.Create();
-        SetupEyeCam(_leftCam, _leftRT, isUiOverlay: false);
+        CameraRig.SetupEyeCam(_leftCam, _leftRT, isUiOverlay: false);
 
         var rightGO = new GameObject("RightEye");
         rightGO.transform.SetParent(_cameraOffset, false);
         _rightCam = rightGO.AddComponent<Camera>();
         _rightRT  = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32) { name = "SoDVR_Right" };
         _rightRT.Create();
-        SetupEyeCam(_rightCam, _rightRT, isUiOverlay: false);
+        CameraRig.SetupEyeCam(_rightCam, _rightRT, isUiOverlay: false);
 
         _voidRoom.CaptureNeutralEnv(_leftCam);
 
@@ -1335,159 +1335,26 @@ public class VRCamera : MonoBehaviour
     // has time to complete before the camera is taken offline.
     private void TryFindGameCamera()
     {
-        foreach (var cam in Camera.allCameras)
-        {
-            if (cam == _leftCam || cam == _rightCam) continue;
-            if (!cam.gameObject.activeInHierarchy) continue;
-            // Only accept the primary game camera; skip setup/NPC cameras.
-            if (!cam.gameObject.name.Equals("Main Camera", StringComparison.OrdinalIgnoreCase)) continue;
-            _gameCam          = cam.transform;
-            _gameCamPending   = cam;
-            _gameCamRef       = cam;
-            _gameCamSavedMask = cam.cullingMask;
-            _gameCamDisableDelay = 10;
-            Log.LogInfo($"[VRCamera] Found game camera: '{cam.gameObject.name}' pos={cam.transform.position} (suppress in 10 frames)");
+        var found = CameraRig.TryFindGameCamera(_leftCam, _rightCam);
+        if (found == null) return;
 
-            // ── Copy game camera settings to VR eye cameras ──
-            CopyGameCameraSettings(cam, _leftCam);
-            CopyGameCameraSettings(cam, _rightCam);
-            _voidRoom.CaptureGameplayState(_leftCam);
-            Log.LogInfo($"[VRCamera] VRCam after copy: clearFlags={_leftCam.clearFlags}" +
-                        $" cullingMask=0x{_leftCam.cullingMask:X8}" +
-                        $" near={_leftCam.nearClipPlane} far={_leftCam.farClipPlane}" +
-                        $" allowHDR={_leftCam.allowHDR}");
+        _gameCam          = found.transform;
+        _gameCamPending   = found;
+        _gameCamRef       = found;
+        _gameCamSavedMask = found.cullingMask;
+        _gameCamDisableDelay = 10;
+        Log.LogInfo($"[VRCamera] Found game camera: '{found.gameObject.name}' pos={found.transform.position} (suppress in 10 frames)");
 
-            transform.position = _gameCam.position;
-            return;
-        }
-    }
+        // ── Copy game camera settings to VR eye cameras ──
+        CameraRig.CopyGameCameraSettings(found, _leftCam);
+        CameraRig.CopyGameCameraSettings(found, _rightCam);
+        _voidRoom.CaptureGameplayState(_leftCam);
+        Log.LogInfo($"[VRCamera] VRCam after copy: clearFlags={_leftCam.clearFlags}" +
+                    $" cullingMask=0x{_leftCam.cullingMask:X8}" +
+                    $" near={_leftCam.nearClipPlane} far={_leftCam.farClipPlane}" +
+                    $" allowHDR={_leftCam.allowHDR}");
 
-    // Expensive HDRP passes to disable on VR eye cameras.
-    private static readonly FrameSettingsField[] s_VrDisabledFields =
-    {
-        FrameSettingsField.Postprocess,         // master kill — disables exposure + all PP
-        FrameSettingsField.SSAO,
-        FrameSettingsField.SSR,
-        FrameSettingsField.Volumetrics,
-        FrameSettingsField.MotionVectors,
-        FrameSettingsField.MotionBlur,
-        FrameSettingsField.DepthOfField,
-        FrameSettingsField.ChromaticAberration,
-        FrameSettingsField.ContactShadows,
-        FrameSettingsField.Tonemapping,
-    };
-
-    // UI overlay cameras use a superset of the scene camera's disabled passes — everything off.
-    private static readonly FrameSettingsField[] s_UIOverlayDisabledFields =
-    {
-        FrameSettingsField.Postprocess,
-        FrameSettingsField.SSAO,
-        FrameSettingsField.SSR,
-        FrameSettingsField.Volumetrics,
-        FrameSettingsField.MotionVectors,
-        FrameSettingsField.MotionBlur,
-        FrameSettingsField.DepthOfField,
-        FrameSettingsField.ChromaticAberration,
-        FrameSettingsField.ContactShadows,
-        FrameSettingsField.Tonemapping,
-        FrameSettingsField.ExposureControl,
-        FrameSettingsField.ColorGrading,
-        FrameSettingsField.Bloom,
-        FrameSettingsField.FilmGrain,
-        FrameSettingsField.Dithering,
-        FrameSettingsField.LensDistortion,
-        FrameSettingsField.Vignette,
-    };
-
-    private void SetupEyeCam(Camera cam, RenderTexture rt, bool isUiOverlay)
-    {
-        // Minimal setup — only set what's strictly needed for manual rendering.
-        cam.targetTexture = rt;
-        cam.stereoTargetEye = StereoTargetEyeMask.None;
-        cam.enabled = false;  // manual render only
-
-        if (isUiOverlay)
-        {
-            cam.clearFlags = CameraClearFlags.Depth;
-            cam.backgroundColor = Color.clear;
-        }
-
-        try
-        {
-            var hd = cam.gameObject.GetComponent<HDAdditionalCameraData>()
-                  ?? cam.gameObject.AddComponent<HDAdditionalCameraData>();
-            hd.customRenderingSettings = false;
-            hd.flipYMode = HDAdditionalCameraData.FlipYMode.ForceFlipY;
-            Log.LogInfo($"[VRCamera] HDRP setup: customRS={hd.customRenderingSettings}" +
-                        $" flipY={hd.flipYMode}" +
-                        $" volumeLayerMask=0x{hd.volumeLayerMask.value:X8}" +
-                        $" on {cam.gameObject.name}");
-        }
-        catch (Exception ex)
-        {
-            Log.LogWarning($"[VRCamera] HDAdditionalCameraData setup failed: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Copies essential camera and HDRP settings from the game camera to a VR eye camera.
-    /// Called once when the game camera is discovered.  This ensures the VR cameras pick up
-    /// the same HDRP Volume stack, culling mask, clip planes, and lighting configuration.
-    /// </summary>
-    private void CopyGameCameraSettings(Camera src, Camera dst)
-    {
-        try
-        {
-            // ── Core camera properties ──
-            dst.clearFlags      = src.clearFlags;
-            dst.backgroundColor = src.backgroundColor;
-            dst.cullingMask     = src.cullingMask;
-            dst.nearClipPlane   = src.nearClipPlane;
-            dst.farClipPlane    = src.farClipPlane;
-            dst.allowHDR        = src.allowHDR;
-            dst.allowMSAA       = src.allowMSAA;
-            dst.renderingPath   = src.renderingPath;
-
-            // ── HDRP-specific settings ──
-            var srcHD = src.gameObject.GetComponent<HDAdditionalCameraData>();
-            var dstHD = dst.gameObject.GetComponent<HDAdditionalCameraData>();
-            if (srcHD != null && dstHD != null)
-            {
-                // Volume layer mask — controls which HDRP Volumes affect this camera.
-                // Without this, the VR camera won't pick up scene lighting, sky, or exposure.
-                dstHD.volumeLayerMask = srcHD.volumeLayerMask;
-                // Probe layer mask — controls which reflection probes affect this camera.
-                dstHD.probeLayerMask  = srcHD.probeLayerMask;
-                // Clear color mode (Sky, Color, None).
-                dstHD.clearColorMode  = srcHD.clearColorMode;
-                // Background color in HDR.
-                dstHD.backgroundColorHDR = srcHD.backgroundColorHDR;
-                // Anti-aliasing.
-                dstHD.antialiasing    = srcHD.antialiasing;
-                dstHD.dithering       = srcHD.dithering;
-                dstHD.stopNaNs        = srcHD.stopNaNs;
-                // Do NOT copy customRenderingSettings — keep it false so we inherit defaults.
-                dstHD.customRenderingSettings = false;
-                // Force HDRP to handle Y-flip for RT rendering.  This correctly
-                // inverts both the image orientation and face culling internally,
-                // without needing GL.invertCulling or projection matrix hacks.
-                dstHD.flipYMode = HDAdditionalCameraData.FlipYMode.ForceFlipY;
-
-                Log.LogInfo($"[VRCamera] Copied HDRP to {dst.gameObject.name}: " +
-                            $"volumeLayerMask=0x{dstHD.volumeLayerMask.value:X8} " +
-                            $"probeLayerMask=0x{dstHD.probeLayerMask.value:X8} " +
-                            $"clearColorMode={dstHD.clearColorMode} " +
-                            $"bgHDR={dstHD.backgroundColorHDR}");
-            }
-            else
-            {
-                Log.LogWarning($"[VRCamera] CopyGameCameraSettings: srcHD={srcHD != null} dstHD={dstHD != null}");
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.LogWarning($"[VRCamera] CopyGameCameraSettings failed for {dst.gameObject.name}: {ex.Message}");
-        }
+        transform.position = _gameCam.position;
     }
 
     private void LateUpdate()
@@ -1587,8 +1454,8 @@ public class VRCamera : MonoBehaviour
                 _leftCam.Render();
             }
 
-            bool leftOk = CopyEye(true, out uint leftIdx);
-            bool rightOk = CopyEye(false, out uint rightIdx);
+            bool leftOk = CameraRig.CopyEye("L", OpenXRManager.LeftSwapchain, OpenXRManager.LeftSwapchainImages, _leftRT, _frameCount, out uint leftIdx);
+            bool rightOk = CameraRig.CopyEye("R", OpenXRManager.RightSwapchain, OpenXRManager.RightSwapchainImages, _rightRT, _frameCount, out uint rightIdx);
 
             if (!leftOk || !rightOk)
             {
@@ -1623,65 +1490,6 @@ public class VRCamera : MonoBehaviour
         }
     }
 
-    private bool CopyEye(bool left, out uint imageIndex)
-    {
-        imageIndex = 0;
-        string eye = left ? "L" : "R";
-        ulong sc = left ? OpenXRManager.LeftSwapchain : OpenXRManager.RightSwapchain;
-        IntPtr[] images = left ? OpenXRManager.LeftSwapchainImages : OpenXRManager.RightSwapchainImages;
-        RenderTexture rt = left ? _leftRT : _rightRT;
-
-        if (sc == 0 || images == null || images.Length == 0 || rt == null)
-        {
-            Log.LogWarning($"[VRCamera] {eye} copy skipped - swapchain not ready");
-            return false;
-        }
-
-        if (!OpenXRManager.AcquireSwapchainImage(sc, out imageIndex))
-        {
-            Log.LogWarning($"[VRCamera] {eye} AcquireSwapchainImage failed");
-            return false;
-        }
-
-        if (!OpenXRManager.WaitSwapchainImage(sc))
-        {
-            Log.LogWarning($"[VRCamera] {eye} WaitSwapchainImage failed");
-            OpenXRManager.ReleaseSwapchainImage(sc);
-            return false;
-        }
-
-        if (imageIndex < (uint)images.Length)
-        {
-            // Guard: GetNativeTexturePtr() on a destroyed/uncreated RT returns a
-            // stale pointer. Passing it to D3D11 CopyResource crashes nvwgf2umx.dll
-            // with ACCESS_VIOLATION. Recreate if needed before touching the pointer.
-            if (!rt.IsCreated())
-            {
-                Log.LogWarning($"[VRCamera] {eye} RT not created — attempting recreate");
-                try { rt.Create(); }
-                catch (Exception ex) { Log.LogWarning($"[VRCamera] {eye} RT recreate failed: {ex.Message}"); }
-            }
-
-            if (!rt.IsCreated())
-            {
-                Log.LogWarning($"[VRCamera] {eye} RT still not created — skipping CopyResource");
-            }
-            else
-            {
-                IntPtr src = rt.GetNativeTexturePtr();
-                IntPtr dst = images[imageIndex];
-                if (_frameCount <= 3)
-                    Log.LogInfo($"[VRCamera] {eye} copy: src=0x{src:X} dst=0x{dst:X}");
-                if (src != IntPtr.Zero && dst != IntPtr.Zero)
-                    OpenXRManager.D3D11CopyTexture(src, dst);
-                else
-                    Log.LogWarning($"[VRCamera] {eye} copy skipped — null ptr src=0x{src:X} dst=0x{dst:X}");
-            }
-        }
-
-        OpenXRManager.ReleaseSwapchainImage(sc);
-        return true;
-    }
 
     /// <summary>
     /// Finds all root Screen Space canvases that have not been converted yet and
@@ -8623,41 +8431,6 @@ public class VRCamera : MonoBehaviour
                 Log.LogWarning($"[VRCamera] TryClickCanvas: {ex.Message}");
             }
         }
-    }
-
-    // OpenXR: right-handed (+Y up, +X right, -Z forward)
-    // Unity:  left-handed  (+Y up, +X right, +Z forward)
-    //
-    // Position: flip Z  →  (x, y, -z)
-    //
-    // Quaternion: change-of-basis M = diag(1,1,-1), conjugation q' = M·R(q)·M yields
-    //   q_Unity = (-qx, -qy, qz, qw)
-    //   (negate X and Y; keep Z and W)
-    //   Verified: pitch-up → -X ✓  yaw-left → -Y ✓  roll-right → -Z ✓
-    private static void ApplyCameraPose(Transform t, OpenXRManager.EyePose eye)
-    {
-        t.localPosition = new Vector3( eye.Position.x,
-                                        eye.Position.y,
-                                       -eye.Position.z);
-        t.localRotation = new Quaternion(-eye.Orientation.x,
-                                         -eye.Orientation.y,
-                                          eye.Orientation.z,
-                                          eye.Orientation.w);
-    }
-
-    // Off-centre perspective from OpenXR tangent-angle FOV.
-    // angleLeft ≤ 0, angleRight ≥ 0, angleUp ≥ 0, angleDown ≤ 0.
-    // Row 1 (Y) is negated to compensate for Unity D3D11 storing RenderTextures Y-flipped.
-    private static void SetProjection(Camera cam, OpenXRManager.EyePose eye)
-    {
-        float n = cam.nearClipPlane, f = cam.farClipPlane;
-        float l = Mathf.Tan(eye.FovLeft)  * n;
-        float r = Mathf.Tan(eye.FovRight) * n;
-        float t = Mathf.Tan(eye.FovUp)    * n;
-        float b = Mathf.Tan(eye.FovDown)  * n;
-        var m = Matrix4x4.Frustum(l, r, b, t, n, f);
-        // No manual Y-flip — HDRP handles it via HDAdditionalCameraData.flipYMode.
-        cam.projectionMatrix = m;
     }
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
