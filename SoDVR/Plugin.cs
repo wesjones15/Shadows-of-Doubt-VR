@@ -1,5 +1,4 @@
 using BepInEx;
-using BepInEx.Configuration;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
 using HarmonyLib;
@@ -14,20 +13,19 @@ public class Plugin : BasePlugin
 {
     public static new ManualLogSource Log { get; private set; } = null!;
     public static bool VREnabled { get; private set; }
-    public static ConfigEntry<bool> DisableGameBackgroundBlurConfig { get; private set; } = null!;
 
     public override void Load()
     {
         Log = base.Log;
         Log.LogInfo($"SoDVR {MyPluginInfo.PLUGIN_VERSION} loading...");
 
-        DisableGameBackgroundBlurConfig = Config.Bind(
-            "Development",
-            "DisableGameBackgroundBlur",
+        PostProcessingOverride.ForceDisableDepthOfField = Config.Bind(
+            "Rendering",
+            "ForceDisableDepthOfField",
             true,
-            "Forces InterfaceController.SetBackgroundBlur(false) every frame. The base VR mod's " +
-            "menus render blurred because the game blurs the world behind them; this is a temporary " +
-            "dev-time workaround until the menu/panel rewrite handles it properly.");
+            "Forces HDRP DepthOfField off on every Volume. Temporary dev workaround for menus/panels " +
+            "being blurred by the scene's post-processing stack while the panel rewrite is in progress " +
+            "— set false to restore normal depth of field.");
 
         if (Array.Exists(Environment.GetCommandLineArgs(), a => a == "--disable-vr"))
         {

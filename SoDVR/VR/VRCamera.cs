@@ -604,7 +604,7 @@ public class VRCamera : MonoBehaviour
         // Always drain the event queue so VDXR can advance the session state machine.
         OpenXRManager.PollEventsPublic();
 
-        BackgroundBlurController.Tick();
+        PostProcessingOverride.Tick();
 
         // Detect scene changes and apply a grace period during which we skip
         // ScanAndConvertCanvases.  This prevents us from touching canvas/camera
