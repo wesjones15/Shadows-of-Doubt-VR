@@ -1,0 +1,18 @@
+<!--
+  Per-developer build configuration.
+
+  SETUP:
+    Copy this file to Directory.Build.props (same folder) and set GameDir to
+    wherever you have Shadows of Doubt installed.  Directory.Build.props is in
+    .gitignore so your local path never ends up in the repository.
+
+  REQUIRED:
+    After building once, BepInEx will have generated the interop assemblies under
+    $(GameDir)\BepInEx\interop\.  These must exist before the project will compile.
+    See README.md §  Building from source for the full setup steps.
+-->
+<Project>
+  <PropertyGroup>
+    <GameDir>C:\Program Files (x86)\Steam\steamapps\common\Shadows of Doubt</GameDir>
+  </PropertyGroup>
+</Project>

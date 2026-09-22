@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SoDVR", "SoDVR\SoDVR.csproj", "{A04E03E0-5353-4453-AE03-CC048495BBFF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SoDVR.Preload", "SoDVR.Preload\SoDVR.Preload.csproj", "{4EAB44CE-2B58-4692-A437-6E733F02FAA1}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{A04E03E0-5353-4453-AE03-CC048495BBFF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A04E03E0-5353-4453-AE03-CC048495BBFF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A04E03E0-5353-4453-AE03-CC048495BBFF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A04E03E0-5353-4453-AE03-CC048495BBFF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4EAB44CE-2B58-4692-A437-6E733F02FAA1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4EAB44CE-2B58-4692-A437-6E733F02FAA1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4EAB44CE-2B58-4692-A437-6E733F02FAA1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4EAB44CE-2B58-4692-A437-6E733F02FAA1}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

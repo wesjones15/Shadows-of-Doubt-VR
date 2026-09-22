@@ -1,0 +1,37 @@
+# Build artifacts
+bin/
+obj/
+*.nupkg
+
+# Old Files folder
+Old Files/
+
+# IDE / editor
+.vs/
+*.user
+.idea/
+*.suo
+*.sln.docstates
+
+# NuGet local cache
+packages/
+.nuget/
+
+# Game runtime binaries (not source — obtained from game install)
+Assembly-CSharp.dll
+
+# Claude Code local session state
+.claude/
+CLAUDE.md
+HANDOVER.md
+HANDOVER_PROMPT.md
+
+# Proprietary Unity DLLs (not redistributable — obtain from your game/Unity install)
+RuntimeDeps/Managed/
+RuntimeDeps/Native/UnityOpenXR.dll
+
+# Per-developer build path override (copy Directory.Build.props.example → Directory.Build.props)
+Directory.Build.props
+
+# Release packages (built by scripts/pack.ps1)
+scripts/*.zip
