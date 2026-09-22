@@ -60,6 +60,7 @@ public class VRCamera : MonoBehaviour
     private readonly HeldItemTracker _heldItem = new();
     private readonly HudController _hud = new();
     private readonly LocomotionController _locomotion = new();
+    private readonly ControllerInteraction _controllerInteraction = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
     // The swapchain copy still runs every frame, so head tracking stays smooth via ATW.
@@ -142,9 +143,9 @@ public class VRCamera : MonoBehaviour
     // Ignored: transient/world-space canvases — never converted, never in depth scan.
     // HUD: body-locked (VROrigin yaw only), non-interactable, excluded from ray system.
     // CaseBoard: recentres on open, remembers relative layout, grip-relocatable.
-    private enum CanvasCategory { HUD, Menu, CaseBoard, Panel, Tooltip, Ignored, Default }
+    internal enum CanvasCategory { HUD, Menu, CaseBoard, Panel, Tooltip, Ignored, Default }
 
-    private readonly struct CanvasCategoryDefaults
+    internal readonly struct CanvasCategoryDefaults
     {
         public readonly float Distance;             // metres in front of head
         public readonly float VerticalOffset;       // metres above (+) / below (-) eye level
@@ -161,10 +162,10 @@ public class VRCamera : MonoBehaviour
           IsHUD = isHud; IsGripRelocatable = isGrip; }
     }
 
-    private static CanvasCategory GetCanvasCategory(string name)
+    internal static CanvasCategory GetCanvasCategory(string name)
         => s_canvasCategories.TryGetValue(name, out var c) ? c : CanvasCategory.Default;
 
-    private static CanvasCategoryDefaults GetCategoryDefaults(CanvasCategory cat)
+    internal static CanvasCategoryDefaults GetCategoryDefaults(CanvasCategory cat)
         => s_categoryDefaults.TryGetValue(cat, out var d) ? d : s_categoryDefaults[CanvasCategory.Default];
 
     // Canvas name → category.  Names are matched case-insensitively.
@@ -310,16 +311,6 @@ public class VRCamera : MonoBehaviour
     private LineRenderer? _laserLine;         // laser pointer beam from right controller
     private LineRenderer? _leftLaserLine;     // laser pointer beam from left controller (interact)
 
-    // ── Left hand interaction marker ─────────────────────────────────
-    private Canvas?    _leftDotCanvas;    // tiny WorldSpace canvas for aim dot
-    private Image?     _leftDotImage;     // dot image (for color changes)
-    private bool       _leftDotVisible;
-
-    // ── Left hand interactable label ─────────────────────────────────
-    private Canvas?          _leftLabelCanvas;     // small WorldSpace canvas for text
-    private TextMeshProUGUI? _leftLabelText;       // TMP text component
-    private bool             _leftLabelVisible;
-
     // ── Left hand raycast params (cached from game) ──────────────────
     private int   _interactionLayerMask = ~0;     // Toolbox.Instance.interactionRayLayerMask
     private float _baseInteractionRange = 1.85f;  // GameplayControls.Instance.interactionRange
@@ -375,7 +366,6 @@ public class VRCamera : MonoBehaviour
     // The dot moves via anchoredPosition (2D) inside this fixed-distance canvas.
     private Canvas?        _cursorCanvas;         // VRCursorCanvasInternal once scan converts it
     private RectTransform? _cursorRect;           // the dot's RectTransform inside _cursorCanvas
-    private Vector2        _cursorCanvasHalfSize; // half-size in canvas pixels; cached lazily
     private float          _cursorAimDepth = UIDistance - 0.01f; // head-fwd depth of nearest aimed-at canvas (for tooltips)
     private bool           _cursorHasTarget;      // true when depth scan found a canvas rect hit this frame
     private Canvas?        _cursorTargetCanvas;   // the nearest aimed-at canvas (for button mapping: A=RMB, B=MMB)
@@ -385,7 +375,6 @@ public class VRCamera : MonoBehaviour
     private bool           _menuCanvasHidden;    // tracks last hide state to avoid per-frame toggles
     private bool           _menuWasActive;       // tracks last isActiveAndEnabled to detect menu open transition
     private int            _menuSettingsBtnId;   // instanceID of the patched Settings button in MenuCanvas
-    private bool           _cursorVisible = false; // tracks SetActive state to avoid per-frame IL2CPP calls
 
     // ── Multi-dot aim system ─────────────────────────────────────────────────
     // World-space quads that show an aim dot on EVERY canvas the controller ray passes through,
@@ -394,7 +383,6 @@ public class VRCamera : MonoBehaviour
     private readonly List<GameObject> _aimDotPool = new();
     private const int   AimDotPoolSize = 8;
     private const float AimDotSize     = 0.012f; // 1.2 cm world-space quad
-    private readonly List<(float depth, Canvas canvas, Vector3 worldHit)> _aimDotHits = new();
     // Dedicated CaseCanvas (pin board) aim dot — separate from pool because
     // CaseCanvas fails standard bounds checks (sizeDelta doesn't match visual extent).
     private GameObject? _caseBoardDot;
@@ -481,8 +469,6 @@ public class VRCamera : MonoBehaviour
     // so we need independent tracking for edge detection here.
     private bool _cbABtnPrev;
     private bool _cbBBtnPrev;
-    private int         _poseFrameCount;
-    private bool        _poseEverValid;
 
     // Tracks canvas instance IDs whose QueueMap has already been logged, so rescans
     // don't spam the log every 30 frames.
@@ -791,7 +777,7 @@ public class VRCamera : MonoBehaviour
 
                 bool caseBoardOpenForInput = _actionPanelCanvas != null && _actionPanelCanvas.gameObject.activeSelf;
                 bool isPausedForLocomotion = caseBoardOpenForInput
-                                           || (_menuCanvasRef != null && !IsCanvasEffectivelyHidden(_menuCanvasRef));
+                                           || (_menuCanvasRef != null && !IsCanvasEffectivelyHidden(_menuCanvasRef, _noGroupInteractable));
                 bool vrSettingsOpenForInput = VRSettingsPanel.RootGO?.activeSelf == true;
 
                 _locomotion.UpdateSnapTurn(transform, _voidRoom.InVoidMode);
@@ -865,7 +851,7 @@ public class VRCamera : MonoBehaviour
                 if (!shouldDiscover && !_locomotion.HasPlayerController)
                 {
                     // Post-save/load path: wait for menu to close before discovering.
-                    bool menuGone = (_menuCanvasRef == null || IsCanvasEffectivelyHidden(_menuCanvasRef))
+                    bool menuGone = (_menuCanvasRef == null || IsCanvasEffectivelyHidden(_menuCanvasRef, _noGroupInteractable))
                                  && (_actionPanelCanvas == null || !_actionPanelCanvas.gameObject.activeSelf);
                     if (menuGone) shouldDiscover = true;
                 }
@@ -1023,6 +1009,8 @@ public class VRCamera : MonoBehaviour
 
         // Left hand interaction dot — tiny WorldSpace canvas with Image.
         // 3D sphere primitives don't render in HDRP VR eye cameras; WorldSpace Canvas does.
+        Canvas? leftDotCanvas = null;
+        Image? leftDotImage = null;
         try
         {
             var dotCanvasGO = new GameObject("VRLeftDotCanvas");
@@ -1045,10 +1033,9 @@ public class VRCamera : MonoBehaviour
             dotImgRT.anchorMin = Vector2.zero; dotImgRT.anchorMax = Vector2.one;
             dotImgRT.sizeDelta = Vector2.zero;
 
-            _leftDotCanvas = dotCanvas;
-            _leftDotImage = dotImg;
+            leftDotCanvas = dotCanvas;
+            leftDotImage = dotImg;
             dotCanvasGO.SetActive(false);
-            _leftDotVisible = false;
             Log.LogInfo("[VRCamera] VRLeftDotCanvas created (WorldSpace canvas dot)");
         }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] Left dot creation failed: {ex.Message}"); }
@@ -1056,14 +1043,16 @@ public class VRCamera : MonoBehaviour
         // Floating label for interactable name — small WorldSpace canvas with TMP text.
         // IL2CPP pitfall: AddComponent<TextMeshProUGUI>() on a GO that already has Image
         // returns null. Use SEPARATE child GOs for background and text.
+        Canvas? leftLabelCanvas = null;
+        TextMeshProUGUI? leftLabelText = null;
         try
         {
             var labelGO = new GameObject("VRLeftInteractLabel");
             labelGO.layer = UILayer;
             UnityEngine.Object.DontDestroyOnLoad(labelGO);
-            _leftLabelCanvas = labelGO.AddComponent<Canvas>();
-            _leftLabelCanvas.renderMode = RenderMode.WorldSpace;
-            _leftLabelCanvas.sortingOrder = 200;
+            leftLabelCanvas = labelGO.AddComponent<Canvas>();
+            leftLabelCanvas.renderMode = RenderMode.WorldSpace;
+            leftLabelCanvas.sortingOrder = 200;
             var labelRT = labelGO.GetComponent<RectTransform>();
             if (labelRT != null) labelRT.sizeDelta = new Vector2(400f, 60f);
             // Scale: 400px at 0.001 = 0.4m wide — readable at arm's length
@@ -1087,15 +1076,15 @@ public class VRCamera : MonoBehaviour
             var txtGO = new GameObject("LabelTMP");
             txtGO.layer = UILayer;
             txtGO.transform.SetParent(labelGO.transform, false);
-            _leftLabelText = txtGO.AddComponent<TextMeshProUGUI>();
-            Log.LogInfo($"[VRCamera] Label TMP AddComponent result: {(_leftLabelText != null ? "OK" : "NULL")}");
-            if (_leftLabelText != null)
+            leftLabelText = txtGO.AddComponent<TextMeshProUGUI>();
+            Log.LogInfo($"[VRCamera] Label TMP AddComponent result: {(leftLabelText != null ? "OK" : "NULL")}");
+            if (leftLabelText != null)
             {
-                _leftLabelText.fontSize = 32;
-                _leftLabelText.color = new Color(32f, 32f, 32f, 1f); // HDR white (HDRP text boost)
-                _leftLabelText.alignment = TextAlignmentOptions.Center;
-                _leftLabelText.raycastTarget = false;
-                _leftLabelText.text = "";
+                leftLabelText.fontSize = 32;
+                leftLabelText.color = new Color(32f, 32f, 32f, 1f); // HDR white (HDRP text boost)
+                leftLabelText.alignment = TextAlignmentOptions.Center;
+                leftLabelText.raycastTarget = false;
+                leftLabelText.text = "";
                 var txtRT = txtGO.GetComponent<RectTransform>();
                 if (txtRT != null)
                 {
@@ -1105,7 +1094,6 @@ public class VRCamera : MonoBehaviour
             }
 
             labelGO.SetActive(false);
-            _leftLabelVisible = false;
             Log.LogInfo("[VRCamera] VRLeftInteractLabel created");
         }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] Left label creation failed: {ex.Message}"); }
@@ -1238,6 +1226,8 @@ public class VRCamera : MonoBehaviour
             Log.LogWarning($"[VRCamera] Aim dot pool creation failed: {ex.Message}");
         }
 
+        _controllerInteraction.Discover(leftDotCanvas, leftDotImage, leftLabelCanvas, leftLabelText, _aimDotPool);
+
         // ── Phase 1: VR Settings Panel ───────────────────────────────────────────
         try
         {
@@ -1361,7 +1351,7 @@ public class VRCamera : MonoBehaviour
 
                 // UIPointerController positions run in Update; we override AFTER all Updates
                 // complete (LateUpdate) so our write wins over the game's garbage projection.
-                _hud.UpdatePointers(_leftCam, _poseFrameCount);
+                _hud.UpdatePointers(_leftCam, _controllerInteraction.PoseFrameCount);
 
                 // Awareness compass: reposition and reorient for VR head view.
                 _hud.UpdateCompass(_leftCam);
@@ -3315,7 +3305,7 @@ public class VRCamera : MonoBehaviour
     }
 
     // Returns true if the canvas is active, enabled, and not faded out via CanvasGroup.
-    private static bool IsCanvasVisible(Canvas canvas)
+    internal static bool IsCanvasVisible(Canvas canvas)
     {
         if (canvas == null) return false;
         if (!canvas.gameObject.activeSelf || !canvas.enabled) return false;
@@ -3335,7 +3325,7 @@ public class VRCamera : MonoBehaviour
     ///   2. No CanvasGroup at all AND not enough active Graphics to be considered "showing content"
     ///      (e.g. MenuCanvas when the pause menu is hidden has ~3 decorative Graphics).
     /// </summary>
-    private bool IsCanvasEffectivelyHidden(Canvas c)
+    internal static bool IsCanvasEffectivelyHidden(Canvas c, HashSet<int> noGroupInteractable)
     {
         bool hasCanvasGroup = false;
         try
@@ -3356,7 +3346,7 @@ public class VRCamera : MonoBehaviour
         if (!hasCanvasGroup)
         {
             int cid = c.GetInstanceID();
-            if (!_noGroupInteractable.Contains(cid)) return true;
+            if (!noGroupInteractable.Contains(cid)) return true;
         }
         return false;
     }
@@ -3369,119 +3359,18 @@ public class VRCamera : MonoBehaviour
     {
         if (_rightControllerGO == null) return;
 
-        bool poseOk = OpenXRManager.GetControllerPose(true, displayTime, out Quaternion ori, out Vector3 pos);
-
-        _poseFrameCount++;
-        if (!poseOk)
-        {
-            if (_cursorRect != null && _cursorVisible)
-                try { _cursorVisible = false; _cursorRect.gameObject.SetActive(false); } catch { }
-            if (!_poseEverValid && _poseFrameCount % 120 == 0)
-                Log.LogInfo($"[VRCamera] Controller pose not valid (frame {_poseFrameCount}) - waiting");
+        if (!_controllerInteraction.UpdateRightPose(displayTime, transform, _rightControllerGO,
+                _cursorRect, _cursorCanvas, _managedCanvases))
             return;
-        }
-
-        if (!_poseEverValid)
-        {
-            _poseEverValid = true;
-            Log.LogInfo($"[VRCamera] Controller pose FIRST VALID at frame {_poseFrameCount}: pos={pos} ori={ori}");
-            Log.LogInfo($"[VRCamera] First valid pose: cursorRect={_cursorRect != null} cursorCanvas={_cursorCanvas != null} managedCanvases={_managedCanvases.Count}");
-        }
-
-        var uPos = new Vector3(pos.x, pos.y, -pos.z);
-        var uOri = new Quaternion(-ori.x, -ori.y, ori.z, ori.w);
-
-        _rightControllerGO.transform.position = transform.TransformPoint(uPos);
-        _rightControllerGO.transform.rotation = transform.rotation * uOri;
 
         // Grip-drag: move CaseBoard canvases with the grip button.
         UpdateGripDrag(displayTime);
 
-        // Cursor dot: project controller ray onto the cursor canvas plane (always UIDistance
-        // in front of the head), then set anchoredPosition to move the dot within the canvas.
-        if (_cursorRect != null && _cursorCanvas != null)
-        {
-            // Lazily cache the cursor canvas half-size (available only after WorldSpace conversion).
-            if (_cursorCanvasHalfSize == Vector2.zero)
-            {
-                var crt = _cursorCanvas.GetComponent<RectTransform>();
-                if (crt != null && crt.sizeDelta.x > 0)
-                    _cursorCanvasHalfSize = crt.sizeDelta * 0.5f;
-            }
-
-            Vector3 ctrlPos = _rightControllerGO.transform.position;
-            Vector3 ctrlFwd = _rightControllerGO.transform.forward;
-            var ray = new Ray(ctrlPos, ctrlFwd);
-
-            var cursorPlane = new Plane(-_cursorCanvas.transform.forward, _cursorCanvas.transform.position);
-            if (cursorPlane.Raycast(ray, out float cd) && cd > 0f)
-            {
-                Vector3 localHit = _cursorCanvas.transform.InverseTransformPoint(ctrlPos + ctrlFwd * cd);
-
-                // Hide cursor if ray hits the canvas plane but lands outside the canvas rect.
-                bool inBounds = _cursorCanvasHalfSize == Vector2.zero  // not yet cached — allow
-                             || (Mathf.Abs(localHit.x) <= _cursorCanvasHalfSize.x
-                              && Mathf.Abs(localHit.y) <= _cursorCanvasHalfSize.y);
-
-                if (inBounds)
-                {
-                    _cursorRect.anchoredPosition = new Vector2(localHit.x, localHit.y);
-                    if (!_cursorVisible) { _cursorVisible = true; _cursorRect.gameObject.SetActive(true); }
-
-                    if (_poseFrameCount <= 5 || (_poseFrameCount % 120) == 0)
-                        Log.LogInfo($"[VRCamera] Cursor: dist={cd:F2} px=({localHit.x:F0},{localHit.y:F0})");
-                }
-                else
-                {
-                    if (_cursorVisible) { _cursorVisible = false; _cursorRect.gameObject.SetActive(false); }
-                }
-            }
-            else
-            {
-                if (_cursorVisible) { _cursorVisible = false; _cursorRect.gameObject.SetActive(false); }
-            }
-        }
-
-        // Laser pointer: draw a beam from the controller forward to the cursor target (or 3 m).
-        if (_laserLine != null && _rightControllerGO != null)
-        {
-            try
-            {
-                Vector3 laserStart = _rightControllerGO.transform.position;
-                Vector3 laserEnd   = _cursorHasTarget
-                    ? _cursorTargetPos
-                    : (laserStart + _rightControllerGO.transform.forward * 3.0f);
-                _laserLine.SetPosition(0, laserStart);
-                _laserLine.SetPosition(1, laserEnd);
-                if (!_laserLine.enabled) _laserLine.enabled = true;
-            }
-            catch { }
-        }
-
-        // Left laser pointer: toggled via VR Settings "Left Laser" toggle.
-        if (_leftLaserLine != null && _leftControllerGO != null)
-        {
-            bool showLeft = VRSettingsPanel.LeftLaserEnabled;
-            if (showLeft)
-            {
-                try
-                {
-                    Vector3 lStart = _leftControllerGO.transform.position;
-                    Vector3 lEnd   = lStart + _leftControllerGO.transform.forward * 3.0f;
-                    _leftLaserLine.SetPosition(0, lStart);
-                    _leftLaserLine.SetPosition(1, lEnd);
-                    if (!_leftLaserLine.enabled) _leftLaserLine.enabled = true;
-                }
-                catch { }
-            }
-            else if (_leftLaserLine.enabled)
-            {
-                _leftLaserLine.enabled = false;
-            }
-        }
-
-        // Left hand interaction marker: dot at hit point + floating label for interactables.
-        UpdateLeftInteractMarker();
+        _controllerInteraction.UpdateCursorDot(_cursorRect, _cursorCanvas, _rightControllerGO);
+        _controllerInteraction.UpdateLaser(_laserLine, _rightControllerGO, _cursorHasTarget, _cursorTargetPos);
+        _controllerInteraction.UpdateLeftLaser(_leftLaserLine, _leftControllerGO);
+        _controllerInteraction.UpdateLeftInteractMarker(_leftControllerGO, _menuCanvasRef, _gameCamRef,
+            _leftCam, _interactionLayerMask, _baseInteractionRange);
 
         // Pre-scan: re-enforce ALL canvas VR poses that were snapshotted in the last pre-render.
         // The game overwrites canvas transforms between our LateUpdate/pre-render and this Update.
@@ -3684,124 +3573,17 @@ public class VRCamera : MonoBehaviour
             }
         }
 
-        // Depth scan: find ALL managed canvases the controller ray hits within their rects.
-        // The nearest hit drives the primary cursor canvas (for click targeting / tooltip depth).
-        // Every hit gets a world-space aim dot so the user can see aim on canvases behind others.
-        _aimDotHits.Clear();
-        if (_rightControllerGO != null && _leftCam != null)
-        {
-            Vector3 dCtrlPos = _rightControllerGO.transform.position;
-            Vector3 dCtrlFwd = _rightControllerGO.transform.forward;
-            Vector3 dHeadPos = _leftCam.transform.position;
-            Vector3 dHeadFwd = _leftCam.transform.forward;
-            float   bestDepth     = float.MaxValue;
-            Canvas? bestCanvas    = null;
-            bool    foundHit      = false;
-            float nearestPlane = float.MaxValue;
-
-            foreach (var kvp in _managedCanvases)
-            {
-                var c = kvp.Value;
-                if (c == null) continue;
-                if (!c.gameObject.activeSelf || !c.enabled) continue;
-                if (IsCanvasEffectivelyHidden(c)) continue;
-                if (_cursorCanvas != null && c.GetInstanceID() == _cursorCanvas.GetInstanceID()) continue;
-                if (c.gameObject.name?.IndexOf("VRCursor", StringComparison.OrdinalIgnoreCase) >= 0) continue;
-                if (GetCategoryDefaults(GetCanvasCategory(c.gameObject.name)).RepositionEveryFrame)
-                {
-                    // RepositionEveryFrame canvases (TooltipCanvas) are normally skip —
-                    // EXCEPT when context menu is active (frozen in place, plane is valid)
-                    // or when a dialog popup is showing.
-                    if (!_prevContextMenuActive)
-                    {
-                        bool dialogUp = (_popupMessageGO != null && _popupMessageGO.activeSelf)
-                                     || (_tutorialMessageGO != null && _tutorialMessageGO.activeSelf);
-                        if (!dialogUp) continue;
-                    }
-                }
-                var aimCat = GetCanvasCategory(c.gameObject.name);
-                if (aimCat == CanvasCategory.HUD) continue;
-                // DIAGNOSTIC: when case board is open, track which canvases absorb the cursor
-                // to identify invisible blockers at pin board edges.
-                // Allow grip-dragged notes through — they have independent world transforms
-                if (_nestedCanvasIds.Contains(kvp.Key))
-                {
-                    if (!_nestedDragTransforms.ContainsKey(c.gameObject.GetInstanceID())) continue;
-                }
-
-                var pl = new Plane(-c.transform.forward, c.transform.position);
-                if (!pl.Raycast(new Ray(dCtrlPos, dCtrlFwd), out float hitDist) || hitDist <= 0f) continue;
-
-                float depth = Vector3.Dot(c.transform.position - dHeadPos, dHeadFwd);
-                if (depth > 0f && depth < nearestPlane) nearestPlane = depth;
-
-                // Bounds check: only count as a hit when ray lands inside the canvas rect.
-                Vector3 worldHitPt = dCtrlPos + dCtrlFwd * hitDist;
-                Vector3 lp = c.transform.InverseTransformPoint(worldHitPt);
-                var rt = c.GetComponent<RectTransform>();
-                if (rt != null)
-                {
-                    // Standard centered-pivot bounds check (works reliably in IL2CPP).
-                    // Context menu bounds are handled by ContextMenus canvas directly (post-loop).
-                    Vector2 hs = rt.sizeDelta * 0.5f;
-                    bool boundsPass = Mathf.Abs(lp.x) <= hs.x && Mathf.Abs(lp.y) <= hs.y;
-                    if (!boundsPass) continue;
-                }
-
-                // Record this hit for aim dot positioning
-                _aimDotHits.Add((depth, c, worldHitPt));
-
-                if (!foundHit || depth < bestDepth) { bestDepth = depth; bestCanvas = c; foundHit = true; }
-            }
-
-            // NOTE: Context menu aim dot is now handled by the main loop above —
-            // TooltipCanvas is no longer skipped when _prevContextMenuActive is true.
-            // Since ContextMenus localPosition is zeroed (content at canvas center),
-            // the TooltipCanvas plane correctly matches the visual position.
-
-            if (foundHit && bestCanvas != null)
-            {
-                _cursorHasTarget   = true;
-                _cursorTargetCanvas = bestCanvas;
-                _cursorTargetPos   = bestCanvas.transform.position;
-                _cursorTargetRot   = bestCanvas.transform.rotation;
-                _cursorAimDepth    = bestDepth - 0.01f;
-
-            }
-            else
-            {
-                _cursorHasTarget = false;
-                _cursorTargetCanvas = null;
-                if (nearestPlane < float.MaxValue) _cursorAimDepth = nearestPlane - 0.01f;
-            }
-        }
-
-        // Position world-space aim dots at every canvas hit point.
-        {
-            int dotIdx = 0;
-            for (int hi = 0; hi < _aimDotHits.Count && dotIdx < _aimDotPool.Count; hi++)
-            {
-                var hit = _aimDotHits[hi];
-                var dot = _aimDotPool[dotIdx];
-                try
-                {
-                    // Face the dot toward the head, 5mm in front of the canvas surface
-                    Vector3 toHead = (_leftCam != null)
-                        ? (_leftCam.transform.position - hit.worldHit).normalized
-                        : -hit.canvas.transform.forward;
-                    dot.transform.position = hit.worldHit + toHead * 0.005f;
-                    dot.transform.rotation = Quaternion.LookRotation(-toHead);
-                    if (!dot.activeSelf) dot.SetActive(true);
-                }
-                catch { }
-                dotIdx++;
-            }
-            // Hide unused dots
-            for (int i = dotIdx; i < _aimDotPool.Count; i++)
-            {
-                try { if (_aimDotPool[i].activeSelf) _aimDotPool[i].SetActive(false); } catch { }
-            }
-        }
+        // Depth scan: find ALL managed canvases the controller ray hits within their rects, and
+        // render a world-space aim dot at every hit. The nearest hit drives the primary cursor
+        // canvas (for click targeting / tooltip depth).
+        var aim = _controllerInteraction.ScanAndRenderAimDots(_rightControllerGO, _leftCam,
+            _managedCanvases, _cursorCanvas, _prevContextMenuActive, _popupMessageGO, _tutorialMessageGO,
+            _nestedCanvasIds, _nestedDragTransforms, _noGroupInteractable);
+        _cursorHasTarget    = aim.HasTarget;
+        _cursorTargetCanvas = aim.TargetCanvas;
+        _cursorTargetPos    = aim.TargetPos;
+        _cursorTargetRot    = aim.TargetRot;
+        _cursorAimDepth     = aim.AimDepth;
 
         // Undo the WindowCanvas world-position shift applied before the aim dot scan.
         // The shift was needed so the aim dot scan+placement aligns with the Note visual.
@@ -5171,28 +4953,8 @@ public class VRCamera : MonoBehaviour
             }
         }
 
-        // Thumbstick Y scrolls the VR settings panel when it is open.
-        // Dead-zone: ignore values < 0.2 to prevent drift.
-        if (VRSettingsPanel.RootGO?.activeSelf == true)
-        {
-            if (OpenXRManager.GetThumbstickState(true, out float tx, out float ty))
-            {
-                const float deadZone   = 0.20f;
-                const float scrollRate = 6.0f;  // pixels per frame at full deflection
-                if (Mathf.Abs(ty) > deadZone)
-                    VRSettingsPanel.Scroll(-ty * scrollRate); // negative: stick up → scroll up (lower y)
-            }
-        }
-
-        // Left controller pose
-        if (_leftControllerGO != null &&
-            OpenXRManager.GetControllerPose(false, displayTime, out Quaternion lOri, out Vector3 lPos))
-        {
-            var ulPos = new Vector3(lPos.x, lPos.y, -lPos.z);
-            var ulOri = new Quaternion(-lOri.x, -lOri.y, lOri.z, lOri.w);
-            _leftControllerGO.transform.position = transform.TransformPoint(ulPos);
-            _leftControllerGO.transform.rotation = transform.rotation * ulOri;
-        }
+        _controllerInteraction.UpdateVrSettingsScroll();
+        _controllerInteraction.UpdateLeftPose(displayTime, transform, _leftControllerGO);
     }
 
     private void UpdateGripDrag(long displayTime)
@@ -5255,7 +5017,7 @@ public class VRCamera : MonoBehaviour
                 var visCat = GetCanvasCategory(kvpVis.Value.gameObject.name);
                 if (visCat == CanvasCategory.Menu || visCat == CanvasCategory.Panel)
                 {
-                    if (!IsCanvasEffectivelyHidden(kvpVis.Value))
+                    if (!IsCanvasEffectivelyHidden(kvpVis.Value, _noGroupInteractable))
                     { anyInteractiveVisible = true; break; }
                 }
             }
@@ -5526,165 +5288,6 @@ public class VRCamera : MonoBehaviour
             Log.LogInfo($"[VRCamera] GripDrag end: '{_gripDragCanvas.gameObject.name}'");
             _gripDragCanvas = null;
         }
-    }
-
-    /// <summary>
-    /// Left controller interaction marker: dot at hit point + floating label for interactables.
-    /// Runs every frame — independent of laser visibility (LineRenderers don't render in VR).
-    /// </summary>
-    private void UpdateLeftInteractMarker()
-    {
-        if (_leftControllerGO == null) return;
-        // Skip when VR Settings panel or pause menu is open
-        if (VRSettingsPanel.RootGO?.activeSelf == true) return;
-        bool menuOpen = _menuCanvasRef != null && _menuCanvasRef.isActiveAndEnabled;
-        if (menuOpen)
-        {
-            if (_leftDotVisible  && _leftDotCanvas != null) { _leftDotCanvas.gameObject.SetActive(false); _leftDotVisible = false; }
-            if (_leftLabelVisible && _leftLabelCanvas != null) { _leftLabelCanvas.gameObject.SetActive(false); _leftLabelVisible = false; }
-            return;
-        }
-
-        try
-        {
-
-            // Ray origin: Camera.main position (head/eye level) — same as the game's
-            // InteractionController. Controller rotation only (not position).
-            Vector3 lStart = _gameCamRef != null ? _gameCamRef.transform.position
-                                                 : _leftControllerGO.transform.position;
-            Vector3 lDir   = _leftControllerGO.transform.forward;
-            float   lRange = 12.0f;  // same as game's raycast distance
-            bool    didHit = false;
-            bool    isInteractable = false;
-            InteractableController? hitIC = null;
-            RaycastHit lHit = default;
-
-            if (Physics.Raycast(new Ray(lStart, lDir), out lHit, lRange, _interactionLayerMask))
-            {
-                didHit = true;
-                // Walk up hierarchy (max 6 levels) for InteractableController
-                try
-                {
-                    var tr = lHit.collider.transform;
-                    for (int i = 0; i < 6 && tr != null; i++)
-                    {
-                        var ic = tr.gameObject.GetComponent<InteractableController>();
-                        if (ic != null)
-                        {
-                            hitIC = ic;
-                            // Check if within interaction range (game's GetReachDistance)
-                            float reachDist = _baseInteractionRange;
-                            try
-                            {
-                                if (ic.interactable != null)
-                                    reachDist = ic.interactable.GetReachDistance();
-                            }
-                            catch { }
-                            if (lHit.distance <= reachDist)
-                                isInteractable = true;
-                            break;
-                        }
-                        tr = tr.parent;
-                    }
-                }
-                catch { }
-            }
-
-
-            // ── Dot: WorldSpace canvas at hit point ──────────────────────
-            if (_leftDotCanvas != null)
-            {
-                if (didHit)
-                {
-                    _leftDotCanvas.transform.position = lHit.point + lHit.normal * 0.005f; // slight offset from surface
-                    // Billboard toward VR head
-                    if (_leftCam != null)
-                        _leftDotCanvas.transform.rotation = _leftCam.transform.rotation;
-                    // Color: green when interactable, cyan otherwise
-                    if (_leftDotImage != null)
-                    {
-                        _leftDotImage.color = isInteractable
-                            ? new Color(0f, 64f, 0f, 1f)   // HDR green
-                            : new Color(0f, 64f, 64f, 1f);  // HDR cyan
-                    }
-                    if (!_leftDotVisible) { _leftDotCanvas.gameObject.SetActive(true); _leftDotVisible = true; }
-                }
-                else if (_leftDotVisible)
-                {
-                    _leftDotCanvas.gameObject.SetActive(false);
-                    _leftDotVisible = false;
-                }
-            }
-
-            // ── Label: only when pointing at an interactable within range ─
-            if (_leftLabelCanvas != null)
-            {
-                if (isInteractable && hitIC != null)
-                {
-                    // Build label: object name + available actions
-                    string objName = "";
-                    try
-                    {
-                        if (hitIC.interactable != null)
-                            objName = hitIC.interactable.GetName();
-                        if (string.IsNullOrEmpty(objName))
-                            objName = hitIC.gameObject.name ?? "?";
-                    }
-                    catch { objName = hitIC.gameObject.name ?? "?"; }
-
-                    // Get action text from game's current interaction state.
-                    // We read currentInteractions regardless of which direction the head camera
-                    // is aimed — the label shows actions for what the HAND is pointing at.
-                    string actionText = "";
-                    try
-                    {
-                        var ic2 = InteractionController.Instance;
-                        if (ic2?.currentInteractions != null)
-                        {
-                            foreach (var kvp in ic2.currentInteractions)
-                            {
-                                if (kvp.Value?.currentSetting == null) continue;
-                                if (!kvp.Value.currentSetting.enabled || !kvp.Value.currentSetting.display) continue;
-                                string aText = kvp.Value.actionText ?? "";
-                                if (!string.IsNullOrEmpty(aText))
-                                {
-                                    if (actionText.Length > 0) actionText += " | ";
-                                    actionText += aText;
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-
-                    string fullLabel = string.IsNullOrEmpty(actionText) ? objName : $"{objName}\n{actionText}";
-                    if (_leftLabelText != null)
-                        _leftLabelText.text = fullLabel;
-
-                    // Position: at hit point, offset 0.08m above, billboard toward VR head
-                    Vector3 labelPos = lHit.point + Vector3.up * 0.08f;
-                    _leftLabelCanvas.transform.position = labelPos;
-                    if (_leftCam != null)
-                    {
-                        // Billboard: face toward VR camera, Y-axis only (no tilt)
-                        Vector3 toCam = _leftCam.transform.position - labelPos;
-                        toCam.y = 0f;
-                        if (toCam.sqrMagnitude > 0.001f)
-                            _leftLabelCanvas.transform.rotation = Quaternion.LookRotation(-toCam, Vector3.up);
-                    }
-                    if (!_leftLabelVisible)
-                    {
-                        _leftLabelCanvas.gameObject.SetActive(true);
-                        _leftLabelVisible = true;
-                    }
-                }
-                else if (_leftLabelVisible)
-                {
-                    _leftLabelCanvas.gameObject.SetActive(false);
-                    _leftLabelVisible = false;
-                }
-            }
-        }
-        catch { }
     }
 
 
@@ -6656,7 +6259,7 @@ public class VRCamera : MonoBehaviour
             var clickCat = GetCanvasCategory(canvas.gameObject.name);
             if (clickCat == CanvasCategory.HUD || clickCat == CanvasCategory.Ignored) continue;
             // Skip canvases hidden via CanvasGroup OR all-children-inactive (MenuCanvas).
-            if (IsCanvasEffectivelyHidden(canvas)) continue;
+            if (IsCanvasEffectivelyHidden(canvas, _noGroupInteractable)) continue;
             // Include nested canvases in hit testing — they have their own GraphicRaycasters
             // and their graphics are NOT visible to the parent canvas's raycaster.
             // (Previously excluded, but that caused WindowCanvas to fall through to CaseCanvas.)
