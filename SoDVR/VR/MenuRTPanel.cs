@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using BepInEx.Logging;
 using UnityEngine;
-using UnityEngine.Rendering.HighDefinition;
 using UnityEngine.UI;
 
 namespace SoDVR.VR;
@@ -258,8 +257,8 @@ internal sealed class MenuRTPanel
         _rt.Create();
 
         int canvasLayer = canvas.gameObject.layer;
-        SetupProjectorCamera(canvasLayer);
-        _projectorCam!.targetTexture = _rt;
+        _projectorCam = CameraRig.SetupRTPanelProjectorCamera("MenuRTPanel", canvasLayer);
+        _projectorCam.targetTexture = _rt;
 
         canvas.renderMode   = RenderMode.ScreenSpaceCamera;
         canvas.worldCamera  = _projectorCam;
@@ -273,86 +272,15 @@ internal sealed class MenuRTPanel
         }
         catch (Exception ex) { Log.LogWarning($"[MenuRTPanel] GraphicRaycaster setup: {ex.Message}"); }
 
-        CreateQuad();
+        (_quadGO, _quadCollider, _quadMaterial) = CameraRig.CreateRTPanelQuad("MenuRTPanel", _quadLayer, _rt);
         float worldH = PanelWorldWidth * ((float)rtH / rtW);
-        _quadGO!.transform.localScale = new Vector3(PanelWorldWidth, worldH, 1f);
+        _quadGO.transform.localScale = new Vector3(PanelWorldWidth, worldH, 1f);
 
-        _pointer.Bind(canvas, _quadCollider!, _rt);
+        _pointer.Bind(canvas, _quadCollider, _rt);
 
         var patchedId = CanvasConversionScanner.PatchMenuSettingsButton(canvas);
         if (patchedId.HasValue) _settingsBtnId = patchedId.Value;
 
         Log.LogInfo($"[MenuRTPanel] Setup complete: rt={rtW}x{rtH} worldSize={PanelWorldWidth:F2}x{worldH:F2}m canvasLayer={canvasLayer}");
-    }
-
-    private void SetupProjectorCamera(int canvasLayer)
-    {
-        var camGO = new GameObject("SoDVR_MenuRTPanel_Camera");
-        UnityEngine.Object.DontDestroyOnLoad(camGO);
-        _projectorCam = camGO.AddComponent<Camera>();
-        _projectorCam.enabled = false; // manual render only
-        _projectorCam.stereoTargetEye = StereoTargetEyeMask.None;
-        _projectorCam.cullingMask = 1 << canvasLayer;
-        _projectorCam.clearFlags = CameraClearFlags.SolidColor;
-        _projectorCam.backgroundColor = Color.black;
-        _projectorCam.nearClipPlane = 0.01f;
-        _projectorCam.farClipPlane = 10f;
-
-        try
-        {
-            var hd = camGO.AddComponent<HDAdditionalCameraData>();
-            // Explicit clear settings rather than the component defaults — a fresh
-            // HDAdditionalCameraData defaults clearColorMode to Sky, not transparent/solid,
-            // which caused real problems twice earlier in this project (see CameraRig.cs history).
-            hd.clearColorMode    = HDAdditionalCameraData.ClearColorMode.Color;
-            hd.backgroundColorHDR = Color.black;
-            hd.clearDepth         = true;
-            // TAA, not None: the "no AA" rule elsewhere in this codebase (CameraRig.SetupUICam)
-            // is specifically about two cameras writing into the SAME shared RT, where a second
-            // camera's TAA history has nothing valid to reproject against — the actual cause of
-            // this project's earlier ghosting bug. This camera owns its RT exclusively and renders
-            // it every frame on its own, so that concern doesn't apply, and leaving AA off was
-            // just making the panel's text/edges alias badly for no benefit.
-            hd.antialiasing       = HDAdditionalCameraData.AntialiasingMode.TemporalAntialiasing;
-            // No scene HDRP Volume should influence a flat UI render — safe to zero out because
-            // ExposureControl is explicitly disabled below too (unlike VoidRoom's camera, which
-            // needs volumeLayerMask left alone specifically because it still needs exposure).
-            hd.volumeLayerMask = 0;
-
-            // Backing-field property, not the ref-returning renderingPathCustomFrameSettings
-            // getter — confirmed this session that ref-return writes don't persist over this
-            // IL2CPP interop boundary while this one does (see git history around CameraRig.cs).
-            hd.customRenderingSettings = true;
-            var fs = FrameSettings.NewDefaultCamera();
-            fs.SetEnabled(FrameSettingsField.Postprocess, false);
-            fs.SetEnabled(FrameSettingsField.ExposureControl, false);
-            var mask = new FrameSettingsOverrideMask();
-            mask.mask[(uint)FrameSettingsField.Postprocess] = true;
-            mask.mask[(uint)FrameSettingsField.ExposureControl] = true;
-            hd.renderingPathCustomFrameSettingsOverrideMask = mask;
-            hd.m_RenderingPathCustomFrameSettings = fs;
-
-            Log.LogInfo($"[MenuRTPanel] Projector camera HDRP setup: clearColorMode={hd.clearColorMode} " +
-                        $"customRS={hd.customRenderingSettings} cullingMask=0x{_projectorCam.cullingMask:X8}");
-        }
-        catch (Exception ex) { Log.LogWarning($"[MenuRTPanel] Projector camera HDRP setup failed: {ex.Message}"); }
-    }
-
-    private void CreateQuad()
-    {
-        _quadGO = GameObject.CreatePrimitive(PrimitiveType.Quad);
-        _quadGO.name = "SoDVR_MenuRTPanel_Quad";
-        _quadGO.layer = _quadLayer;
-        UnityEngine.Object.DontDestroyOnLoad(_quadGO);
-
-        _quadCollider = _quadGO.GetComponent<Collider>();
-
-        var mr = _quadGO.GetComponent<MeshRenderer>();
-        var shader = Shader.Find("UI/Default");
-        _quadMaterial = shader != null ? new Material(shader) : mr.material;
-        _quadMaterial.mainTexture = _rt;
-        mr.material = _quadMaterial;
-
-        _quadGO.SetActive(false); // hidden until first placed and shown
     }
 }

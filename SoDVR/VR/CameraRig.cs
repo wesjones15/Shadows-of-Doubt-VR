@@ -284,4 +284,89 @@ internal static class CameraRig
         }
         catch (Exception ex) { Log.LogWarning($"[CameraRig] SetupPostFXExemptPass failed: {ex.Message}"); }
     }
+
+    /// <summary>
+    /// Builds a manually-rendered, fully independent camera for an RT panel (MenuRTPanel,
+    /// TooltipRTPanel, ...): post-processing and exposure disabled, solid-color clear, TAA (this
+    /// camera owns its RenderTexture exclusively and renders it every frame on its own, so TAA's
+    /// per-camera history has something valid to reproject against — unlike SetupUICam's shared-RT
+    /// case above, where two cameras writing into the same target is what caused this project's
+    /// ghosting bug). Caller still needs to set <c>targetTexture</c> once the panel's RenderTexture
+    /// exists, and give it a name for logging.
+    /// </summary>
+    public static Camera SetupRTPanelProjectorCamera(string logTag, int cullingLayer)
+    {
+        var camGO = new GameObject($"SoDVR_{logTag}_Camera");
+        UnityEngine.Object.DontDestroyOnLoad(camGO);
+        var cam = camGO.AddComponent<Camera>();
+        cam.enabled = false; // manual render only
+        cam.stereoTargetEye = StereoTargetEyeMask.None;
+        cam.cullingMask = 1 << cullingLayer;
+        cam.clearFlags = CameraClearFlags.SolidColor;
+        cam.backgroundColor = Color.black;
+        cam.nearClipPlane = 0.01f;
+        cam.farClipPlane = 10f;
+
+        try
+        {
+            var hd = camGO.AddComponent<HDAdditionalCameraData>();
+            // Explicit clear settings rather than the component defaults — a fresh
+            // HDAdditionalCameraData defaults clearColorMode to Sky, not transparent/solid, which
+            // caused real problems twice earlier in this project.
+            hd.clearColorMode     = HDAdditionalCameraData.ClearColorMode.Color;
+            hd.backgroundColorHDR = Color.black;
+            hd.clearDepth         = true;
+            hd.antialiasing       = HDAdditionalCameraData.AntialiasingMode.TemporalAntialiasing;
+            // No scene HDRP Volume should influence a flat UI render — safe to zero out because
+            // ExposureControl is explicitly disabled below too (unlike VoidRoom's camera, which
+            // needs volumeLayerMask left alone specifically because it still needs exposure).
+            hd.volumeLayerMask = 0;
+
+            // Backing-field property, not the ref-returning renderingPathCustomFrameSettings
+            // getter — confirmed this session that ref-return writes don't persist over this
+            // IL2CPP interop boundary while this one does.
+            hd.customRenderingSettings = true;
+            var fs = FrameSettings.NewDefaultCamera();
+            fs.SetEnabled(FrameSettingsField.Postprocess, false);
+            fs.SetEnabled(FrameSettingsField.ExposureControl, false);
+            var mask = new FrameSettingsOverrideMask();
+            mask.mask[(uint)FrameSettingsField.Postprocess] = true;
+            mask.mask[(uint)FrameSettingsField.ExposureControl] = true;
+            hd.renderingPathCustomFrameSettingsOverrideMask = mask;
+            hd.m_RenderingPathCustomFrameSettings = fs;
+
+            Log.LogInfo($"[CameraRig] RT panel projector camera '{logTag}' HDRP setup: " +
+                        $"clearColorMode={hd.clearColorMode} customRS={hd.customRenderingSettings} " +
+                        $"cullingMask=0x{cam.cullingMask:X8}");
+        }
+        catch (Exception ex) { Log.LogWarning($"[CameraRig] RT panel projector camera '{logTag}' HDRP setup failed: {ex.Message}"); }
+
+        return cam;
+    }
+
+    /// <summary>
+    /// A plain world-space quad displaying an RT panel's RenderTexture — the same
+    /// CreatePrimitive(Quad) + UI/Default-shader pattern this codebase's aim-dot pool already uses.
+    /// Returns the quad, its own MeshCollider (for RTPanelPointer's ray-vs-quad hit test), and the
+    /// material (rarely needed by the caller, returned for completeness/future retexturing).
+    /// </summary>
+    public static (GameObject quad, Collider collider, Material material) CreateRTPanelQuad(
+        string logTag, int layer, RenderTexture rt)
+    {
+        var quadGO = GameObject.CreatePrimitive(PrimitiveType.Quad);
+        quadGO.name = $"SoDVR_{logTag}_Quad";
+        quadGO.layer = layer;
+        UnityEngine.Object.DontDestroyOnLoad(quadGO);
+
+        var collider = quadGO.GetComponent<Collider>();
+
+        var mr = quadGO.GetComponent<MeshRenderer>();
+        var shader = Shader.Find("UI/Default");
+        var material = shader != null ? new Material(shader) : mr.material;
+        material.mainTexture = rt;
+        mr.material = material;
+
+        quadGO.SetActive(false); // hidden until the owner places and shows it
+        return (quadGO, collider, material);
+    }
 }

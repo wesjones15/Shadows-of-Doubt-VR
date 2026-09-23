@@ -35,6 +35,13 @@ internal sealed class RTPanelPointer
     private Collider? _quadCollider;
     private RenderTexture? _rt;
 
+    // Nested content canvases (e.g. a dialog box nested inside a bigger panel canvas) that also
+    // need hit-testing — Unity's GraphicRaycaster only resolves Graphics belonging to its OWN
+    // canvas, never a nested child canvas's, so a panel with dialog-style nested content must
+    // register it here to be clickable at all. Tried most-recently-added first (topmost/most
+    // specific), falling back to the root canvas bound via Bind().
+    private readonly List<Canvas> _overlayCanvases = new();
+
     private LineRenderer? _laserLine;
     private Selectable? _hoveredSelectable;
     private bool _prevRightTrigger;
@@ -49,7 +56,19 @@ internal sealed class RTPanelPointer
         _canvas = canvas;
         _quadCollider = quadCollider;
         _rt = rt;
+        _overlayCanvases.Clear();
     }
+
+    /// <summary>Registers a nested content canvas (e.g. a dialog box) as also hit-testable —
+    /// needed because Unity's GraphicRaycaster never resolves a nested child canvas's Graphics
+    /// through its parent's raycaster. Safe to call repeatedly; a canvas already registered is not
+    /// added twice.</summary>
+    public void AddOverlayCanvas(Canvas canvas)
+    {
+        if (canvas != null && !_overlayCanvases.Contains(canvas)) _overlayCanvases.Add(canvas);
+    }
+
+    public void RemoveOverlayCanvas(Canvas canvas) => _overlayCanvases.Remove(canvas);
 
     /// <summary>Hides the laser/cursor and clears hover state. Call whenever the panel stops being
     /// interactable (closed, or the owner otherwise wants interaction paused).</summary>
@@ -114,20 +133,39 @@ internal sealed class RTPanelPointer
 
         ShowLaser(origin, hit.point);
 
-        var gr = _canvas.GetComponent<GraphicRaycaster>();
         var es = EventSystem.current;
-        if (gr == null || !gr.enabled || es == null) { UpdateHover(null, null); return; }
+        if (es == null) { UpdateHover(null, null); return; }
 
         Vector2 screenPt = new Vector2(hit.textureCoord.x * _rt.width, hit.textureCoord.y * _rt.height);
         var ped = new PointerEventData(es) { position = screenPt };
-        var results = new Il2CppSystem.Collections.Generic.List<RaycastResult>();
-        gr.Raycast(ped, results);
-        var hitGo = results.Count > 0 ? results[0].gameObject : null;
+
+        GameObject? hitGo = null;
+        Il2CppSystem.Collections.Generic.List<RaycastResult>? hitResults = null;
+        for (int i = _overlayCanvases.Count - 1; i >= 0 && hitGo == null; i--)
+        {
+            var overlay = _overlayCanvases[i];
+            if (overlay == null) { _overlayCanvases.RemoveAt(i); continue; }
+            var ogr = overlay.GetComponent<GraphicRaycaster>();
+            if (ogr == null || !ogr.enabled) continue;
+            var oResults = new Il2CppSystem.Collections.Generic.List<RaycastResult>();
+            ogr.Raycast(ped, oResults);
+            if (oResults.Count > 0) { hitGo = oResults[0].gameObject; hitResults = oResults; }
+        }
+        if (hitGo == null)
+        {
+            var gr = _canvas.GetComponent<GraphicRaycaster>();
+            if (gr != null && gr.enabled)
+            {
+                var results = new Il2CppSystem.Collections.Generic.List<RaycastResult>();
+                gr.Raycast(ped, results);
+                if (results.Count > 0) { hitGo = results[0].gameObject; hitResults = results; }
+            }
+        }
 
         UpdateHover(hitGo, ped);
 
-        if (clickThisFrame && hitGo != null)
-            Dispatch(hitGo, ped, results[0], managedCanvases, lastRescanFrame, requestForceScan, onBeforeClick);
+        if (clickThisFrame && hitGo != null && hitResults != null)
+            Dispatch(hitGo, ped, hitResults[0], managedCanvases, lastRescanFrame, requestForceScan, onBeforeClick);
     }
 
     private void Dispatch(GameObject go, PointerEventData ped, RaycastResult raycastResult,
