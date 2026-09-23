@@ -49,6 +49,10 @@ internal static class CameraRig
                   ?? cam.gameObject.AddComponent<HDAdditionalCameraData>();
             hd.customRenderingSettings = false;
             hd.flipYMode = HDAdditionalCameraData.FlipYMode.ForceFlipY;
+
+            // Tried forcing this true + a per-camera CustomPass FrameSettings override, to make
+            // SetupPostFXExemptPass's AfterPostProcess pass execute — it didn't help (the pass still
+            // never drew anything) and broke case board/pause menu rendering entirely. Leave false.
             Log.LogInfo($"[CameraRig] HDRP setup: customRS={hd.customRenderingSettings}" +
                         $" flipY={hd.flipYMode}" +
                         $" volumeLayerMask=0x{hd.volumeLayerMask.value:X8}" +
@@ -230,70 +234,54 @@ internal static class CameraRig
     }
 
     /// <summary>
-    /// Sets up a UI-only camera that renders directly into the SAME RenderTexture its corresponding
-    /// main eye camera already used that frame — not a separate RT, no compositing shader. It draws
-    /// on top of whatever's already there (clearColorMode=None, clearDepth=false) with
-    /// post-processing disabled for itself, so UILayer content is genuinely immune to post-FX.
-    ///
-    /// This replaces two failed attempts: an AfterPostProcess CustomPassVolume (confirmed dead —
-    /// extensively tested, never drew anything on any layer/config) and a separate-RT-plus-Blit
-    /// composite (never alpha-blended correctly, replaced the world instead of layering over it).
-    /// Both likely share a root cause with THIS mechanism's one real risk: HDRP uses its own
-    /// clearColorMode instead of the legacy Camera.clearFlags for a manually-rendered camera, and a
-    /// fresh HDAdditionalCameraData defaults to ClearColorMode.Sky — which is almost certainly why
-    /// an even earlier in-place attempt (clearFlags=Depth, pre-dating this file's git history)
-    /// "overwrote the scene with blue/black". Explicitly setting ClearColorMode.None here is the
-    /// fix that attempt never had.
+    /// Installs a global AfterPostProcess CustomPassVolume that redraws <paramref name="uiLayer"/>
+    /// once the post stack has already been applied to the rest of the frame — genuinely immune to
+    /// post-processing, no second camera/compositing needed. A prior attempt at this (deleted in
+    /// commit a4d425a) silently did nothing; that attempt never checked or forced
+    /// RenderPipelineSettings.supportCustomPass, an asset-level gate this game's HDRP asset turned
+    /// out to have off by default (confirmed via reflection against the interop DLL) — forced on
+    /// here before installing the pass.
     /// </summary>
-    public static void SetupUICam(Camera cam, RenderTexture rt, int uiLayer, Camera mainCam)
+    public static void SetupPostFXExemptPass(int uiLayer)
     {
-        cam.targetTexture = rt;             // SAME texture the corresponding main eye camera uses
-        cam.stereoTargetEye = StereoTargetEyeMask.None;
-        cam.enabled = false;                // manual render only
-        cam.cullingMask = 1 << uiLayer;
-        // Match the main eye camera's near/far — doesn't affect X/Y screen position (the frustum's
-        // l/r/t/b bounds scale proportionally with near, which cancels out of the projection
-        // matrix's X/Y terms), but a mismatched depth-precision curve between two cameras writing
-        // into the same shared depth buffer is never correct.
-        cam.nearClipPlane = mainCam.nearClipPlane;
-        cam.farClipPlane  = mainCam.farClipPlane;
-
         try
         {
-            var hd = cam.gameObject.GetComponent<HDAdditionalCameraData>()
-                  ?? cam.gameObject.AddComponent<HDAdditionalCameraData>();
-            hd.flipYMode = HDAdditionalCameraData.FlipYMode.ForceFlipY;
+            var asset = HDRenderPipeline.currentAsset;
+            if (asset != null)
+            {
+                var settings = asset.currentPlatformRenderPipelineSettings;
+                if (!settings.supportCustomPass)
+                {
+                    settings.supportCustomPass = true;
+                    asset.currentPlatformRenderPipelineSettings = settings;
+                    Log.LogInfo("[CameraRig] Forced RenderPipelineSettings.supportCustomPass = true");
+                }
+                else
+                {
+                    Log.LogInfo("[CameraRig] RenderPipelineSettings.supportCustomPass already true");
+                }
+            }
+            else
+            {
+                Log.LogWarning("[CameraRig] SetupPostFXExemptPass: HDRenderPipeline.currentAsset is null");
+            }
 
-            // The fix: render on top of whatever's already in the shared RT, clear nothing.
-            hd.clearColorMode = HDAdditionalCameraData.ClearColorMode.None;
-            hd.clearDepth = false;
+            var go = new GameObject("SoDVR_PostFXExemptVolume");
+            UnityEngine.Object.DontDestroyOnLoad(go);
+            var volume = go.AddComponent<CustomPassVolume>();
+            volume.isGlobal = true;
+            volume.injectionPoint = CustomPassInjectionPoint.AfterPostProcess;
 
-            // No antialiasing — TAA keeps its own per-camera history/reprojection buffer, and this
-            // camera's history has nothing meaningful to reproject against (it's drawing fresh UI
-            // geometry into a shared RT another camera just rendered). A mismatched TAA history is
-            // a well-known source of exactly the head-motion-linked ghosting this was producing.
-            hd.antialiasing = HDAdditionalCameraData.AntialiasingMode.None;
+            var pass = new DrawRenderersCustomPass
+            {
+                layerMask = 1 << uiLayer,
+                renderQueueType = CustomPass.RenderQueueType.All,
+            };
+            volume.customPasses.Add(pass);
 
-            // Post-processing disabled for this camera only. m_RenderingPathCustomFrameSettings is
-            // the backing field exposed as a plain get/set property — NOT the ref-returning
-            // renderingPathCustomFrameSettings getter, confirmed via readback earlier this session
-            // that ref-return writes don't persist over this IL2CPP interop boundary while this one does.
-            hd.customRenderingSettings = true;
-            var fs = FrameSettings.NewDefaultCamera();
-            fs.SetEnabled(FrameSettingsField.Postprocess, false);
-            fs.SetEnabled(FrameSettingsField.ExposureControl, false);
-            var mask = new FrameSettingsOverrideMask();
-            mask.mask[(uint)FrameSettingsField.Postprocess] = true;
-            mask.mask[(uint)FrameSettingsField.ExposureControl] = true;
-            hd.renderingPathCustomFrameSettingsOverrideMask = mask;
-            hd.m_RenderingPathCustomFrameSettings = fs;
-
-            Log.LogInfo($"[CameraRig] UI cam setup: cullingMask=0x{cam.cullingMask:X8} " +
-                        $"clearColorMode={hd.clearColorMode} clearDepth={hd.clearDepth} on {cam.gameObject.name}");
+            Log.LogInfo($"[CameraRig] Custom pass volume created: " +
+                        $"injectionPoint={volume.injectionPoint}, layerMask=0x{(int)pass.layerMask:X8}.");
         }
-        catch (Exception ex)
-        {
-            Log.LogWarning($"[CameraRig] SetupUICam HDRP setup failed: {ex.Message}");
-        }
+        catch (Exception ex) { Log.LogWarning($"[CameraRig] SetupPostFXExemptPass failed: {ex.Message}"); }
     }
 }
