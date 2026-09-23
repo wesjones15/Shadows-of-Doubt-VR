@@ -308,7 +308,13 @@ internal sealed class MenuRTPanel
             hd.clearColorMode    = HDAdditionalCameraData.ClearColorMode.Color;
             hd.backgroundColorHDR = Color.black;
             hd.clearDepth         = true;
-            hd.antialiasing       = HDAdditionalCameraData.AntialiasingMode.None;
+            // TAA, not None: the "no AA" rule elsewhere in this codebase (CameraRig.SetupUICam)
+            // is specifically about two cameras writing into the SAME shared RT, where a second
+            // camera's TAA history has nothing valid to reproject against — the actual cause of
+            // this project's earlier ghosting bug. This camera owns its RT exclusively and renders
+            // it every frame on its own, so that concern doesn't apply, and leaving AA off was
+            // just making the panel's text/edges alias badly for no benefit.
+            hd.antialiasing       = HDAdditionalCameraData.AntialiasingMode.TemporalAntialiasing;
             // No scene HDRP Volume should influence a flat UI render — safe to zero out because
             // ExposureControl is explicitly disabled below too (unlike VoidRoom's camera, which
             // needs volumeLayerMask left alone specifically because it still needs exposure).

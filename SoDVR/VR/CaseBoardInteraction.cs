@@ -45,6 +45,14 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private bool _prevTrigger;
     private bool _triggerNeedsRelease;
     private int _triggerFireFrame;
+    // Left-trigger generic click fallback: independent of the right-trigger state above.
+    // Case board's pin-drag/string-drag/minimap-pan mechanics stay right-hand-only (unaffected by
+    // this), but a legacy WorldSpace canvas — e.g. the save-and-exit confirm popup — needs to be
+    // reachable when the player is on their left hand (RTPanelPointer lets them swap there for RT
+    // panels; the legacy click router had no equivalent left-hand path at all before this).
+    private bool _prevTriggerLeft;
+    private bool _leftTriggerNeedsRelease;
+    private int _leftTriggerFireFrame;
 
     // ── Case board pin drag (trigger) ───────────────────────────────────────
     private bool _cbDragActive;
@@ -1546,6 +1554,31 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 _triggerNeedsRelease = true;
                 _triggerFireFrame = Time.frameCount;
                 CanvasClickRouter.TryClick(rPos, rFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
+                    _ctxLastRescanFrame, _ctxRequestForceScan, _ctxMenuSettingsBtnId, _ctxMenuCanvasRef,
+                    _ctxOnSaveLoadButtonClicked, this);
+            }
+        }
+
+        // ── Left trigger → same generic click fallback, independent state ──
+        // Not gated on cbOpen/_cbDragActive (those are right-hand pin/string-drag concerns only);
+        // a legacy dialog is either reachable from the left hand or it isn't.
+        if (_ctxLeftControllerGO != null)
+        {
+            OpenXRManager.GetTriggerState(false, out bool triggerNowLeft);
+            bool triggerEdgeLeft = triggerNowLeft && !_prevTriggerLeft;
+            _prevTriggerLeft = triggerNowLeft;
+
+            if (_leftTriggerNeedsRelease)
+            {
+                if (!triggerNowLeft) _leftTriggerNeedsRelease = false;
+            }
+            else if (triggerEdgeLeft && (Time.frameCount - _leftTriggerFireFrame) >= 20)
+            {
+                _leftTriggerNeedsRelease = true;
+                _leftTriggerFireFrame = Time.frameCount;
+                Vector3 lPos = _ctxLeftControllerGO.transform.position;
+                Vector3 lFwd = _ctxLeftControllerGO.transform.forward;
+                CanvasClickRouter.TryClick(lPos, lFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
                     _ctxLastRescanFrame, _ctxRequestForceScan, _ctxMenuSettingsBtnId, _ctxMenuCanvasRef,
                     _ctxOnSaveLoadButtonClicked, this);
             }

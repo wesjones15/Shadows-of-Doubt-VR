@@ -225,7 +225,16 @@ internal sealed class RTPanelPointer
         if (shader != null)
         {
             var mat = new Material(shader) { name = $"SoDVR_{_logTag}_LaserMat" };
-            var color = new Color(0f, 4096f, 4096f, 1f); // HDR cyan, matches the mod's original laser
+            // NOT the mod's original laser's (0,4096,4096) — that value only exists to survive the
+            // main eye camera's auto-exposure at EV8-12 (dark scenes), but this camera's post stack
+            // still applies bloom on top, and at low EV (bright scenes, e.g. the void room the menu
+            // sits in) that same value blows out into a huge glowing halo instead of a thin line.
+            // There's no way to exempt this object from the eye camera's post-FX (that's the whole
+            // reason UI moved to RT panels; a laser can't — it has to exist in real 3D space, so it
+            // has to be drawn by the same camera as everything else). This is a tradeoff, not a fix:
+            // modest enough to stay a thin line under bloom, at the cost of being dimmer than the
+            // original in unusually dark rooms.
+            var color = new Color(0f, 4f, 4f, 1f);
             mat.color = color;
             try { mat.SetColor("_UnlitColor", color); } catch { }
             try { mat.SetColor("_BaseColor", color); } catch { }
@@ -264,7 +273,10 @@ internal sealed class RTPanelPointer
         if (shader != null && mr != null)
         {
             var mat = new Material(shader);
-            mat.color = new Color(64f, 0f, 64f, 1f); // HDR magenta, matches this mod's existing aim-dot convention
+            // Same bloom tradeoff as the laser (see EnsureLaser) — modest HDR boost, not the
+            // existing aim-dot pool's (64,0,64), which would bloom into a glowing blob right on
+            // the panel surface at low EV.
+            mat.color = new Color(4f, 0f, 4f, 1f);
             mat.renderQueue = 4000;
             mr.material = mat;
         }
