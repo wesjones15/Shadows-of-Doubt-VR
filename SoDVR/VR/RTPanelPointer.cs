@@ -39,7 +39,9 @@ internal sealed class RTPanelPointer
 
     private LineRenderer? _laserLine;
     private Canvas? _cursorCanvas;
+    private RectTransform? _cursorCanvasRT;
     private RectTransform? _cursorImageRT;
+    private bool _loggedCursorCanvasSize;
     private Selectable? _hoveredSelectable;
     private bool _prevRightTrigger;
     private bool _prevLeftTrigger;
@@ -283,6 +285,7 @@ internal sealed class RTPanelPointer
         _cursorCanvas.worldCamera = _canvas.worldCamera; // the panel's own projector camera
         _cursorCanvas.planeDistance = Mathf.Max(0.05f, _canvas.planeDistance - 0.1f); // in front of the panel's own content
         _cursorCanvas.sortingOrder = 500;
+        _cursorCanvasRT = cursorCanvasGO.GetComponent<RectTransform>();
 
         var imgGO = new GameObject("Cursor");
         imgGO.transform.SetParent(cursorCanvasGO.transform, false);
@@ -301,7 +304,20 @@ internal sealed class RTPanelPointer
     {
         EnsureCursorDot();
         if (_cursorImageRT == null || _cursorCanvas == null || _rt == null) return;
-        _cursorImageRT.anchoredPosition = new Vector2((uv.x - 0.5f) * _rt.width, (uv.y - 0.5f) * _rt.height);
+
+        // Scale from the cursor canvas's own measured rect rather than assuming it auto-sized to
+        // exactly the RT's pixel dimensions (expected for a ScreenSpaceCamera canvas sharing the
+        // projector camera, but asserted here via a one-time log instead of trusted blindly — this
+        // canvas is the newest, least-exercised code path in this class).
+        Vector2 measured = _cursorCanvasRT != null ? _cursorCanvasRT.rect.size : Vector2.zero;
+        if (!_loggedCursorCanvasSize)
+        {
+            _loggedCursorCanvasSize = true;
+            Log.LogInfo($"[{_logTag}] Cursor canvas measured size={measured} vs RT pixel size=({_rt.width},{_rt.height})");
+        }
+        Vector2 scale = (measured.x > 0f && measured.y > 0f) ? measured : new Vector2(_rt.width, _rt.height);
+
+        _cursorImageRT.anchoredPosition = new Vector2((uv.x - 0.5f) * scale.x, (uv.y - 0.5f) * scale.y);
         if (!_cursorCanvas.gameObject.activeSelf) _cursorCanvas.gameObject.SetActive(true);
     }
 
