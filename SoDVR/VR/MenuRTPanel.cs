@@ -134,7 +134,6 @@ internal sealed class MenuRTPanel
             }
             catch (Exception ex) { Log.LogWarning($"[MenuRTPanel] Settings-button re-patch: {ex.Message}"); }
             _quadPlaced = false; // recentre in front of the current head pose on every fresh open
-            _pointer.ResetActiveController(); // default hand on every fresh open
         }
         _wasShowing = showing;
 

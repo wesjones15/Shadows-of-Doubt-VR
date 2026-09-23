@@ -11,17 +11,24 @@ namespace SoDVR.VR;
 
 /// <summary>
 /// Reusable controller-ray interaction for an RT panel quad: a thin laser that only shows while
-/// actually aiming at the panel, an on-panel cursor dot at the hit point, hover-driven Button
-/// highlighting, and trigger-as-click — with right-controller-by-default, opposite-hand-first-
-/// press-swaps-only ownership. One instance is meant to be owned per RT panel (MenuRTPanel today;
-/// future RT panels — case board, popups — construct their own instance and Bind it to their own
-/// canvas/collider/RT once set up) rather than duplicating this logic per panel.
+/// actually aiming at the panel, an on-panel cursor rendered as part of the panel's own RT content
+/// (not a separate 3D object — genuinely immune to the main eye cameras' post-processing, the same
+/// way the panel's own buttons/text are, rather than just toned down to reduce bloom like the laser
+/// has to be), hover-driven Button highlighting, and trigger-as-click. One instance is meant to be
+/// owned per RT panel (MenuRTPanel today; future RT panels — case board, popups — construct their
+/// own instance and Bind it to their own canvas/collider/RT once set up) rather than duplicating
+/// this logic per panel.
 /// </summary>
 internal sealed class RTPanelPointer
 {
     private static ManualLogSource Log => Plugin.Log;
 
     private const float MaxRayDistance = 15f;
+
+    // Which hand owns pointer interaction — shared across every RTPanelPointer instance (every RT
+    // panel), not per-panel: swapping hands on one panel should carry over to the next one you aim
+    // at, not silently reset. Right by default each session.
+    private static bool s_useRightController = true;
 
     private readonly int _quadLayer;
     private readonly string _logTag;
@@ -31,9 +38,9 @@ internal sealed class RTPanelPointer
     private RenderTexture? _rt;
 
     private LineRenderer? _laserLine;
-    private GameObject? _cursorDotGO;
+    private Canvas? _cursorCanvas;
+    private RectTransform? _cursorImageRT;
     private Selectable? _hoveredSelectable;
-    private bool _useRightController = true;
     private bool _prevRightTrigger;
     private bool _prevLeftTrigger;
 
@@ -47,10 +54,6 @@ internal sealed class RTPanelPointer
         _quadCollider = quadCollider;
         _rt = rt;
     }
-
-    /// <summary>Resets which hand owns the panel — call on every fresh panel-open so the default
-    /// (right hand) is restored rather than remembering the last session's swap.</summary>
-    public void ResetActiveController() => _useRightController = true;
 
     /// <summary>Hides the laser/cursor and clears hover state. Call whenever the panel stops being
     /// interactable (closed, or the owner otherwise wants interaction paused).</summary>
@@ -82,25 +85,26 @@ internal sealed class RTPanelPointer
 
         // Default right controller. The first trigger press on the OTHER hand just swaps
         // ownership over (so an imprecise aim mid-swap doesn't also fire a click); every press
-        // after that on the now-active hand clicks normally.
+        // after that on the now-active hand clicks normally. Shared across all RT panels (see
+        // s_useRightController) — swapping here also applies the next time any RT panel is aimed at.
         bool swappedThisFrame = false;
-        if (_useRightController && leftEdge && leftControllerGO != null)
+        if (s_useRightController && leftEdge && leftControllerGO != null)
         {
-            _useRightController = false;
+            s_useRightController = false;
             swappedThisFrame = true;
             Log.LogInfo($"[{_logTag}] Active controller swapped to LEFT");
         }
-        else if (!_useRightController && rightEdge && rightControllerGO != null)
+        else if (!s_useRightController && rightEdge && rightControllerGO != null)
         {
-            _useRightController = true;
+            s_useRightController = true;
             swappedThisFrame = true;
             Log.LogInfo($"[{_logTag}] Active controller swapped to RIGHT");
         }
 
-        var activeGO = _useRightController ? rightControllerGO : leftControllerGO;
+        var activeGO = s_useRightController ? rightControllerGO : leftControllerGO;
         if (activeGO == null) { Clear(); return; }
 
-        bool clickThisFrame = !swappedThisFrame && (_useRightController ? rightEdge : leftEdge);
+        bool clickThisFrame = !swappedThisFrame && (s_useRightController ? rightEdge : leftEdge);
 
         Vector3 origin = activeGO.transform.position;
         Vector3 direction = activeGO.transform.forward;
@@ -115,7 +119,7 @@ internal sealed class RTPanelPointer
         }
 
         ShowLaser(origin, hit.point);
-        ShowCursorDot(hit.point, hit.normal);
+        ShowCursorDot(hit.textureCoord);
 
         var gr = _canvas.GetComponent<GraphicRaycaster>();
         var es = EventSystem.current;
@@ -151,7 +155,7 @@ internal sealed class RTPanelPointer
             ped.eligibleForClick      = true;
             ped.button                = PointerEventData.InputButton.Left;
 
-            Log.LogInfo($"[{_logTag}] Trigger click ({(_useRightController ? "R" : "L")}): '{go.name}'");
+            Log.LogInfo($"[{_logTag}] Trigger click ({(s_useRightController ? "R" : "L")}): '{go.name}'");
 
             bool handledByButton = CanvasClickRouter.InvokeButtonClick(go, _canvas!, managedCanvases, lastRescanFrame, requestForceScan);
             if (!handledByButton)
@@ -258,42 +262,51 @@ internal sealed class RTPanelPointer
         if (_laserLine != null && _laserLine.enabled) _laserLine.enabled = false;
     }
 
+    /// <summary>
+    /// Unlike the laser, the cursor genuinely can be made immune to the main eye cameras' post-
+    /// processing: it doesn't need to exist in real 3D space, only to appear to sit on the panel, so
+    /// it's drawn as an ordinary UI Image sharing the panel's own projector camera (a second
+    /// ScreenSpaceCamera canvas using that same camera, sorted in front) rather than as a separate
+    /// 3D-world quad next to the panel. It becomes part of the same pre-rendered pixels the panel's
+    /// buttons and text already are, so it never touches the eye cameras' bloom/tonemapping at all —
+    /// no exposure/bloom tradeoff needed here the way the laser needs one.
+    /// </summary>
     private void EnsureCursorDot()
     {
-        if (_cursorDotGO != null) return;
-        _cursorDotGO = GameObject.CreatePrimitive(PrimitiveType.Quad);
-        _cursorDotGO.name = $"SoDVR_{_logTag}_Cursor";
-        _cursorDotGO.layer = _quadLayer;
-        UnityEngine.Object.DontDestroyOnLoad(_cursorDotGO);
-        var col = _cursorDotGO.GetComponent<Collider>();
-        if (col != null) UnityEngine.Object.Destroy(col); // visual only, must not intercept our own raycasts
-        _cursorDotGO.transform.localScale = Vector3.one * 0.015f;
-        var mr = _cursorDotGO.GetComponent<MeshRenderer>();
-        var shader = Shader.Find("UI/Default");
-        if (shader != null && mr != null)
-        {
-            var mat = new Material(shader);
-            // Same bloom tradeoff as the laser (see EnsureLaser) — modest HDR boost, not the
-            // existing aim-dot pool's (64,0,64), which would bloom into a glowing blob right on
-            // the panel surface at low EV.
-            mat.color = new Color(4f, 0f, 4f, 1f);
-            mat.renderQueue = 4000;
-            mr.material = mat;
-        }
-        _cursorDotGO.SetActive(false);
+        if (_cursorCanvas != null || _canvas == null) return;
+
+        var cursorCanvasGO = new GameObject($"SoDVR_{_logTag}_CursorCanvas");
+        cursorCanvasGO.layer = _canvas.gameObject.layer; // must match the projector camera's cullingMask
+        UnityEngine.Object.DontDestroyOnLoad(cursorCanvasGO);
+        _cursorCanvas = cursorCanvasGO.AddComponent<Canvas>();
+        _cursorCanvas.renderMode = RenderMode.ScreenSpaceCamera;
+        _cursorCanvas.worldCamera = _canvas.worldCamera; // the panel's own projector camera
+        _cursorCanvas.planeDistance = Mathf.Max(0.05f, _canvas.planeDistance - 0.1f); // in front of the panel's own content
+        _cursorCanvas.sortingOrder = 500;
+
+        var imgGO = new GameObject("Cursor");
+        imgGO.transform.SetParent(cursorCanvasGO.transform, false);
+        var img = imgGO.AddComponent<Image>();
+        img.raycastTarget = false;
+        img.color = new Color(1f, 0.15f, 0.85f, 0.9f); // plain SDR color — part of the rendered panel content, no bloom to tune around
+        _cursorImageRT = imgGO.GetComponent<RectTransform>();
+        _cursorImageRT.sizeDelta = new Vector2(26f, 26f);
+        _cursorImageRT.anchorMin = _cursorImageRT.anchorMax = new Vector2(0.5f, 0.5f);
+        _cursorImageRT.pivot = new Vector2(0.5f, 0.5f);
+
+        cursorCanvasGO.SetActive(false);
     }
 
-    private void ShowCursorDot(Vector3 hitPoint, Vector3 hitNormal)
+    private void ShowCursorDot(Vector2 uv)
     {
         EnsureCursorDot();
-        if (_cursorDotGO == null) return;
-        _cursorDotGO.transform.position = hitPoint + hitNormal * 0.005f; // avoid z-fighting with the panel
-        _cursorDotGO.transform.rotation = Quaternion.LookRotation(hitNormal);
-        if (!_cursorDotGO.activeSelf) _cursorDotGO.SetActive(true);
+        if (_cursorImageRT == null || _cursorCanvas == null || _rt == null) return;
+        _cursorImageRT.anchoredPosition = new Vector2((uv.x - 0.5f) * _rt.width, (uv.y - 0.5f) * _rt.height);
+        if (!_cursorCanvas.gameObject.activeSelf) _cursorCanvas.gameObject.SetActive(true);
     }
 
     private void HideCursorDot()
     {
-        if (_cursorDotGO != null && _cursorDotGO.activeSelf) _cursorDotGO.SetActive(false);
+        if (_cursorCanvas != null && _cursorCanvas.gameObject.activeSelf) _cursorCanvas.gameObject.SetActive(false);
     }
 }
