@@ -1296,10 +1296,23 @@ public class VRCamera : MonoBehaviour
 
         // Depth scan: find ALL managed canvases the controller ray hits within their rects, and
         // render a world-space aim dot at every hit. The nearest hit drives the primary cursor
-        // canvas (for click targeting / tooltip depth).
-        var aim = _controllerInteraction.ScanAndRenderAimDots(_rightControllerGO, _leftCam,
-            _managedCanvases, _cursorCanvas, _caseBoard.ContextMenuActive, _popupMessageGO, _tutorialMessageGO,
-            _nestedCanvasIds, _nestedDragTransforms, _noGroupInteractable);
+        // canvas (for click targeting / tooltip depth). Skipped while any RT panel owns
+        // interaction — this scan is a legacy-WorldSpace-canvas visual (hardcoded to the right
+        // controller, unaware of RTPanelPointer's hand swap) that would otherwise render a stray
+        // dot at whatever other Menu-category legacy canvas happens to sit near the RT panel.
+        bool anyRTPanelInteractable = _menuRTPanel.IsInteractable;
+        AimScanResult aim;
+        if (anyRTPanelInteractable)
+        {
+            _controllerInteraction.HideAllAimDots();
+            aim = default;
+        }
+        else
+        {
+            aim = _controllerInteraction.ScanAndRenderAimDots(_rightControllerGO, _leftCam,
+                _managedCanvases, _cursorCanvas, _caseBoard.ContextMenuActive, _popupMessageGO, _tutorialMessageGO,
+                _nestedCanvasIds, _nestedDragTransforms, _noGroupInteractable);
+        }
         _cursorHasTarget    = aim.HasTarget;
         _cursorTargetCanvas = aim.TargetCanvas;
         _cursorTargetPos    = aim.TargetPos;

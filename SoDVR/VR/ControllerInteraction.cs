@@ -467,6 +467,18 @@ internal sealed class ControllerInteraction
         return result;
     }
 
+    /// <summary>Hides every pooled aim dot without scanning. Call instead of
+    /// ScanAndRenderAimDots on frames an RT panel owns interaction — that pool is a legacy-
+    /// WorldSpace-canvas visual, hardcoded to the right controller, with no notion of an RT panel's
+    /// own laser/cursor or its hand swap.</summary>
+    public void HideAllAimDots()
+    {
+        for (int i = 0; i < _aimDotPool.Count; i++)
+        {
+            try { if (_aimDotPool[i].activeSelf) _aimDotPool[i].SetActive(false); } catch { }
+        }
+    }
+
     /// <summary>Thumbstick Y scrolls the VR settings panel when it is open. Dead-zone: ignore
     /// values &lt; 0.2 to prevent drift.</summary>
     public void UpdateVrSettingsScroll()
