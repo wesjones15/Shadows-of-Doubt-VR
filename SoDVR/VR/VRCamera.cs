@@ -62,6 +62,7 @@ public class VRCamera : MonoBehaviour
     private readonly ControllerInteraction _controllerInteraction = new();
     private readonly CaseBoardInteraction _caseBoard = new();
     private readonly CanvasMaterialPatcher _materialPatcher = new();
+    private readonly CanvasPlacement _canvasPlacement = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
     // The swapchain copy still runs every frame, so head tracking stays smooth via ATW.
@@ -126,13 +127,7 @@ public class VRCamera : MonoBehaviour
     private Canvas?                       _popupMessageCanvas;
     private Canvas?                       _tutorialMessageCanvas;
 
-    // ── Canvas category system ────────────────────────────────────────────────
-    // Each canvas is assigned a category that controls placement, scale, and interactability.
-    // Ignored: transient/world-space canvases — never converted, never in depth scan.
-    // HUD: body-locked (VROrigin yaw only), non-interactable, excluded from ray system.
-    // CaseBoard: recentres on open, remembers relative layout, grip-relocatable.
     // ── CaseBoard grip-relocate ───────────────────────────────────────────────
-    private bool       _dialogCanvasPlaced;       // true once dialog-mode tooltip is placed (world-lock until dialog closes)
     private Vector3    _contextMenuFreezePos;    // world position to enforce while context menu is frozen
     private Quaternion _contextMenuFreezeRot;    // world rotation to enforce while context menu is frozen
     private Vector3    _contextMenuChildWorldPos; // actual world pos of context menu child after zeroing (set in pre-render)
@@ -153,7 +148,6 @@ public class VRCamera : MonoBehaviour
     private readonly Dictionary<int, (Vector3 worldPos, Quaternion worldRot)> _nestedDragTransforms = new();
     // WindowCanvas-relative offsets for grip-dragged nested canvases (survive reopen/recentre).
     private readonly Dictionary<int, (Vector3 localOffset, Quaternion localRot)> _nestedDragRelative = new();
-    private int  _placementIndex;     // incremental depth offset counter per placement cycle
 
     // Canvases without CanvasGroup that have enough active Graphics to be considered
     // "actually showing content".  Updated every scan cycle.  Used by depth scan / click
@@ -237,8 +231,6 @@ public class VRCamera : MonoBehaviour
     private Vector3        _cursorTargetPos;      // world pos of nearest aimed-at canvas
     private Quaternion     _cursorTargetRot;      // world rot of nearest aimed-at canvas
     private Canvas?        _menuCanvasRef;       // MenuCanvas — hidden while VR settings panel is open
-    private bool           _menuCanvasHidden;    // tracks last hide state to avoid per-frame toggles
-    private bool           _menuWasActive;       // tracks last isActiveAndEnabled to detect menu open transition
     private int            _menuSettingsBtnId;   // instanceID of the patched Settings button in MenuCanvas
 
     // ── Multi-dot aim system ─────────────────────────────────────────────────
@@ -1073,7 +1065,31 @@ public class VRCamera : MonoBehaviour
         if (!_stereoReady || !_frameOpen) return;
         _frameOpen = false;
 
-        try { PositionCanvases(); }
+        try
+        {
+            _canvasPlacement.PositionCanvases(
+                transform, _hudAnchor,
+                _managedFades, _frameCount,
+                _menuCanvasRef, ref _menuSettingsBtnId,
+                _noGroupInteractable, ref _forceScanFrames,
+                _leftCam, _posesValid,
+                _casePanelCanvas, _casePanelId, _cursorCanvas,
+                _managedCanvases, _nestedCanvasIds,
+                _canvasWasActive, _positionedCanvases,
+                _lastRescanFrame,
+                _caseBoard,
+                _caseBoardOffsets,
+                _gripDragAnchorOffsets,
+                _gripDragEnforce,
+                _nestedDragTransforms,
+                _actionPanelCanvas, _actionPanelId,
+                _popupMessageGO, _tutorialMessageGO,
+                ref _contextMenuFreezePos, ref _contextMenuFreezeRot,
+                _locomotion,
+                ref _minimapBBtnHasOffset, ref _minimapBBtnLocalOffset, ref _minimapBBtnLocalRot,
+                _cursorHasTarget, _cursorTargetPos, _cursorTargetRot, _cursorAimDepth,
+                _caseContentIds);
+        }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] PositionCanvases exception: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}"); }
 
         try
@@ -1158,7 +1174,7 @@ public class VRCamera : MonoBehaviour
 
                 // Minimap: set ZoomContent zoom range so the full city fits within the
                 // Viewport at minimum zoom (applied once after MapController is ready).
-                UpdateMinimapZoom();
+                _canvasPlacement.UpdateMinimapZoom(_materialPatcher);
 
                 // No GL.invertCulling — HDRP flipYMode handles both Y-flip and culling.
                 _rightCam.Render();
@@ -1202,547 +1218,6 @@ public class VRCamera : MonoBehaviour
     }
 
 
-    // Set ZoomContent.zoomLimit.x and desiredZoom so the full city fits within the Viewport
-    // at minimum zoom — eliminating map overflow at zoom-out.
-    // Called once after _materialPatcher.MinimapViewportTransform is cached and MapController is ready.
-    private void UpdateMinimapZoom()
-    {
-        if (_materialPatcher.MinimapZoomApplied || _materialPatcher.MinimapViewportTransform == null) return;
-        try
-        {
-            var mapCtrl = MapController.Instance;
-            if (mapCtrl == null) return;
-
-            var zc = mapCtrl.zoomController;
-            if (zc == null) return;
-
-            // Prefer MapController.viewport (authoritative) over our cached transform.
-            var vpRT = mapCtrl.viewport
-                    ?? (_materialPatcher.MinimapViewportTransform as RectTransform
-                        ?? _materialPatcher.MinimapViewportTransform?.GetComponent<RectTransform>());
-            if (vpRT == null) return;
-
-            // normalSize is the Content sizeDelta at zoom=1 (full city).
-            var normalSize = zc.normalSize;
-            // Viewport uses stretch anchors so sizeDelta=(0,0); rect.size gives actual layout size.
-            var vpSize = vpRT.rect.size;
-            if (normalSize.x <= 0 || normalSize.y <= 0 || vpSize.x <= 0 || vpSize.y <= 0) return;
-
-            // Scale factor to fit the full city within the Viewport rect.
-            float fitZoom = Mathf.Min(vpSize.x / normalSize.x, vpSize.y / normalSize.y);
-            fitZoom = Mathf.Clamp(fitZoom, 0.01f, 1f);
-
-            // Allow zooming out to fitZoom (whole city fits) and in up to original max.
-            float maxZoom = zc.zoomLimit.y;
-            zc.zoomLimit = new UnityEngine.Vector2(fitZoom, maxZoom);
-
-            // Start zoomed in to show the player's neighbourhood, not the whole city.
-            // Use 4x the fit zoom so a reasonable area is visible without overflow.
-            float startZoom = Mathf.Min(fitZoom * 4f, maxZoom);
-            zc.desiredZoom  = startZoom;
-
-            _materialPatcher.MinimapZoomApplied = true;
-            Log.LogInfo($"[VRCamera] MinimapZoom: vpSize={vpSize} normalSize={normalSize} fitZoom={fitZoom:F3} startZoom={startZoom:F3} maxZoom={maxZoom:F1}");
-        }
-        catch (Exception ex)
-        {
-            Log.LogWarning($"[VRCamera] UpdateMinimapZoom: {ex.Message}");
-        }
-    }
-
-
-    private void PositionCanvases()
-    {
-        // Suppress FadeOverlay graphics every 4 frames (prevents black screen flash).
-        if (_managedFades.Count > 0 && (_frameCount % 4) == 0)
-        {
-            foreach (var kvp in _managedFades)
-            {
-                var fg = kvp.Value;
-                if (fg == null) continue;
-                if (fg.color.a > 0f)
-                    fg.color = new Color(fg.color.r, fg.color.g, fg.color.b, 0f);
-            }
-        }
-
-        // Hide MenuCanvas while VR settings panel is open (only toggle on state change —
-        // toggling every frame causes material instance flood → crash).
-        if (_menuCanvasRef != null)
-        {
-            try
-            {
-                bool vrOpen = VRSettingsPanel.RootGO?.activeSelf == true;
-                if (vrOpen != _menuCanvasHidden)
-                {
-                    _menuCanvasHidden = vrOpen;
-                    _menuCanvasRef.enabled = !vrOpen;
-                    var mgr = _menuCanvasRef.GetComponent<GraphicRaycaster>();
-                    if (mgr != null) mgr.enabled = !vrOpen;
-                }
-
-                // Re-patch Settings button on every menu open (game may reinitialise buttons)
-                bool menuNowActive = _menuCanvasRef.isActiveAndEnabled;
-                if (menuNowActive && !_menuWasActive)
-                {
-                    var patchedId = CanvasConversionScanner.PatchMenuSettingsButton(_menuCanvasRef);
-                    if (patchedId.HasValue) _menuSettingsBtnId = patchedId.Value;
-                    // MenuCanvas just became interactable — add it to the no-CanvasGroup
-                    // interactable cache immediately so TryClickCanvas doesn't skip it.
-                    // The next forced scan will rebuild the cache from scratch.
-                    _noGroupInteractable.Add(_menuCanvasRef.GetInstanceID());
-                    _forceScanFrames = 1;
-                }
-                _menuWasActive = menuNowActive;
-            }
-            catch { }
-        }
-
-        if (_leftCam == null || !_posesValid) return;
-
-        // Head/body reference directions for placement.
-        Vector3 headPos = _leftCam.transform.position;
-        float   headYaw = _leftCam.transform.eulerAngles.y;
-        Quaternion yawOnly = Quaternion.Euler(0f, headYaw, 0f);
-        Vector3 forward = yawOnly * Vector3.forward;
-
-        // ── HUD anchor scale (controlled by VR Settings) ─────────────────
-        float hudSc = VRSettingsPanel.HudSize;
-        if (_hudAnchor.localScale.x != hudSc)
-            _hudAnchor.localScale = new Vector3(hudSc, hudSc, hudSc);
-
-        // ── HUD anchor rotation: laggy head-follow OR body-locked ─────────
-        // transform.rotation = VROrigin (snap-turn yaw only).
-        // yawOnly = world-space head yaw from OpenXR pose via _leftCam.
-        // localRotation toward headRelative makes the HUD swing to follow head yaw with lag.
-        if (VRSettingsPanel.HudLaggyFollow)
-        {
-            float headPitch = _leftCam.transform.eulerAngles.x;
-            Quaternion pitchAndYaw = Quaternion.Euler(headPitch, headYaw, 0f);
-            Quaternion headRelative = Quaternion.Inverse(transform.rotation) * pitchAndYaw;
-            _hudAnchor.localRotation = Quaternion.Slerp(
-                _hudAnchor.localRotation, headRelative, Time.deltaTime * 4f);
-        }
-        else
-        {
-            _hudAnchor.localRotation = Quaternion.identity;
-        }
-
-        // ── HUD auto-hide: hide when pause menu or case board is open ─────
-        // Use _casePanelCanvas (CaseCanvas) — only active when pin board is open.
-        // _actionPanelCanvas is always active during gameplay so cannot be used here.
-        bool menuOpen      = _menuCanvasRef != null && _menuCanvasRef.isActiveAndEnabled;
-        bool caseBoardOpen = _casePanelCanvas != null && CanvasCategoryInfo.IsCanvasVisible(_casePanelCanvas);
-        bool hudShouldShow = !menuOpen && !caseBoardOpen;
-        if (_hudAnchor.gameObject.activeSelf != hudShouldShow)
-            _hudAnchor.gameObject.SetActive(hudShouldShow);
-
-        int cursorId = _cursorCanvas != null ? _cursorCanvas.GetInstanceID() : -1;
-
-        // Active-state tracking: detect false→true transitions to trigger recentre.
-        foreach (var kvp in _managedCanvases)
-        {
-            if (kvp.Value == null) continue;
-            int tid = kvp.Key;
-            bool nowActive = CanvasCategoryInfo.IsCanvasVisible(kvp.Value);
-            bool wasActive;
-            bool hadTracking = _canvasWasActive.TryGetValue(tid, out wasActive);
-
-            if (hadTracking && !wasActive && nowActive)
-            {
-                var cat = CanvasCategoryInfo.GetCanvasCategory(kvp.Value.gameObject.name);
-                var catDef = CanvasCategoryInfo.GetCategoryDefaults(cat);
-                if (catDef.RecentreOnActivate && !catDef.IsHUD)
-                    _positionedCanvases.Remove(tid);
-
-                // Clear rescan cooldown so material drift is fixed immediately
-                // when a dialog becomes visible (game sets text content on show).
-                _lastRescanFrame.Remove(tid);
-
-                // When ActionPanelCanvas becomes visible (case board opens),
-                // force-recentre ALL CaseBoard canvases + WindowCanvas so everything
-                // moves to the player's current position.  Notes/notebook are children
-                // of WindowCanvas (InterfaceController.windowCanvas), not CaseCanvas.
-                string tn = kvp.Value.gameObject.name ?? "";
-                if (tn.Equals("ActionPanelCanvas", StringComparison.OrdinalIgnoreCase))
-                {
-                    _caseBoard.CaseBoardPrimaryId = -1; // reset primary so it's re-elected
-                    foreach (var cb in _managedCanvases)
-                    {
-                        if (cb.Value == null) continue;
-                        string cbName = cb.Value.gameObject.name ?? "";
-                        var cbCat = CanvasCategoryInfo.GetCanvasCategory(cbName);
-                        if (cbCat == CanvasCategory.CaseBoard
-                            || cbName.Equals("WindowCanvas", StringComparison.OrdinalIgnoreCase))
-                        {
-                            _positionedCanvases.Remove(cb.Key);
-                            _lastRescanFrame.Remove(cb.Key);
-                        }
-                        // MinimapCanvas: always remove from positioned so it can be re-placed.
-                        // If grip-dragged, PositionCanvases will restore from anchor offsets.
-                        // If not, it gets default head+forward placement.
-                        if (cbName.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase))
-                        {
-                            _positionedCanvases.Remove(cb.Key);
-                            _gripDragEnforce.Remove(cb.Key);
-                            _lastRescanFrame.Remove(cb.Key);
-                        }
-                        // Any canvas with anchor offsets: remove from positioned + enforce
-                        // so PositionCanvases recomputes from new ActionPanelCanvas position.
-                        if (_gripDragAnchorOffsets.ContainsKey(cb.Key))
-                        {
-                            _positionedCanvases.Remove(cb.Key);
-                            _gripDragEnforce.Remove(cb.Key);
-                        }
-                    }
-                    // Clear absolute nested transforms — they'll be restored from
-                    // _nestedDragRelative once WindowCanvas gets its new position.
-                    _nestedDragTransforms.Clear();
-                    Log.LogInfo("[VRCamera] ActionPanelCanvas activated — recentring CaseBoard + WindowCanvas (Minimap preserved if grip-dragged)");
-                }
-            }
-
-            _canvasWasActive[tid] = nowActive;
-        }
-
-        _placementIndex = 0;
-        foreach (var kvp in _managedCanvases)
-        {
-            var canvas = kvp.Value;
-            if (canvas == null) continue;
-            if (_nestedCanvasIds.Contains(kvp.Key)) continue;
-
-            int id = kvp.Key;
-            bool isCursorCanvas = (id == cursorId);
-            var cat     = CanvasCategoryInfo.GetCanvasCategory(canvas.gameObject.name);
-            var catDefs = CanvasCategoryInfo.GetCategoryDefaults(cat);
-
-            // ── Per-frame scale enforcement ───────────────────────────────────
-            // The game resets localScale on certain canvases (PopupMessage,
-            // WindowCanvas) every frame. ScaleFix in the 90-frame scan is too
-            // slow — enforce correct scale every frame for visible canvases.
-            if (!isCursorCanvas && !catDefs.IsHUD && cat != CanvasCategory.Ignored && !catDefs.RepositionEveryFrame)
-            {
-                try
-                {
-                    var rtEnf = canvas.GetComponent<RectTransform>();
-                    if (rtEnf != null)
-                    {
-                        float sdW = rtEnf.sizeDelta.x;
-                        if (sdW > 1f)
-                        {
-                            float want = catDefs.TargetWorldWidth / sdW;
-                            float have = canvas.transform.localScale.x;
-                            if (!Mathf.Approximately(have, want))
-                                canvas.transform.localScale = Vector3.one * want;
-                        }
-                    }
-                    // Disable CanvasScaler so the game can't reset our scale next frame.
-                    // This eliminates the 1-frame flicker from the scale fight.
-                    var scaler = canvas.GetComponent<UnityEngine.UI.CanvasScaler>();
-                    if (scaler != null && scaler.enabled)
-                        scaler.enabled = false;
-                }
-                catch { }
-            }
-
-            // ── Cursor canvas ─────────────────────────────────────────────────
-            if (isCursorCanvas)
-            {
-                if (_cursorHasTarget)
-                {
-                    Vector3 toHead = (headPos - _cursorTargetPos).normalized;
-                    canvas.transform.position = _cursorTargetPos + toHead * 0.02f;
-                    canvas.transform.rotation = _cursorTargetRot;
-                }
-                continue;
-            }
-
-            // ── Tooltip / Dialog mode ─────────────────────────────────────────
-            if (catDefs.RepositionEveryFrame)
-            {
-                if (!canvas.gameObject.activeSelf || !canvas.enabled) continue;
-
-                // Context menu freeze: when ContextMenus has active children (a right-click
-                // context menu is showing), world-lock TooltipCanvas so the menu stays put.
-                // Orient to match the pin board so the menu is coplanar with the board.
-                bool cbIsOpen = _actionPanelCanvas != null && _actionPanelCanvas.gameObject.activeSelf;
-                bool contextMenuFrozen = false;
-                try
-                {
-                    var cmTr = canvas.transform.Find("ContextMenus");
-                    if (cmTr != null && cmTr.gameObject.activeSelf)
-                        for (int ci = 0; ci < cmTr.childCount; ci++)
-                        {
-                            var cmChild = cmTr.GetChild(ci);
-                            if (!cmChild.gameObject.activeSelf) continue;
-                            // Only freeze for actual context menus, NOT PinnedQuickMenu hover tooltips
-                            string childName = cmChild.gameObject.name ?? "";
-                            if (childName.StartsWith("ContextMenu")) { contextMenuFrozen = true; break; }
-                        }
-                }
-                catch { }
-                if (contextMenuFrozen)
-                {
-                    if (!_caseBoard.ContextMenuFreezeApplied)
-                    {
-                        // First freeze frame: compute snap position/rotation.
-                        float cmDist = catDefs.Distance;
-                        if (cmDist <= 0f) cmDist = 1.0f;
-                        _contextMenuFreezePos = headPos + forward * cmDist + Vector3.up * catDefs.VerticalOffset;
-                        _contextMenuFreezeRot = yawOnly;
-                        _caseBoard.ContextMenuFreezeApplied = true;
-
-                        Log.LogInfo($"[VRCamera] Context menu freeze: dist={cmDist:F2} freezePos={_contextMenuFreezePos} freezeRot={_contextMenuFreezeRot.eulerAngles}");
-                    }
-
-                    // The game repositions ContextMenus AND its children at SCREEN COORDINATES
-                    // every frame.  In WorldSpace, this offset is 0.5-0.6m from canvas center.
-                    // Fix: zero localPosition ONLY (not anchoredPosition — setting anchoredPosition
-                    // after localPosition overrides it based on anchor config, causing position drift).
-                    // localPosition = zero puts the child's pivot at the parent's pivot regardless of anchors.
-                    try
-                    {
-                        var cmTr2 = canvas.transform.Find("ContextMenus");
-                        if (cmTr2 != null)
-                        {
-                            cmTr2.localPosition = Vector3.zero;
-                            cmTr2.localRotation = Quaternion.identity;
-                            cmTr2.localScale    = Vector3.one;
-
-                            for (int cci = 0; cci < cmTr2.childCount; cci++)
-                            {
-                                var child = cmTr2.GetChild(cci);
-                                if (!child.gameObject.activeSelf) continue;
-                                child.localPosition = Vector3.zero;
-                                child.localRotation = Quaternion.identity;
-                                child.localScale = Vector3.one;
-                                break;
-                            }
-                        }
-                    }
-                    catch { }
-
-                    // Enforce position/rotation EVERY frame to prevent game from overwriting.
-                    canvas.transform.position = _contextMenuFreezePos;
-                    canvas.transform.rotation = _contextMenuFreezeRot;
-                    continue;
-                }
-
-                // When PopupMessage or TutorialMessage is active, TooltipCanvas
-                // switches to dialog mode: positioned ONCE in front of head (world-locked after that).
-                // The player can grip-drag the dialog to reposition it freely.
-                bool dialogActive = (_popupMessageGO != null && _popupMessageGO.activeSelf)
-                                 || (_tutorialMessageGO != null && _tutorialMessageGO.activeSelf);
-                if (dialogActive)
-                {
-                    if (!_dialogCanvasPlaced)
-                    {
-                        // First frame the dialog is active — snap to head position.
-                        float dialogDist = VRSettingsPanel.MenuDistance - 0.2f;
-                        canvas.transform.position = headPos + forward * dialogDist + Vector3.up * catDefs.VerticalOffset;
-                        canvas.transform.rotation = yawOnly;
-                        _dialogCanvasPlaced = true;
-                    }
-                    // else: canvas is world-locked; let the player grip-drag it.
-                    // Scale up TooltipCanvas to popup size while dialog is active.
-                    try
-                    {
-                        var rtDlg = canvas.GetComponent<RectTransform>();
-                        if (rtDlg != null)
-                        {
-                            float popupScale = CanvasCategoryInfo.GetCategoryDefaults(CanvasCategory.Menu).TargetWorldWidth / rtDlg.sizeDelta.x;
-                            if (!Mathf.Approximately(canvas.transform.localScale.x, popupScale))
-                                canvas.transform.localScale = Vector3.one * popupScale;
-                        }
-                    }
-                    catch { }
-                }
-                else
-                {
-                    _dialogCanvasPlaced = false; // dialog closed — allow fresh placement next time
-                    float tooltipDist = _cursorAimDepth - 0.02f;
-                    canvas.transform.position = headPos + forward * tooltipDist + Vector3.up * catDefs.VerticalOffset;
-                    canvas.transform.rotation = yawOnly;
-                    // Restore tooltip scale if it was enlarged for dialog mode.
-                    try
-                    {
-                        var rtTip = canvas.GetComponent<RectTransform>();
-                        if (rtTip != null)
-                        {
-                            float tipScale = catDefs.TargetWorldWidth / rtTip.sizeDelta.x;
-                            if (!Mathf.Approximately(canvas.transform.localScale.x, tipScale))
-                                canvas.transform.localScale = Vector3.one * tipScale;
-                        }
-                    }
-                    catch { }
-                }
-                continue;
-            }
-
-            // ── HUD (body-locked) ─────────────────────────────────────────────
-            // Parent to HUDanchor once; after that it follows body movement automatically.
-            if (catDefs.IsHUD)
-            {
-                if (!_positionedCanvases.Contains(id) && CanvasCategoryInfo.IsCanvasVisible(canvas))
-                {
-                    try
-                    {
-                        canvas.transform.SetParent(_hudAnchor, false);
-                        canvas.transform.localRotation = Quaternion.identity;
-                        _positionedCanvases.Add(id);
-                        Log.LogInfo($"[VRCamera] HUD parented '{canvas.gameObject.name}' to HUDAnchor");
-                    }
-                    catch (Exception ex) { Log.LogWarning($"[VRCamera] HUD parent: {ex.Message}"); }
-                }
-                // Sync position from VR Settings every frame — adjustments apply immediately
-                if (_positionedCanvases.Contains(id))
-                {
-                    canvas.transform.localPosition = new Vector3(
-                        VRSettingsPanel.HudHorizOffset,
-                        VRSettingsPanel.HudVertOffset,
-                        VRSettingsPanel.HudDistance);
-                }
-                continue;
-            }
-
-            // ── Menu, Panel, CaseBoard, Default ──────────────────────────────
-            // Skip if already positioned and not needing recentre.
-            if (_positionedCanvases.Contains(id)) continue;
-
-            // ── B-button minimap: body-locked placement ──────────────────────
-            // When B is held (not case board), place MinimapCanvas from VROrigin-relative offset
-            // instead of the standard head+forward Panel logic. Marked positioned so it doesn't
-            // fall through to default placement. Per-frame body-lock update happens in Update().
-            string nameForBBtn = canvas.gameObject.name ?? "";
-            if (_locomotion.MinimapInBBtnContext && nameForBBtn.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase))
-            {
-                if (CanvasCategoryInfo.IsCanvasVisible(canvas))
-                {
-                    Quaternion vrYaw = Quaternion.Euler(0, transform.eulerAngles.y, 0);
-                    if (_minimapBBtnHasOffset)
-                    {
-                        canvas.transform.position = transform.position + vrYaw * _minimapBBtnLocalOffset;
-                        canvas.transform.rotation = vrYaw * _minimapBBtnLocalRot;
-                    }
-                    else
-                    {
-                        // First time — use default head+forward, then save as VROrigin-relative
-                        float bDist = catDefs.Distance;
-                        canvas.transform.position = headPos + forward * bDist + Vector3.up * catDefs.VerticalOffset;
-                        canvas.transform.rotation = yawOnly;
-                        Quaternion invVrYaw = Quaternion.Inverse(vrYaw);
-                        _minimapBBtnLocalOffset = invVrYaw * (canvas.transform.position - transform.position);
-                        _minimapBBtnLocalRot = invVrYaw * canvas.transform.rotation;
-                        _minimapBBtnHasOffset = true;
-                    }
-                    _positionedCanvases.Add(id);
-                    _gripDragEnforce[id] = (canvas.transform.position, canvas.transform.rotation);
-                }
-                continue;
-            }
-
-            _placementIndex++; // incremental depth offset to prevent z-fighting
-            // Skip if not currently visible (will be placed when it activates).
-            // Exception: CaseBoard canvases are always positioned — the game may
-            // fade them in via CanvasGroup after our positioning pass.
-            if (!CanvasCategoryInfo.IsCanvasVisible(canvas) && cat != CanvasCategory.CaseBoard) continue;
-
-            float dist = catDefs.Distance;
-            if (cat == CanvasCategory.Menu) dist = VRSettingsPanel.MenuDistance;
-            float vOff = catDefs.VerticalOffset;
-
-            // PopupMessage/TutorialMessage: now nested under TooltipCanvas, handled in dialog mode above.
-            string cname = canvas.gameObject.name ?? "";
-            // ActionPanelCanvas: 0.15m closer than CaseBoard so action buttons are in front
-            if (cname.Equals("ActionPanelCanvas", StringComparison.OrdinalIgnoreCase))
-                dist = CanvasCategoryInfo.GetCategoryDefaults(CanvasCategory.CaseBoard).Distance - 0.15f;
-
-            // CaseBoard: first canvas becomes primary anchor, others maintain relative offset
-            if (cat == CanvasCategory.CaseBoard)
-            {
-                // First CaseBoard canvas to be positioned becomes the primary
-                if (_caseBoard.CaseBoardPrimaryId < 0)
-                {
-                    _caseBoard.CaseBoardPrimaryId = id;
-                    // Fall through to normal placement below
-                }
-                else if (id != _caseBoard.CaseBoardPrimaryId)
-                {
-                    if (_managedCanvases.TryGetValue(_caseBoard.CaseBoardPrimaryId, out var primary) && primary != null
-                        && _positionedCanvases.Contains(_caseBoard.CaseBoardPrimaryId))
-                    {
-                        // Apply stored relative offset from primary
-                        if (_caseBoardOffsets.TryGetValue(id, out var stored))
-                        {
-                            canvas.transform.position = primary.transform.position + stored.pos;
-                            canvas.transform.rotation = stored.rot;
-                            _positionedCanvases.Add(id);
-                            continue;
-                        }
-                        // No stored offset yet — place alongside primary with visible offset
-                        canvas.transform.position = primary.transform.position + primary.transform.right * 0.5f;
-                        canvas.transform.rotation = primary.transform.rotation;
-                        _positionedCanvases.Add(id);
-                        continue;
-                    }
-                    // Primary not positioned yet — defer to next frame
-                    continue;
-                }
-            }
-
-            // If user previously grip-dragged this canvas, restore relative to
-            // ActionPanelCanvas (case board selection UI).  Offset is in anchor-local
-            // space so it rotates with the anchor when the case board reopens.
-            // Exception: ActionPanelCanvas IS the anchor — restoring it from its own
-            // offset would cause a deadlock (waits for itself to be positioned).
-            // Let it fall through to default head+forward placement instead.
-            bool isActionPanelAnchor = (id == _actionPanelId);
-            if (!isActionPanelAnchor &&
-                _gripDragAnchorOffsets.TryGetValue(id, out var anchorOff) &&
-                _actionPanelCanvas != null && _positionedCanvases.Contains(_actionPanelId))
-            {
-                Quaternion anchorRot = _actionPanelCanvas.transform.rotation;
-                Vector3 restoredPos = _actionPanelCanvas.transform.position + anchorRot * anchorOff.offset;
-                Quaternion restoredRot = anchorRot * anchorOff.rot;
-                canvas.transform.position = restoredPos;
-                canvas.transform.rotation = restoredRot;
-                _positionedCanvases.Add(id);
-                // Update absolute enforcement so LateUpdate keeps this position
-                _gripDragEnforce[id] = (restoredPos, restoredRot);
-                Log.LogInfo($"[VRCamera] Restored '{cname}' [{cat}] from ActionPanel-relative offset");
-            }
-            else if (!isActionPanelAnchor &&
-                     _gripDragAnchorOffsets.TryGetValue(id, out _) &&
-                     _actionPanelCanvas != null && !_positionedCanvases.Contains(_actionPanelId))
-            {
-                // ActionPanelCanvas not positioned yet this cycle — defer to next frame
-                // so we don't fall through to default placement and lose the offset.
-                continue;
-            }
-            else
-            {
-                // Incremental depth offset (0.03m per canvas) prevents z-fighting between coplanar canvases
-                float depthJitter = _placementIndex * 0.03f;
-                canvas.transform.position = headPos + forward * (dist - depthJitter) + Vector3.up * vOff;
-                canvas.transform.rotation = yawOnly;
-                _positionedCanvases.Add(id);
-                Log.LogInfo($"[VRCamera] Placed '{cname}' [{cat}] dist={dist - depthJitter:F2}m yaw={headYaw:F1}°");
-            }
-        }
-
-        // Sync map/content nested canvases to CaseCanvas transform.
-        if (_casePanelCanvas != null && _caseContentIds.Count > 0 && _positionedCanvases.Contains(_casePanelId))
-        {
-            Vector3    casePos = _casePanelCanvas.transform.position;
-            Quaternion caseRot = _casePanelCanvas.transform.rotation;
-            foreach (var cid in _caseContentIds)
-            {
-                if (!_managedCanvases.TryGetValue(cid, out var cc) || cc == null) continue;
-                cc.transform.position = casePos;
-                cc.transform.rotation = caseRot;
-            }
-        }
-    }
 
     /// <summary>
     /// Reads the right controller pose, applies OpenXR-to-Unity coord flip, updates the
