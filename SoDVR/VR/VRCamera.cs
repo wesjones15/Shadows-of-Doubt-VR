@@ -43,21 +43,15 @@ public class VRCamera : MonoBehaviour
     private Transform     _cameraOffset = null!;
     private Camera        _leftCam    = null!;   // scene eye camera — renders everything (all layers)
     private Camera        _rightCam   = null!;
-    private Camera        _leftUICam  = null!;   // UI-only camera: renders UILayer with post-FX disabled
-    private Camera        _rightUICam = null!;
     private RenderTexture _leftRT     = null!;
     private RenderTexture _rightRT    = null!;
-    private RenderTexture _leftUIRT   = null!;
-    private RenderTexture _rightUIRT  = null!;
     private Transform     _gameCam    = null!;   // original game camera transform; we follow its world position
     private Transform     _hudAnchor  = null!;   // body-locked HUD anchor: follows VROrigin pos+yaw only
 
     // Unity built-in UI layer. Every attempt to find a genuinely unused layer 8-31 failed — the
-    // base game names all of them (see CameraRig.LogLayerAudit) — so this stays 5. The dedicated
-    // UI camera (see BuildCameraRig) is what actually makes its content immune to post-processing,
-    // not the layer choice itself. VoidRoomController's own geometry shares this layer too —
-    // deliberately not split off it; the only effect is its rings/posts also render post-FX-exempt
-    // during the pre-game/main-menu state, which is harmless.
+    // base game names all of them (see CameraRig.LogLayerAudit) — so this stays 5.
+    // Post-FX immunity is handled by CameraRig.SetupPostFXExemptPass's AfterPostProcess custom
+    // pass, not by excluding this layer from the main eye cameras — they still render it normally.
     internal const int UILayer      = 5;
 
     private readonly Rooms.VoidRoomController _voidRoom = new(UILayer);
@@ -510,13 +504,6 @@ public class VRCamera : MonoBehaviour
             CameraRig.SetProjection(_leftCam,  _leftEye);
             CameraRig.SetProjection(_rightCam, _rightEye);
 
-            // UI-only cameras must match their corresponding eye camera's pose/projection exactly,
-            // or the composited UI won't align with the world beneath it.
-            CameraRig.ApplyCameraPose(_leftUICam.transform,  _leftEye);
-            CameraRig.ApplyCameraPose(_rightUICam.transform, _rightEye);
-            CameraRig.SetProjection(_leftUICam,  _leftEye);
-            CameraRig.SetProjection(_rightUICam, _rightEye);
-
             // NOTE: Do NOT copy VR projectionMatrix to Camera.main — it breaks interaction.
             // VR projection is asymmetric for 2554x2756, while Camera.main is 1920x1080.
             // The resolution mismatch corrupts Camera.main.ScreenPointToRay and
@@ -697,11 +684,11 @@ public class VRCamera : MonoBehaviour
         hudAnchorGO.transform.SetParent(transform, false);
         _hudAnchor = hudAnchorGO.transform;
 
-        // ── Scene cameras — render everything EXCEPT UILayer, which the UI-only cameras below own
-        // exclusively and composite on top post-render, immune to post-processing. A second-camera
-        // approach using clearFlags=Depth in-place compositing was tried here before and reverted
-        // (see git history around this block) because HDRP ignored it and overwrote the scene with
-        // blue/black — this uses a separate RenderTexture + explicit alpha blit instead.
+        // ── Scene cameras — render EVERYTHING including UI layer ────────────────
+        // UI visibility/post-FX immunity is handled by CameraRig.SetupPostFXExemptPass's
+        // AfterPostProcess custom pass, not by a second camera — a second-camera approach (both
+        // clearFlags=Depth in-place compositing and a separate-RT-plus-blit composite) was tried
+        // here before and reverted; see git history around this block for why both failed.
         var leftGO = new GameObject("LeftEye");
         leftGO.transform.SetParent(_cameraOffset, false);
         _leftCam = leftGO.AddComponent<Camera>();
@@ -716,25 +703,11 @@ public class VRCamera : MonoBehaviour
         _rightRT.Create();
         CameraRig.SetupEyeCam(_rightCam, _rightRT);
 
-        // ── UI-only cameras — own UILayer exclusively, post-processing disabled ──
-        var leftUIGO = new GameObject("LeftEyeUI");
-        leftUIGO.transform.SetParent(_cameraOffset, false);
-        _leftUICam = leftUIGO.AddComponent<Camera>();
-        _leftUIRT  = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32) { name = "SoDVR_LeftUI" };
-        _leftUIRT.Create();
-        CameraRig.SetupUICam(_leftUICam, _leftUIRT, UILayer);
-
-        var rightUIGO = new GameObject("RightEyeUI");
-        rightUIGO.transform.SetParent(_cameraOffset, false);
-        _rightUICam = rightUIGO.AddComponent<Camera>();
-        _rightUIRT  = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32) { name = "SoDVR_RightUI" };
-        _rightUIRT.Create();
-        CameraRig.SetupUICam(_rightUICam, _rightUIRT, UILayer);
-
         _voidRoom.CaptureNeutralEnv(_leftCam);
         _heldItem.SetOrigin(transform);
 
         CameraRig.LogLayerAudit();
+        CameraRig.SetupPostFXExemptPass(UILayer);
 
         // Try to find and disable the game camera now. If it's not available yet
         // (e.g. main menu hasn't spawned one), TryFindGameCamera() will keep retrying in Update().
@@ -1076,34 +1049,6 @@ public class VRCamera : MonoBehaviour
         CameraRig.CopyGameCameraSettings(found, _leftCam);
         CameraRig.CopyGameCameraSettings(found, _rightCam);
 
-        // The UI-only cameras (see BuildCameraRig) own UILayer exclusively and composite it on top
-        // post-render — excluding it here too avoids double-rendering every UI element (once
-        // blurred by this pass, once crisp from the composite), which risked a blur "ghosting"
-        // halo at partially-transparent edges.
-        _leftCam.cullingMask  &= ~(1 << UILayer);
-        _rightCam.cullingMask &= ~(1 << UILayer);
-
-        // Sync just the lighting-relevant fields onto the UI cameras — not a full
-        // CopyGameCameraSettings call, which would also stomp their cullingMask/clearColorMode/
-        // customRenderingSettings back to the main cameras' values, undoing SetupUICam. Without
-        // this they resolve exposure against whatever HDAdditionalCameraData defaults to instead
-        // of the scene's actual Volume, which is the same near-black-panel failure v1_findings.md
-        // already documents for a wrong volumeLayerMask.
-        var leftHD    = _leftCam.gameObject.GetComponent<HDAdditionalCameraData>();
-        var leftUIHD  = _leftUICam.gameObject.GetComponent<HDAdditionalCameraData>();
-        var rightHD   = _rightCam.gameObject.GetComponent<HDAdditionalCameraData>();
-        var rightUIHD = _rightUICam.gameObject.GetComponent<HDAdditionalCameraData>();
-        if (leftHD != null && leftUIHD != null)
-        {
-            leftUIHD.volumeLayerMask = leftHD.volumeLayerMask;
-            leftUIHD.probeLayerMask  = leftHD.probeLayerMask;
-        }
-        if (rightHD != null && rightUIHD != null)
-        {
-            rightUIHD.volumeLayerMask = rightHD.volumeLayerMask;
-            rightUIHD.probeLayerMask  = rightHD.probeLayerMask;
-        }
-
         _voidRoom.CaptureGameplayState(_leftCam);
         Log.LogInfo($"[VRCamera] VRCam after copy: clearFlags={_leftCam.clearFlags}" +
                     $" cullingMask=0x{_leftCam.cullingMask:X8}" +
@@ -1232,13 +1177,6 @@ public class VRCamera : MonoBehaviour
                 // No GL.invertCulling — HDRP flipYMode handles both Y-flip and culling.
                 _rightCam.Render();
                 _leftCam.Render();
-
-                // UI-only cameras render UILayer with post-processing disabled, then get
-                // alpha-blitted onto the (already-rendered) eye RTs before the swapchain copy.
-                _rightUICam.Render();
-                _leftUICam.Render();
-                CameraRig.CompositeUIOntoEye(_rightUIRT, _rightRT);
-                CameraRig.CompositeUIOntoEye(_leftUIRT, _leftRT);
             }
 
             bool leftOk = CameraRig.CopyEye("L", OpenXRManager.LeftSwapchain, OpenXRManager.LeftSwapchainImages, _leftRT, _frameCount, out uint leftIdx);

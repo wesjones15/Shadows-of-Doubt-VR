@@ -230,73 +230,54 @@ internal static class CameraRig
     }
 
     /// <summary>
-    /// Sets up a UI-only camera: renders just <paramref name="uiLayer"/>, into its own transparent
-    /// RenderTexture, with HDRP post-processing disabled specifically for this camera. Composited
-    /// onto the main eye camera's output afterward via <see cref="CompositeUIOntoEye"/> — this is
-    /// what actually makes UI immune to post-processing, replacing the AfterPostProcess CustomPass
-    /// approach tried and confirmed non-functional in this game's HDRP build.
+    /// Installs a global AfterPostProcess CustomPassVolume that redraws <paramref name="uiLayer"/>
+    /// once the post stack has already been applied to the rest of the frame — genuinely immune to
+    /// post-processing, no second camera/compositing needed. A prior attempt at this (deleted in
+    /// commit a4d425a) silently did nothing; that attempt never checked or forced
+    /// RenderPipelineSettings.supportCustomPass, an asset-level gate this game's HDRP asset turned
+    /// out to have off by default (confirmed via reflection against the interop DLL) — forced on
+    /// here before installing the pass.
     /// </summary>
-    public static void SetupUICam(Camera cam, RenderTexture rt, int uiLayer)
-    {
-        cam.targetTexture = rt;
-        cam.stereoTargetEye = StereoTargetEyeMask.None;
-        cam.enabled = false;  // manual render only
-        cam.clearFlags = CameraClearFlags.SolidColor;
-        cam.backgroundColor = new Color(0f, 0f, 0f, 0f);
-        cam.cullingMask = 1 << uiLayer;
-
-        try
-        {
-            var hd = cam.gameObject.GetComponent<HDAdditionalCameraData>()
-                  ?? cam.gameObject.AddComponent<HDAdditionalCameraData>();
-            hd.flipYMode = HDAdditionalCameraData.FlipYMode.ForceFlipY;
-
-            // HDRP uses its own clear-flags system, not the legacy Camera.clearFlags set above —
-            // a fresh HDAdditionalCameraData defaults to clearing to Sky, which would make this
-            // camera's RT opaque every frame and blot out the world when composited onto the eye RT.
-            hd.clearColorMode = HDAdditionalCameraData.ClearColorMode.Color;
-            hd.backgroundColorHDR = new Color(0f, 0f, 0f, 0f);
-
-            hd.customRenderingSettings = true;
-            var fs = FrameSettings.NewDefaultCamera();
-            fs.SetEnabled(FrameSettingsField.Postprocess, false);
-            fs.SetEnabled(FrameSettingsField.ExposureControl, false);
-            var mask = new FrameSettingsOverrideMask();
-            mask.mask[(uint)FrameSettingsField.Postprocess] = true;
-            mask.mask[(uint)FrameSettingsField.ExposureControl] = true;
-            hd.renderingPathCustomFrameSettingsOverrideMask = mask;
-            ref var liveFs = ref hd.renderingPathCustomFrameSettings;
-            liveFs = fs;
-
-            Log.LogInfo($"[CameraRig] UI cam setup: cullingMask=0x{cam.cullingMask:X8} " +
-                        $"customRS={hd.customRenderingSettings} on {cam.gameObject.name}");
-        }
-        catch (Exception ex)
-        {
-            Log.LogWarning($"[CameraRig] SetupUICam HDRP setup failed: {ex.Message}");
-        }
-    }
-
-    private static Material? s_uiBlitMat;
-
-    /// <summary>
-    /// Alpha-blits the UI-only camera's rendered output onto the main eye camera's already-
-    /// rendered (and already post-processed) RenderTexture. Uses UI/Default — already proven to
-    /// resolve and alpha-blend correctly in this game build via CanvasMaterialPatcher — rather
-    /// than gambling on a built-in blit shader a shipped HDRP build may have stripped.
-    /// </summary>
-    public static void CompositeUIOntoEye(RenderTexture uiRT, RenderTexture eyeRT)
+    public static void SetupPostFXExemptPass(int uiLayer)
     {
         try
         {
-            if (s_uiBlitMat == null)
+            var asset = HDRenderPipeline.currentAsset;
+            if (asset != null)
             {
-                var shader = Shader.Find("UI/Default");
-                if (shader == null) { Log.LogWarning("[CameraRig] CompositeUIOntoEye: UI/Default shader not found"); return; }
-                s_uiBlitMat = new Material(shader);
+                var settings = asset.currentPlatformRenderPipelineSettings;
+                if (!settings.supportCustomPass)
+                {
+                    settings.supportCustomPass = true;
+                    asset.currentPlatformRenderPipelineSettings = settings;
+                    Log.LogInfo("[CameraRig] Forced RenderPipelineSettings.supportCustomPass = true");
+                }
+                else
+                {
+                    Log.LogInfo("[CameraRig] RenderPipelineSettings.supportCustomPass already true");
+                }
             }
-            Graphics.Blit(uiRT, eyeRT, s_uiBlitMat);
+            else
+            {
+                Log.LogWarning("[CameraRig] SetupPostFXExemptPass: HDRenderPipeline.currentAsset is null");
+            }
+
+            var go = new GameObject("SoDVR_PostFXExemptVolume");
+            UnityEngine.Object.DontDestroyOnLoad(go);
+            var volume = go.AddComponent<CustomPassVolume>();
+            volume.isGlobal = true;
+            volume.injectionPoint = CustomPassInjectionPoint.AfterPostProcess;
+
+            var pass = new DrawRenderersCustomPass
+            {
+                layerMask = 1 << uiLayer,
+                renderQueueType = CustomPass.RenderQueueType.All,
+            };
+            volume.customPasses.Add(pass);
+
+            Log.LogInfo($"[CameraRig] Custom pass volume created: " +
+                        $"injectionPoint={volume.injectionPoint}, layerMask=0x{(int)pass.layerMask:X8}.");
         }
-        catch (Exception ex) { Log.LogWarning($"[CameraRig] CompositeUIOntoEye failed: {ex.Message}"); }
+        catch (Exception ex) { Log.LogWarning($"[CameraRig] SetupPostFXExemptPass failed: {ex.Message}"); }
     }
 }
