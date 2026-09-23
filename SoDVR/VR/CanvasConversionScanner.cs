@@ -35,7 +35,6 @@ internal static class CanvasConversionScanner
         ref Canvas? casePanelCanvas, ref int casePanelId,
         int frameCount, Dictionary<int, int> lastRescanFrame,
         Dictionary<int, Graphic> managedFades, Camera? gameCamRef, Camera? leftCam,
-        ref Canvas? menuCanvasRef, ref int menuSettingsBtnId,
         ref Canvas? actionPanelCanvas, ref int actionPanelId, ref Canvas? minimapCanvasRef,
         ref GameObject? popupMessageGO, ref Canvas? popupMessageCanvas,
         ref GameObject? tutorialMessageGO, ref Canvas? tutorialMessageCanvas,
@@ -70,6 +69,10 @@ internal static class CanvasConversionScanner
             if (managedCanvases.ContainsKey(id)) continue;
 
             string cname = canvas.gameObject.name ?? "";
+
+            // MenuCanvas is owned outright by MenuRTPanel (RT-projected quad, immune to
+            // post-processing) — not WorldSpace-converted here, never added to managedCanvases.
+            if (cname == "MenuCanvas") continue;
 
             // Skip transient map-component canvases (high-churn, hundreds spawned/destroyed)
             if (cname.IndexOf("MapDuct",    StringComparison.OrdinalIgnoreCase) >= 0 ||
@@ -113,14 +116,6 @@ internal static class CanvasConversionScanner
             ConvertCanvasToWorldSpace(canvas, materialPatcher, managedFades, gameCamRef, leftCam);
             managedCanvases[id] = canvas;
 
-            // Redirect the game's "Settings" button to open our VR Settings panel instead.
-            // Also cache a reference so PositionCanvases can hide the menu while VR panel is open.
-            if (cname == "MenuCanvas")
-            {
-                menuCanvasRef = canvas;
-                var patchedId = PatchMenuSettingsButton(canvas);
-                if (patchedId.HasValue) menuSettingsBtnId = patchedId.Value;
-            }
             // Cache ActionPanelCanvas — used as anchor for grip-drag offset persistence.
             if (string.Equals(cname, "ActionPanelCanvas", StringComparison.OrdinalIgnoreCase))
             {
@@ -460,13 +455,12 @@ internal static class CanvasConversionScanner
 
     /// <summary>
     /// Finds buttons in MenuCanvas whose label text equals "Settings" and replaces their
-    /// onClick listener to open the VR Settings panel. Called once per MenuCanvas instance
-    /// (first discovery, here) and again on every menu-open transition (from
-    /// VRCamera.PositionCanvases, since the game may reinitialise buttons) — two different
-    /// call sites, so this returns the patched button's instance ID instead of writing
-    /// _menuSettingsBtnId as a side effect; both callers assign it themselves. Returns null
-    /// (leave _menuSettingsBtnId untouched) when no "Settings" button is found this call,
-    /// matching the original's behavior of only ever writing the field inside the match loop.
+    /// onClick listener to open the VR Settings panel. Called by MenuRTPanel — once at first
+    /// discovery, and again on every menu-open transition, since the game may reinitialise
+    /// buttons — so this returns the patched button's instance ID instead of writing a field as a
+    /// side effect; the caller assigns it itself. Returns null when no "Settings" button is found
+    /// this call. Canvas-mode-agnostic (works the same whether the canvas is WorldSpace or
+    /// ScreenSpaceCamera) — only walks Text/Button components, never touches renderMode/transform.
     /// Cannot use GetComponentInParent&lt;Button&gt;() in IL2CPP — walks parents manually.
     /// </summary>
     internal static int? PatchMenuSettingsButton(Canvas menuCanvas)
@@ -495,8 +489,9 @@ internal static class CanvasConversionScanner
                 if (btn == null) continue;
 
                 // Replace onClick to suppress the game's persistent listener.
-                // The actual VR panel open is handled in TryClickCanvas via _menuSettingsBtnId
-                // to avoid IL2CPP AddListener reliability issues on freshly-created events.
+                // The actual VR panel open is handled in MenuRTPanel.TryClick via the returned
+                // button instance ID, to avoid IL2CPP AddListener reliability issues on
+                // freshly-created events.
                 btn.onClick = new Button.ButtonClickedEvent();
                 int btnId = btn.gameObject.GetInstanceID();
                 lastPatchedId = btnId;

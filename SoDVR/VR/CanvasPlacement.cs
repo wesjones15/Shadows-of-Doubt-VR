@@ -25,16 +25,13 @@ internal sealed class CanvasPlacement
     private static ManualLogSource Log => Plugin.Log;
 
     // Cluster-local — nowhere else in VRCamera touches these.
-    private bool _menuCanvasHidden;   // tracks last hide state to avoid per-frame toggles
-    private bool _menuWasActive;      // tracks last isActiveAndEnabled to detect menu open transition
     private bool _dialogCanvasPlaced; // true once dialog-mode tooltip is placed (world-lock until dialog closes)
     private int  _placementIndex;     // incremental depth offset counter per placement cycle
 
     internal void PositionCanvases(
         Transform vrOrigin, Transform hudAnchor,
         Dictionary<int, Graphic> managedFades, int frameCount,
-        Canvas? menuCanvasRef, ref int menuSettingsBtnId,
-        HashSet<int> noGroupInteractable, ref int forceScanFrames,
+        Canvas? menuCanvasRef,
         Camera? leftCam, bool posesValid,
         Canvas? casePanelCanvas, int casePanelId, Canvas? cursorCanvas,
         Dictionary<int, Canvas> managedCanvases, HashSet<int> nestedCanvasIds,
@@ -65,37 +62,10 @@ internal sealed class CanvasPlacement
             }
         }
 
-        // Hide MenuCanvas while VR settings panel is open (only toggle on state change —
-        // toggling every frame causes material instance flood → crash).
-        if (menuCanvasRef != null)
-        {
-            try
-            {
-                bool vrOpen = VRSettingsPanel.RootGO?.activeSelf == true;
-                if (vrOpen != _menuCanvasHidden)
-                {
-                    _menuCanvasHidden = vrOpen;
-                    menuCanvasRef.enabled = !vrOpen;
-                    var mgr = menuCanvasRef.GetComponent<GraphicRaycaster>();
-                    if (mgr != null) mgr.enabled = !vrOpen;
-                }
-
-                // Re-patch Settings button on every menu open (game may reinitialise buttons)
-                bool menuNowActive = menuCanvasRef.isActiveAndEnabled;
-                if (menuNowActive && !_menuWasActive)
-                {
-                    var patchedId = CanvasConversionScanner.PatchMenuSettingsButton(menuCanvasRef);
-                    if (patchedId.HasValue) menuSettingsBtnId = patchedId.Value;
-                    // MenuCanvas just became interactable — add it to the no-CanvasGroup
-                    // interactable cache immediately so TryClickCanvas doesn't skip it.
-                    // The next forced scan will rebuild the cache from scratch.
-                    noGroupInteractable.Add(menuCanvasRef.GetInstanceID());
-                    forceScanFrames = 1;
-                }
-                _menuWasActive = menuNowActive;
-            }
-            catch { }
-        }
+        // MenuCanvas's own hide-while-VR-settings-open + re-patch-on-open-transition behavior now
+        // lives in MenuRTPanel.Tick, which owns the canvas outright. menuCanvasRef is still read
+        // below (HUD auto-hide) — that's a plain read of state MenuRTPanel maintains, not a second
+        // write path competing with it.
 
         if (leftCam == null || !posesValid) return;
 

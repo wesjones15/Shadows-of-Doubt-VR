@@ -62,6 +62,7 @@ public class VRCamera : MonoBehaviour
     private readonly CaseBoardInteraction _caseBoard = new();
     private readonly CanvasMaterialPatcher _materialPatcher = new();
     private readonly CanvasPlacement _canvasPlacement = new();
+    private readonly MenuRTPanel _menuRTPanel = new(UILayer);
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
     // The swapchain copy still runs every frame, so head tracking stays smooth via ATW.
@@ -229,8 +230,6 @@ public class VRCamera : MonoBehaviour
     private Canvas?        _cursorTargetCanvas;   // the nearest aimed-at canvas (for button mapping: A=RMB, B=MMB)
     private Vector3        _cursorTargetPos;      // world pos of nearest aimed-at canvas
     private Quaternion     _cursorTargetRot;      // world rot of nearest aimed-at canvas
-    private Canvas?        _menuCanvasRef;       // MenuCanvas — hidden while VR settings panel is open
-    private int            _menuSettingsBtnId;   // instanceID of the patched Settings button in MenuCanvas
 
     // ── Multi-dot aim system ─────────────────────────────────────────────────
     // World-space quads that show an aim dot on EVERY canvas the controller ray passes through,
@@ -360,13 +359,20 @@ public class VRCamera : MonoBehaviour
                     ref _casePanelCanvas, ref _casePanelId,
                     _frameCount, _lastRescanFrame,
                     _managedFades, _gameCamRef, _leftCam,
-                    ref _menuCanvasRef, ref _menuSettingsBtnId,
                     ref _actionPanelCanvas, ref _actionPanelId, ref _minimapCanvasRef,
                     ref _popupMessageGO, ref _popupMessageCanvas,
                     ref _tutorialMessageGO, ref _tutorialMessageCanvas,
                     _windowNestedList, _noGroupInteractable);
             }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] ScanAndConvertCanvases outer: {ex.GetType().Name}: {ex.Message}"); }
+        }
+
+        // MenuCanvas is owned outright by MenuRTPanel, not the scanner above — same
+        // scene-load-grace gating so it never touches canvas/camera state mid-load either.
+        if (_sceneLoadGrace == 0)
+        {
+            try { _menuRTPanel.Tick(_leftCam); }
+            catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
         }
 
         // F8: re-centre all canvases in front of the current head pose.
@@ -562,8 +568,7 @@ public class VRCamera : MonoBehaviour
                 _locomotion.UpdateVentState();
 
                 bool caseBoardOpenForInput = _actionPanelCanvas != null && _actionPanelCanvas.gameObject.activeSelf;
-                bool isPausedForLocomotion = caseBoardOpenForInput
-                                           || (_menuCanvasRef != null && !CanvasCategoryInfo.IsCanvasEffectivelyHidden(_menuCanvasRef, _noGroupInteractable));
+                bool isPausedForLocomotion = caseBoardOpenForInput || _menuRTPanel.IsShowing;
                 bool vrSettingsOpenForInput = VRSettingsPanel.RootGO?.activeSelf == true;
 
                 _locomotion.UpdateSnapTurn(transform, _voidRoom.InVoidMode);
@@ -637,7 +642,7 @@ public class VRCamera : MonoBehaviour
                 if (!shouldDiscover && !_locomotion.HasPlayerController)
                 {
                     // Post-save/load path: wait for menu to close before discovering.
-                    bool menuGone = (_menuCanvasRef == null || CanvasCategoryInfo.IsCanvasEffectivelyHidden(_menuCanvasRef, _noGroupInteractable))
+                    bool menuGone = !_menuRTPanel.IsShowing
                                  && (_actionPanelCanvas == null || !_actionPanelCanvas.gameObject.activeSelf);
                     if (menuGone) shouldDiscover = true;
                 }
@@ -1077,8 +1082,7 @@ public class VRCamera : MonoBehaviour
             _canvasPlacement.PositionCanvases(
                 transform, _hudAnchor,
                 _managedFades, _frameCount,
-                _menuCanvasRef, ref _menuSettingsBtnId,
-                _noGroupInteractable, ref _forceScanFrames,
+                _menuRTPanel.Canvas,
                 _leftCam, _posesValid,
                 _casePanelCanvas, _casePanelId, _cursorCanvas,
                 _managedCanvases, _nestedCanvasIds,
@@ -1183,6 +1187,11 @@ public class VRCamera : MonoBehaviour
                 // Viewport at minimum zoom (applied once after MapController is ready).
                 _canvasPlacement.UpdateMinimapZoom(_materialPatcher);
 
+                // MenuCanvas's RT panel renders first so its texture is current before the eye
+                // cameras render the quad sampling it this frame.
+                try { _menuRTPanel.Render(); }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.Render: {ex.Message}"); }
+
                 // No GL.invertCulling — HDRP flipYMode handles both Y-flip and culling.
                 _rightCam.Render();
                 _leftCam.Render();
@@ -1241,7 +1250,7 @@ public class VRCamera : MonoBehaviour
         _caseBoard.SetFrameContext(
             _managedCanvases, _noGroupInteractable,
             _lastRescanFrame, () => _forceScanFrames = 30, OnSaveLoadButtonClicked,
-            _menuSettingsBtnId, _menuCanvasRef,
+            _menuRTPanel.SettingsBtnId, _menuRTPanel.Canvas, _menuRTPanel,
             _leftCam, _gameCamRef, _rightControllerGO, _leftControllerGO,
             _actionPanelCanvas, _casePanelCanvas, _minimapCanvasRef,
             _popupMessageGO, _tutorialMessageGO,
@@ -1260,7 +1269,7 @@ public class VRCamera : MonoBehaviour
         _controllerInteraction.UpdateCursorDot(_cursorRect, _cursorCanvas, _rightControllerGO);
         _controllerInteraction.UpdateLaser(_laserLine, _rightControllerGO, _cursorHasTarget, _cursorTargetPos);
         _controllerInteraction.UpdateLeftLaser(_leftLaserLine, _leftControllerGO);
-        _controllerInteraction.UpdateLeftInteractMarker(_leftControllerGO, _menuCanvasRef, _gameCamRef,
+        _controllerInteraction.UpdateLeftInteractMarker(_leftControllerGO, _menuRTPanel.Canvas, _gameCamRef,
             _leftCam, _interactionLayerMask, _baseInteractionRange);
 
         _caseBoard.PreAimScan();

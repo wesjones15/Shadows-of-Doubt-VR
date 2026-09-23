@@ -161,6 +161,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private Action _ctxOnSaveLoadButtonClicked = null!;
     private int _ctxMenuSettingsBtnId;
     private Canvas? _ctxMenuCanvasRef;
+    private MenuRTPanel? _ctxMenuRTPanel;
     private Camera? _ctxLeftCam;
     private Camera? _ctxGameCamRef;
     private GameObject? _ctxRightControllerGO;
@@ -198,7 +199,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     public void SetFrameContext(
         Dictionary<int, Canvas> managedCanvases, HashSet<int> noGroupInteractable,
         Dictionary<int, int> lastRescanFrame, Action requestForceScan, Action onSaveLoadButtonClicked,
-        int menuSettingsBtnId, Canvas? menuCanvasRef,
+        int menuSettingsBtnId, Canvas? menuCanvasRef, MenuRTPanel? menuRTPanel,
         Camera? leftCam, Camera? gameCamRef, GameObject? rightControllerGO, GameObject? leftControllerGO,
         Canvas? actionPanelCanvas, Canvas? casePanelCanvas, Canvas? minimapCanvasRef,
         GameObject? popupMessageGO, GameObject? tutorialMessageGO,
@@ -221,6 +222,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         _ctxOnSaveLoadButtonClicked = onSaveLoadButtonClicked;
         _ctxMenuSettingsBtnId = menuSettingsBtnId;
         _ctxMenuCanvasRef = menuCanvasRef;
+        _ctxMenuRTPanel = menuRTPanel;
         _ctxLeftCam = leftCam;
         _ctxGameCamRef = gameCamRef;
         _ctxRightControllerGO = rightControllerGO;
@@ -248,6 +250,14 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         _ctxMinimapBBtnLocalRot = minimapBBtnLocalRot;
         _ctxMinimapBBtnHasOffset = minimapBBtnHasOffset;
     }
+
+    /// <summary>First refusal for the RT-panel quad ahead of the WorldSpace-canvas click router —
+    /// MenuCanvas isn't in _ctxManagedCanvases any more (MenuRTPanel owns it outright), so it needs
+    /// its own hit test rather than falling out of CanvasClickRouter.TryClick's plane scan.</summary>
+    private bool TryMenuRTPanelClick(Vector3 origin, Vector3 direction) =>
+        _ctxMenuRTPanel != null &&
+        _ctxMenuRTPanel.TryClick(origin, direction, _ctxManagedCanvases, _ctxLastRescanFrame,
+            _ctxRequestForceScan, _ctxOnSaveLoadButtonClicked);
 
     // ── Grip-drag (whole canvas + nested note relocate) ─────────────────────────────────────
     public void UpdateGripDrag()
@@ -1519,9 +1529,10 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                     {
                         _triggerNeedsRelease = true;
                         _triggerFireFrame = Time.frameCount;
-                        CanvasClickRouter.TryClick(rPos, rFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
-                            _ctxLastRescanFrame, _ctxRequestForceScan, _ctxMenuSettingsBtnId, _ctxMenuCanvasRef,
-                            _ctxOnSaveLoadButtonClicked, this);
+                        if (!TryMenuRTPanelClick(rPos, rFwd))
+                            CanvasClickRouter.TryClick(rPos, rFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
+                                _ctxLastRescanFrame, _ctxRequestForceScan, _ctxMenuSettingsBtnId, _ctxMenuCanvasRef,
+                                _ctxOnSaveLoadButtonClicked, this);
                     }
                 }
                 else
@@ -1529,9 +1540,10 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                     // Not hitting CaseCanvas — use regular click for ActionPanelCanvas buttons etc.
                     _triggerNeedsRelease = true;
                     _triggerFireFrame = Time.frameCount;
-                    CanvasClickRouter.TryClick(rPos, rFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
-                        _ctxLastRescanFrame, _ctxRequestForceScan, _ctxMenuSettingsBtnId, _ctxMenuCanvasRef,
-                        _ctxOnSaveLoadButtonClicked, this);
+                    if (!TryMenuRTPanelClick(rPos, rFwd))
+                        CanvasClickRouter.TryClick(rPos, rFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
+                            _ctxLastRescanFrame, _ctxRequestForceScan, _ctxMenuSettingsBtnId, _ctxMenuCanvasRef,
+                            _ctxOnSaveLoadButtonClicked, this);
                 }
             }
         }
@@ -1545,9 +1557,10 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             {
                 _triggerNeedsRelease = true;
                 _triggerFireFrame = Time.frameCount;
-                CanvasClickRouter.TryClick(rPos, rFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
-                    _ctxLastRescanFrame, _ctxRequestForceScan, _ctxMenuSettingsBtnId, _ctxMenuCanvasRef,
-                    _ctxOnSaveLoadButtonClicked, this);
+                if (!TryMenuRTPanelClick(rPos, rFwd))
+                    CanvasClickRouter.TryClick(rPos, rFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
+                        _ctxLastRescanFrame, _ctxRequestForceScan, _ctxMenuSettingsBtnId, _ctxMenuCanvasRef,
+                        _ctxOnSaveLoadButtonClicked, this);
             }
         }
 
