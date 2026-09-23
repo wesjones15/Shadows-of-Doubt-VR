@@ -23,7 +23,7 @@ public static class VRSettingsPanel
 {
     private static ManualLogSource Log => Plugin.Log;
 
-    private const int   UILayer  = 5;
+    private const int   UILayer  = VRCamera.UILayer;
     private const float ROW_H    = 60f;   // row height px
     private const float ROW_STEP = 68f;   // row height + gap
     private const float TOP_PAD  = 8f;

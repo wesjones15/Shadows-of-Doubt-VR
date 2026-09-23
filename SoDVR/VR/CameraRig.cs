@@ -17,55 +17,12 @@ internal static class CameraRig
 {
     private static ManualLogSource Log => Plugin.Log;
 
-    // Expensive HDRP passes to disable on VR eye cameras.
-    private static readonly FrameSettingsField[] s_VrDisabledFields =
-    {
-        FrameSettingsField.Postprocess,         // master kill — disables exposure + all PP
-        FrameSettingsField.SSAO,
-        FrameSettingsField.SSR,
-        FrameSettingsField.Volumetrics,
-        FrameSettingsField.MotionVectors,
-        FrameSettingsField.MotionBlur,
-        FrameSettingsField.DepthOfField,
-        FrameSettingsField.ChromaticAberration,
-        FrameSettingsField.ContactShadows,
-        FrameSettingsField.Tonemapping,
-    };
-
-    // UI overlay cameras use a superset of the scene camera's disabled passes — everything off.
-    private static readonly FrameSettingsField[] s_UIOverlayDisabledFields =
-    {
-        FrameSettingsField.Postprocess,
-        FrameSettingsField.SSAO,
-        FrameSettingsField.SSR,
-        FrameSettingsField.Volumetrics,
-        FrameSettingsField.MotionVectors,
-        FrameSettingsField.MotionBlur,
-        FrameSettingsField.DepthOfField,
-        FrameSettingsField.ChromaticAberration,
-        FrameSettingsField.ContactShadows,
-        FrameSettingsField.Tonemapping,
-        FrameSettingsField.ExposureControl,
-        FrameSettingsField.ColorGrading,
-        FrameSettingsField.Bloom,
-        FrameSettingsField.FilmGrain,
-        FrameSettingsField.Dithering,
-        FrameSettingsField.LensDistortion,
-        FrameSettingsField.Vignette,
-    };
-
-    public static void SetupEyeCam(Camera cam, RenderTexture rt, bool isUiOverlay)
+    public static void SetupEyeCam(Camera cam, RenderTexture rt)
     {
         // Minimal setup — only set what's strictly needed for manual rendering.
         cam.targetTexture = rt;
         cam.stereoTargetEye = StereoTargetEyeMask.None;
         cam.enabled = false;  // manual render only
-
-        if (isUiOverlay)
-        {
-            cam.clearFlags = CameraClearFlags.Depth;
-            cam.backgroundColor = Color.clear;
-        }
 
         try
         {

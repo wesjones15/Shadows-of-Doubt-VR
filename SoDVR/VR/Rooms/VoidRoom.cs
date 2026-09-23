@@ -53,15 +53,22 @@ internal sealed class VoidRoom
 {
     private static ManualLogSource Log => Plugin.Log;
 
-    /// <summary>Layer the room is built on — the same layer the eye cameras are masked down to.</summary>
+    /// <summary>Layer the room's own geometry is built on.</summary>
     private readonly int _layer;
+
+    /// <summary>
+    /// The mod's post-FX-exempt UI layer (menus, HUD gizmos, VR settings panel). Masked in
+    /// alongside <see cref="_layer"/> while the room owns the cameras, so the main menu canvas and
+    /// laser pointer/controller visuals still show over it.
+    /// </summary>
+    private readonly int _uiLayer;
 
     private GameObject? _root;
 
     /// <summary>True while this room has the eye cameras masked down to its own layer.</summary>
     private bool _masksTaken;
 
-    public VoidRoom(int layer) { _layer = layer; }
+    public VoidRoom(int layer, int uiLayer) { _layer = layer; _uiLayer = uiLayer; }
 
     public bool IsActive => _root != null;
 
@@ -118,7 +125,7 @@ internal sealed class VoidRoom
     {
         try
         {
-            int onlyOurs = 1 << _layer;
+            int onlyOurs = (1 << _layer) | (1 << _uiLayer);
             if (left != null) left.cullingMask = onlyOurs;
             if (right != null) right.cullingMask = onlyOurs;
 
@@ -131,7 +138,7 @@ internal sealed class VoidRoom
             if (!_masksTaken)
             {
                 _masksTaken = true;
-                Log.LogInfo($"[VoidRoom] Eye cameras masked to layer {_layer}" +
+                Log.LogInfo($"[VoidRoom] Eye cameras masked to layers {_layer},{_uiLayer} (0x{onlyOurs:X8})" +
                             (neutral.HasValue ? $"; environment pinned to neutral ({neutral.Value})." : " (neutral environment not yet captured)."));
             }
         }
