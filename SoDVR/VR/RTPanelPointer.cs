@@ -11,13 +11,11 @@ namespace SoDVR.VR;
 
 /// <summary>
 /// Reusable controller-ray interaction for an RT panel quad: a thin laser that only shows while
-/// actually aiming at the panel, an on-panel cursor rendered as part of the panel's own RT content
-/// (not a separate 3D object — genuinely immune to the main eye cameras' post-processing, the same
-/// way the panel's own buttons/text are, rather than just toned down to reduce bloom like the laser
-/// has to be), hover-driven Button highlighting, and trigger-as-click. One instance is meant to be
-/// owned per RT panel (MenuRTPanel today; future RT panels — case board, popups — construct their
-/// own instance and Bind it to their own canvas/collider/RT once set up) rather than duplicating
-/// this logic per panel.
+/// actually aiming at the panel (its endpoint is the cursor — a separate on-panel cursor dot was
+/// tried and dropped; the laser's own tip is enough), hover-driven Button highlighting, and
+/// trigger-as-click. One instance is meant to be owned per RT panel (MenuRTPanel today; future RT
+/// panels — case board, popups — construct their own instance and Bind it to their own
+/// canvas/collider/RT once set up) rather than duplicating this logic per panel.
 /// </summary>
 internal sealed class RTPanelPointer
 {
@@ -38,10 +36,6 @@ internal sealed class RTPanelPointer
     private RenderTexture? _rt;
 
     private LineRenderer? _laserLine;
-    private Canvas? _cursorCanvas;
-    private RectTransform? _cursorCanvasRT;
-    private RectTransform? _cursorImageRT;
-    private bool _loggedCursorCanvasSize;
     private Selectable? _hoveredSelectable;
     private bool _prevRightTrigger;
     private bool _prevLeftTrigger;
@@ -62,7 +56,6 @@ internal sealed class RTPanelPointer
     public void Clear()
     {
         if (_laserLine != null && _laserLine.enabled) _laserLine.enabled = false;
-        HideCursorDot();
         UpdateHover(null, null);
     }
 
@@ -115,13 +108,11 @@ internal sealed class RTPanelPointer
         if (!hitQuad)
         {
             HideLaser();
-            HideCursorDot();
             UpdateHover(null, null);
             return;
         }
 
         ShowLaser(origin, hit.point);
-        ShowCursorDot(hit.textureCoord);
 
         var gr = _canvas.GetComponent<GraphicRaycaster>();
         var es = EventSystem.current;
@@ -264,65 +255,4 @@ internal sealed class RTPanelPointer
         if (_laserLine != null && _laserLine.enabled) _laserLine.enabled = false;
     }
 
-    /// <summary>
-    /// Unlike the laser, the cursor genuinely can be made immune to the main eye cameras' post-
-    /// processing: it doesn't need to exist in real 3D space, only to appear to sit on the panel, so
-    /// it's drawn as an ordinary UI Image sharing the panel's own projector camera (a second
-    /// ScreenSpaceCamera canvas using that same camera, sorted in front) rather than as a separate
-    /// 3D-world quad next to the panel. It becomes part of the same pre-rendered pixels the panel's
-    /// buttons and text already are, so it never touches the eye cameras' bloom/tonemapping at all —
-    /// no exposure/bloom tradeoff needed here the way the laser needs one.
-    /// </summary>
-    private void EnsureCursorDot()
-    {
-        if (_cursorCanvas != null || _canvas == null) return;
-
-        var cursorCanvasGO = new GameObject($"SoDVR_{_logTag}_CursorCanvas");
-        cursorCanvasGO.layer = _canvas.gameObject.layer; // must match the projector camera's cullingMask
-        UnityEngine.Object.DontDestroyOnLoad(cursorCanvasGO);
-        _cursorCanvas = cursorCanvasGO.AddComponent<Canvas>();
-        _cursorCanvas.renderMode = RenderMode.ScreenSpaceCamera;
-        _cursorCanvas.worldCamera = _canvas.worldCamera; // the panel's own projector camera
-        _cursorCanvas.planeDistance = Mathf.Max(0.05f, _canvas.planeDistance - 0.1f); // in front of the panel's own content
-        _cursorCanvas.sortingOrder = 500;
-        _cursorCanvasRT = cursorCanvasGO.GetComponent<RectTransform>();
-
-        var imgGO = new GameObject("Cursor");
-        imgGO.transform.SetParent(cursorCanvasGO.transform, false);
-        var img = imgGO.AddComponent<Image>();
-        img.raycastTarget = false;
-        img.color = new Color(1f, 0.15f, 0.85f, 0.9f); // plain SDR color — part of the rendered panel content, no bloom to tune around
-        _cursorImageRT = imgGO.GetComponent<RectTransform>();
-        _cursorImageRT.sizeDelta = new Vector2(26f, 26f);
-        _cursorImageRT.anchorMin = _cursorImageRT.anchorMax = new Vector2(0.5f, 0.5f);
-        _cursorImageRT.pivot = new Vector2(0.5f, 0.5f);
-
-        cursorCanvasGO.SetActive(false);
-    }
-
-    private void ShowCursorDot(Vector2 uv)
-    {
-        EnsureCursorDot();
-        if (_cursorImageRT == null || _cursorCanvas == null || _rt == null) return;
-
-        // Scale from the cursor canvas's own measured rect rather than assuming it auto-sized to
-        // exactly the RT's pixel dimensions (expected for a ScreenSpaceCamera canvas sharing the
-        // projector camera, but asserted here via a one-time log instead of trusted blindly — this
-        // canvas is the newest, least-exercised code path in this class).
-        Vector2 measured = _cursorCanvasRT != null ? _cursorCanvasRT.rect.size : Vector2.zero;
-        if (!_loggedCursorCanvasSize)
-        {
-            _loggedCursorCanvasSize = true;
-            Log.LogInfo($"[{_logTag}] Cursor canvas measured size={measured} vs RT pixel size=({_rt.width},{_rt.height})");
-        }
-        Vector2 scale = (measured.x > 0f && measured.y > 0f) ? measured : new Vector2(_rt.width, _rt.height);
-
-        _cursorImageRT.anchoredPosition = new Vector2((uv.x - 0.5f) * scale.x, (uv.y - 0.5f) * scale.y);
-        if (!_cursorCanvas.gameObject.activeSelf) _cursorCanvas.gameObject.SetActive(true);
-    }
-
-    private void HideCursorDot()
-    {
-        if (_cursorCanvas != null && _cursorCanvas.gameObject.activeSelf) _cursorCanvas.gameObject.SetActive(false);
-    }
 }
