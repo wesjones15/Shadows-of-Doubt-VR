@@ -1049,6 +1049,15 @@ public class VRCamera : MonoBehaviour
         CameraRig.CopyGameCameraSettings(found, _leftCam);
         CameraRig.CopyGameCameraSettings(found, _rightCam);
 
+        // CopyGameCameraSettings just overwrote cullingMask with the base game's own mask, which
+        // may not contain UILayer's bit (it doesn't for layer 15 — TextToImageController's own
+        // layer, excluded from the base game's Main Camera mask). Without this, mod UI/HUD is
+        // literally never culled in for these cameras from here on — not rendered normally, and
+        // not visible to the post-FX-exempt custom pass either, which can only catch renderers the
+        // camera already culled in.
+        _leftCam.cullingMask  |= (1 << UILayer);
+        _rightCam.cullingMask |= (1 << UILayer);
+
         _voidRoom.CaptureGameplayState(_leftCam);
         Log.LogInfo($"[VRCamera] VRCam after copy: clearFlags={_leftCam.clearFlags}" +
                     $" cullingMask=0x{_leftCam.cullingMask:X8}" +

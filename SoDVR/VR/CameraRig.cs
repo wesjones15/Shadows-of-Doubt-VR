@@ -49,6 +49,10 @@ internal static class CameraRig
                   ?? cam.gameObject.AddComponent<HDAdditionalCameraData>();
             hd.customRenderingSettings = false;
             hd.flipYMode = HDAdditionalCameraData.FlipYMode.ForceFlipY;
+
+            // Tried forcing this true + a per-camera CustomPass FrameSettings override, to make
+            // SetupPostFXExemptPass's AfterPostProcess pass execute — it didn't help (the pass still
+            // never drew anything) and broke case board/pause menu rendering entirely. Leave false.
             Log.LogInfo($"[CameraRig] HDRP setup: customRS={hd.customRenderingSettings}" +
                         $" flipY={hd.flipYMode}" +
                         $" volumeLayerMask=0x{hd.volumeLayerMask.value:X8}" +
