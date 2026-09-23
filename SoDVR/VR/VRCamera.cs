@@ -1083,6 +1083,27 @@ public class VRCamera : MonoBehaviour
         _leftCam.cullingMask  &= ~(1 << UILayer);
         _rightCam.cullingMask &= ~(1 << UILayer);
 
+        // Sync just the lighting-relevant fields onto the UI cameras — not a full
+        // CopyGameCameraSettings call, which would also stomp their cullingMask/clearColorMode/
+        // customRenderingSettings back to the main cameras' values, undoing SetupUICam. Without
+        // this they resolve exposure against whatever HDAdditionalCameraData defaults to instead
+        // of the scene's actual Volume, which is the same near-black-panel failure v1_findings.md
+        // already documents for a wrong volumeLayerMask.
+        var leftHD    = _leftCam.gameObject.GetComponent<HDAdditionalCameraData>();
+        var leftUIHD  = _leftUICam.gameObject.GetComponent<HDAdditionalCameraData>();
+        var rightHD   = _rightCam.gameObject.GetComponent<HDAdditionalCameraData>();
+        var rightUIHD = _rightUICam.gameObject.GetComponent<HDAdditionalCameraData>();
+        if (leftHD != null && leftUIHD != null)
+        {
+            leftUIHD.volumeLayerMask = leftHD.volumeLayerMask;
+            leftUIHD.probeLayerMask  = leftHD.probeLayerMask;
+        }
+        if (rightHD != null && rightUIHD != null)
+        {
+            rightUIHD.volumeLayerMask = rightHD.volumeLayerMask;
+            rightUIHD.probeLayerMask  = rightHD.probeLayerMask;
+        }
+
         _voidRoom.CaptureGameplayState(_leftCam);
         Log.LogInfo($"[VRCamera] VRCam after copy: clearFlags={_leftCam.clearFlags}" +
                     $" cullingMask=0x{_leftCam.cullingMask:X8}" +

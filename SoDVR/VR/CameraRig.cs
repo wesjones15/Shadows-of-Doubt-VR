@@ -251,6 +251,12 @@ internal static class CameraRig
                   ?? cam.gameObject.AddComponent<HDAdditionalCameraData>();
             hd.flipYMode = HDAdditionalCameraData.FlipYMode.ForceFlipY;
 
+            // HDRP uses its own clear-flags system, not the legacy Camera.clearFlags set above —
+            // a fresh HDAdditionalCameraData defaults to clearing to Sky, which would make this
+            // camera's RT opaque every frame and blot out the world when composited onto the eye RT.
+            hd.clearColorMode = HDAdditionalCameraData.ClearColorMode.Color;
+            hd.backgroundColorHDR = new Color(0f, 0f, 0f, 0f);
+
             hd.customRenderingSettings = true;
             var fs = FrameSettings.NewDefaultCamera();
             fs.SetEnabled(FrameSettingsField.Postprocess, false);
