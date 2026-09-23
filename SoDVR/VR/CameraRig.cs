@@ -17,6 +17,25 @@ internal static class CameraRig
 {
     private static ManualLogSource Log => Plugin.Log;
 
+    /// <summary>
+    /// One-time diagnostic confirming whether a given layer index is genuinely unused by the base
+    /// game. An empty name means the base game's Project Settings never named that layer.
+    /// Layers 0,1,2,4,5 are Unity built-ins and can't be renamed; 3,6,7 are the only other
+    /// project-definable indices in that range. Logged in full (0-31) because every index 8-31
+    /// turned out already claimed by this game (interior objects, citizen models, the document
+    /// text-capture system, etc.) — see VRCamera.UILayer's own comment for why that means this mod
+    /// just shares layer 5 rather than carving out a new one.
+    /// </summary>
+    public static void LogLayerAudit()
+    {
+        try
+        {
+            for (int i = 0; i <= 31; i++)
+                Log.LogInfo($"[CameraRig] Layer {i}: name='{LayerMask.LayerToName(i)}'");
+        }
+        catch (Exception ex) { Log.LogWarning($"[CameraRig] LogLayerAudit: {ex.Message}"); }
+    }
+
     public static void SetupEyeCam(Camera cam, RenderTexture rt)
     {
         // Minimal setup — only set what's strictly needed for manual rendering.
@@ -208,5 +227,70 @@ internal static class CameraRig
         var m = Matrix4x4.Frustum(l, r, b, t, n, f);
         // No manual Y-flip — HDRP handles it via HDAdditionalCameraData.flipYMode.
         cam.projectionMatrix = m;
+    }
+
+    /// <summary>
+    /// Sets up a UI-only camera: renders just <paramref name="uiLayer"/>, into its own transparent
+    /// RenderTexture, with HDRP post-processing disabled specifically for this camera. Composited
+    /// onto the main eye camera's output afterward via <see cref="CompositeUIOntoEye"/> — this is
+    /// what actually makes UI immune to post-processing, replacing the AfterPostProcess CustomPass
+    /// approach tried and confirmed non-functional in this game's HDRP build.
+    /// </summary>
+    public static void SetupUICam(Camera cam, RenderTexture rt, int uiLayer)
+    {
+        cam.targetTexture = rt;
+        cam.stereoTargetEye = StereoTargetEyeMask.None;
+        cam.enabled = false;  // manual render only
+        cam.clearFlags = CameraClearFlags.SolidColor;
+        cam.backgroundColor = new Color(0f, 0f, 0f, 0f);
+        cam.cullingMask = 1 << uiLayer;
+
+        try
+        {
+            var hd = cam.gameObject.GetComponent<HDAdditionalCameraData>()
+                  ?? cam.gameObject.AddComponent<HDAdditionalCameraData>();
+            hd.flipYMode = HDAdditionalCameraData.FlipYMode.ForceFlipY;
+
+            hd.customRenderingSettings = true;
+            var fs = FrameSettings.NewDefaultCamera();
+            fs.SetEnabled(FrameSettingsField.Postprocess, false);
+            fs.SetEnabled(FrameSettingsField.ExposureControl, false);
+            var mask = new FrameSettingsOverrideMask();
+            mask.mask[(uint)FrameSettingsField.Postprocess] = true;
+            mask.mask[(uint)FrameSettingsField.ExposureControl] = true;
+            hd.renderingPathCustomFrameSettingsOverrideMask = mask;
+            ref var liveFs = ref hd.renderingPathCustomFrameSettings;
+            liveFs = fs;
+
+            Log.LogInfo($"[CameraRig] UI cam setup: cullingMask=0x{cam.cullingMask:X8} " +
+                        $"customRS={hd.customRenderingSettings} on {cam.gameObject.name}");
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning($"[CameraRig] SetupUICam HDRP setup failed: {ex.Message}");
+        }
+    }
+
+    private static Material? s_uiBlitMat;
+
+    /// <summary>
+    /// Alpha-blits the UI-only camera's rendered output onto the main eye camera's already-
+    /// rendered (and already post-processed) RenderTexture. Uses UI/Default — already proven to
+    /// resolve and alpha-blend correctly in this game build via CanvasMaterialPatcher — rather
+    /// than gambling on a built-in blit shader a shipped HDRP build may have stripped.
+    /// </summary>
+    public static void CompositeUIOntoEye(RenderTexture uiRT, RenderTexture eyeRT)
+    {
+        try
+        {
+            if (s_uiBlitMat == null)
+            {
+                var shader = Shader.Find("UI/Default");
+                if (shader == null) { Log.LogWarning("[CameraRig] CompositeUIOntoEye: UI/Default shader not found"); return; }
+                s_uiBlitMat = new Material(shader);
+            }
+            Graphics.Blit(uiRT, eyeRT, s_uiBlitMat);
+        }
+        catch (Exception ex) { Log.LogWarning($"[CameraRig] CompositeUIOntoEye failed: {ex.Message}"); }
     }
 }

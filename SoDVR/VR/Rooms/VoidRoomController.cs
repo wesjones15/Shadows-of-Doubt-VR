@@ -31,7 +31,7 @@ internal sealed class VoidRoomController
 
     private readonly VoidRoom _room;
 
-    public VoidRoomController(int roomLayer, int uiLayer) => _room = new VoidRoom(roomLayer, uiLayer);
+    public VoidRoomController(int layer) => _room = new VoidRoom(layer);
 
     public bool InVoidMode { get; private set; }
 

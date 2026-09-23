@@ -43,23 +43,24 @@ public class VRCamera : MonoBehaviour
     private Transform     _cameraOffset = null!;
     private Camera        _leftCam    = null!;   // scene eye camera — renders everything (all layers)
     private Camera        _rightCam   = null!;
+    private Camera        _leftUICam  = null!;   // UI-only camera: renders UILayer with post-FX disabled
+    private Camera        _rightUICam = null!;
     private RenderTexture _leftRT     = null!;
     private RenderTexture _rightRT    = null!;
+    private RenderTexture _leftUIRT   = null!;
+    private RenderTexture _rightUIRT  = null!;
     private Transform     _gameCam    = null!;   // original game camera transform; we follow its world position
     private Transform     _hudAnchor  = null!;   // body-locked HUD anchor: follows VROrigin pos+yaw only
 
-    // Layer for mod-owned canvases/HUD gizmos. Kept off the base game's named layers (see
-    // PostFXExemptRendering.LogLayerAudit) so a dedicated AfterPostProcess custom pass can render
-    // it immune to scene post-processing without affecting any other layer's rendering.
-    internal const int UILayer      = 15;
+    // Unity built-in UI layer. Every attempt to find a genuinely unused layer 8-31 failed — the
+    // base game names all of them (see CameraRig.LogLayerAudit) — so this stays 5. The dedicated
+    // UI camera (see BuildCameraRig) is what actually makes its content immune to post-processing,
+    // not the layer choice itself. VoidRoomController's own geometry shares this layer too —
+    // deliberately not split off it; the only effect is its rings/posts also render post-FX-exempt
+    // during the pre-game/main-menu state, which is harmless.
+    internal const int UILayer      = 5;
 
-    // VoidRoomController's own takeover geometry — deliberately a separate layer from UILayer, so
-    // its exclusive-layer camera mask during void mode doesn't collide with the post-FX-exempt set.
-    internal const int VoidRoomLayer = 5;
-
-    // The void room also needs the UI layer visible while it owns the cameras, so the main menu
-    // canvas and laser pointer/controller visuals still show over it.
-    private readonly Rooms.VoidRoomController _voidRoom = new(VoidRoomLayer, UILayer);
+    private readonly Rooms.VoidRoomController _voidRoom = new(UILayer);
     private readonly HeldItemTracker _heldItem = new();
     private readonly HudController _hud = new();
     private readonly LocomotionController _locomotion = new();
@@ -509,6 +510,13 @@ public class VRCamera : MonoBehaviour
             CameraRig.SetProjection(_leftCam,  _leftEye);
             CameraRig.SetProjection(_rightCam, _rightEye);
 
+            // UI-only cameras must match their corresponding eye camera's pose/projection exactly,
+            // or the composited UI won't align with the world beneath it.
+            CameraRig.ApplyCameraPose(_leftUICam.transform,  _leftEye);
+            CameraRig.ApplyCameraPose(_rightUICam.transform, _rightEye);
+            CameraRig.SetProjection(_leftUICam,  _leftEye);
+            CameraRig.SetProjection(_rightUICam, _rightEye);
+
             // NOTE: Do NOT copy VR projectionMatrix to Camera.main — it breaks interaction.
             // VR projection is asymmetric for 2554x2756, while Camera.main is 1920x1080.
             // The resolution mismatch corrupts Camera.main.ScreenPointToRay and
@@ -689,11 +697,11 @@ public class VRCamera : MonoBehaviour
         hudAnchorGO.transform.SetParent(transform, false);
         _hudAnchor = hudAnchorGO.transform;
 
-        // ── Scene cameras — render EVERYTHING including UI layer ────────────────
-        // UI visibility/post-FX immunity is handled by PostFXExemptRendering's AfterPostProcess
-        // custom pass (see that file) plus HDR text boost, not by a second camera — a second
-        // UI-overlay-camera approach was tried here before and reverted (see git history around
-        // this block) because HDRP ignored clearFlags=Depth on a manually Camera.Render()'d camera.
+        // ── Scene cameras — render everything EXCEPT UILayer, which the UI-only cameras below own
+        // exclusively and composite on top post-render, immune to post-processing. A second-camera
+        // approach using clearFlags=Depth in-place compositing was tried here before and reverted
+        // (see git history around this block) because HDRP ignored it and overwrote the scene with
+        // blue/black — this uses a separate RenderTexture + explicit alpha blit instead.
         var leftGO = new GameObject("LeftEye");
         leftGO.transform.SetParent(_cameraOffset, false);
         _leftCam = leftGO.AddComponent<Camera>();
@@ -708,11 +716,25 @@ public class VRCamera : MonoBehaviour
         _rightRT.Create();
         CameraRig.SetupEyeCam(_rightCam, _rightRT);
 
+        // ── UI-only cameras — own UILayer exclusively, post-processing disabled ──
+        var leftUIGO = new GameObject("LeftEyeUI");
+        leftUIGO.transform.SetParent(_cameraOffset, false);
+        _leftUICam = leftUIGO.AddComponent<Camera>();
+        _leftUIRT  = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32) { name = "SoDVR_LeftUI" };
+        _leftUIRT.Create();
+        CameraRig.SetupUICam(_leftUICam, _leftUIRT, UILayer);
+
+        var rightUIGO = new GameObject("RightEyeUI");
+        rightUIGO.transform.SetParent(_cameraOffset, false);
+        _rightUICam = rightUIGO.AddComponent<Camera>();
+        _rightUIRT  = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32) { name = "SoDVR_RightUI" };
+        _rightUIRT.Create();
+        CameraRig.SetupUICam(_rightUICam, _rightUIRT, UILayer);
+
         _voidRoom.CaptureNeutralEnv(_leftCam);
         _heldItem.SetOrigin(transform);
 
-        PostFXExemptRendering.LogLayerAudit();
-        PostFXExemptRendering.Setup();
+        CameraRig.LogLayerAudit();
 
         // Try to find and disable the game camera now. If it's not available yet
         // (e.g. main menu hasn't spawned one), TryFindGameCamera() will keep retrying in Update().
@@ -1054,11 +1076,12 @@ public class VRCamera : MonoBehaviour
         CameraRig.CopyGameCameraSettings(found, _leftCam);
         CameraRig.CopyGameCameraSettings(found, _rightCam);
 
-        // CopyGameCameraSettings just overwrote cullingMask with the base game's own mask, which
-        // doesn't contain UILayer's bit (unlike the old layer 5, which happened to already be set
-        // in it) — without this, all mod UI/HUD would silently stop rendering from here on.
-        _leftCam.cullingMask  |= (1 << UILayer);
-        _rightCam.cullingMask |= (1 << UILayer);
+        // The UI-only cameras (see BuildCameraRig) own UILayer exclusively and composite it on top
+        // post-render — excluding it here too avoids double-rendering every UI element (once
+        // blurred by this pass, once crisp from the composite), which risked a blur "ghosting"
+        // halo at partially-transparent edges.
+        _leftCam.cullingMask  &= ~(1 << UILayer);
+        _rightCam.cullingMask &= ~(1 << UILayer);
 
         _voidRoom.CaptureGameplayState(_leftCam);
         Log.LogInfo($"[VRCamera] VRCam after copy: clearFlags={_leftCam.clearFlags}" +
@@ -1188,6 +1211,13 @@ public class VRCamera : MonoBehaviour
                 // No GL.invertCulling — HDRP flipYMode handles both Y-flip and culling.
                 _rightCam.Render();
                 _leftCam.Render();
+
+                // UI-only cameras render UILayer with post-processing disabled, then get
+                // alpha-blitted onto the (already-rendered) eye RTs before the swapchain copy.
+                _rightUICam.Render();
+                _leftUICam.Render();
+                CameraRig.CompositeUIOntoEye(_rightUIRT, _rightRT);
+                CameraRig.CompositeUIOntoEye(_leftUIRT, _leftRT);
             }
 
             bool leftOk = CameraRig.CopyEye("L", OpenXRManager.LeftSwapchain, OpenXRManager.LeftSwapchainImages, _leftRT, _frameCount, out uint leftIdx);
