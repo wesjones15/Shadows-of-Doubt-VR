@@ -96,7 +96,6 @@ public class VRCamera : MonoBehaviour
     // Prevents rescanning the same canvas every 90 frames (huge canvases like MinimapCanvas
     // create 1300+ materials per rescan cycle, causing D3D device loss crashes).
     private readonly Dictionary<int, int> _lastRescanFrame = new();
-    private const int RescanCooldownFrames = 600; // ~10 seconds at 60 fps
 
     // Tracks which canvas IDs have already been placed in world space.
     // Once in this set the canvas transform is never moved again by us.
@@ -160,7 +159,6 @@ public class VRCamera : MonoBehaviour
     // "actually showing content".  Updated every scan cycle.  Used by depth scan / click
     // system to skip MenuCanvas when the pause menu is hidden (game hides it without CG).
     private readonly HashSet<int> _noGroupInteractable = new();
-    private const int MinActiveGraphicsForInteractable = 5;
 
     // WindowCanvas nested canvases (notes, notebook) cached during scan for per-frame Z-separation.
     // Game layout resets localPosition.z every frame → must re-apply Z offsets in LateUpdate.
@@ -362,7 +360,21 @@ public class VRCamera : MonoBehaviour
         if ((++_canvasTick >= UICanvasScanRate || forceScan) && _sceneLoadGrace == 0)
         {
             _canvasTick = 0;
-            try { ScanAndConvertCanvases(); }
+            try
+            {
+                CanvasConversionScanner.ScanAndConvertCanvases(
+                    _materialPatcher, _ownedCanvasIds,
+                    _managedCanvases, _positionedCanvases, _canvasWasActive, _nestedCanvasIds,
+                    _caseContentIds, _gripDragEnforce,
+                    ref _casePanelCanvas, ref _casePanelId,
+                    _frameCount, _lastRescanFrame,
+                    _managedFades, _gameCamRef, _leftCam,
+                    ref _menuCanvasRef, ref _menuSettingsBtnId,
+                    ref _actionPanelCanvas, ref _actionPanelId, ref _minimapCanvasRef,
+                    ref _popupMessageGO, ref _popupMessageCanvas,
+                    ref _tutorialMessageGO, ref _tutorialMessageCanvas,
+                    _windowNestedList, _noGroupInteractable);
+            }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] ScanAndConvertCanvases outer: {ex.GetType().Name}: {ex.Message}"); }
         }
 
@@ -1190,362 +1202,6 @@ public class VRCamera : MonoBehaviour
     }
 
 
-    /// <summary>
-    /// Finds all root Screen Space canvases that have not been converted yet and
-    /// changes them to WorldSpace so the eye cameras can see them.
-    /// Called every UICanvasScanRate frames (pre- and post-stereo).
-    /// </summary>
-    private void ScanAndConvertCanvases()
-    {
-        var dead = new List<int>();
-        foreach (var kvp in _managedCanvases)
-            if (kvp.Value == null) dead.Add(kvp.Key);
-        foreach (var k in dead) { _managedCanvases.Remove(k); _positionedCanvases.Remove(k); _canvasWasActive.Remove(k); _nestedCanvasIds.Remove(k); _caseContentIds.Remove(k); _gripDragEnforce.Remove(k); }
-        if (dead.Contains(_casePanelId)) { _casePanelCanvas = null; _casePanelId = -1; }
-
-        Canvas[] all;
-        try
-        {
-            all = Resources.FindObjectsOfTypeAll<Canvas>();
-        }
-        catch (Exception ex)
-        {
-            Log.LogWarning($"[VRCamera] Canvas scan threw: {ex.GetType().Name}: {ex.Message}");
-            return;
-        }
-
-        if (_frameCount <= 300 || (_frameCount % 300) == 0)
-            Log.LogInfo($"[VRCamera] Canvas scan: found {all.Length} canvas(es), managed={_managedCanvases.Count}");
-
-        foreach (var canvas in all)
-        {
-            if (canvas == null) continue;
-            if (!canvas.isRootCanvas) continue;
-            if (canvas.renderMode == RenderMode.WorldSpace) continue;
-            int id = canvas.GetInstanceID();
-            if (_managedCanvases.ContainsKey(id)) continue;
-
-            string cname = canvas.gameObject.name ?? "";
-
-            // Skip transient map-component canvases (high-churn, hundreds spawned/destroyed)
-            if (cname.IndexOf("MapDuct",    StringComparison.OrdinalIgnoreCase) >= 0 ||
-                cname.IndexOf("MapButton",  StringComparison.OrdinalIgnoreCase) >= 0 ||
-                cname.IndexOf("Loading Icon", StringComparison.OrdinalIgnoreCase) >= 0)
-                continue;
-
-            // Skip Ignored-category canvases — already WorldSpace or not relevant to VR UI.
-            if (CanvasCategoryInfo.GetCanvasCategory(cname) == CanvasCategory.Ignored)
-                continue;
-
-            // CaseCanvas: convert to WorldSpace but suppress background elements
-            // that cause bright white wash. The interactive case board content
-            // (pins, notes, evidence) lives as children of this canvas.
-            if (string.Equals(cname, "CaseCanvas", StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    // Suppress background children that cause the white wash
-                    var children = canvas.GetComponentsInChildren<Transform>(true);
-                    foreach (var child in children)
-                    {
-                        if (child == null || child == canvas.transform) continue;
-                        string cn = child.gameObject.name ?? "";
-                        if (cn.Equals("BG", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Hide background elements by making their graphics transparent
-                            var bg = child.GetComponent<Graphic>();
-                            if (bg != null)
-                                bg.color = new Color(bg.color.r, bg.color.g, bg.color.b, 0f);
-                            Log.LogInfo($"[VRCamera] CaseCanvas: suppressed BG element '{cn}'");
-                        }
-                    }
-                    // Keep GraphicRaycaster enabled so pinned notes on the case board can be clicked.
-                    // BG element hits are filtered out in TryClickCanvas to prevent background steals.
-                }
-                catch { }
-                // Fall through to normal conversion below
-            }
-
-            ConvertCanvasToWorldSpace(canvas);
-            _managedCanvases[id] = canvas;
-
-            // Redirect the game's "Settings" button to open our VR Settings panel instead.
-            // Also cache a reference so PositionCanvases can hide the menu while VR panel is open.
-            if (cname == "MenuCanvas")
-            {
-                _menuCanvasRef = canvas;
-                PatchMenuSettingsButton(canvas);
-            }
-            // Cache ActionPanelCanvas — used as anchor for grip-drag offset persistence.
-            if (string.Equals(cname, "ActionPanelCanvas", StringComparison.OrdinalIgnoreCase))
-            {
-                _actionPanelCanvas = canvas;
-                _actionPanelId = id;
-            }
-            // Cache CaseCanvas — enforced to follow ActionPanelCanvas every frame.
-            if (string.Equals(cname, "CaseCanvas", StringComparison.OrdinalIgnoreCase))
-            {
-                _casePanelCanvas = canvas;
-                _casePanelId = id;
-            }
-            // Cache MinimapCanvas — used for direct ray-hit checks independent of _cursorTargetCanvas.
-            if (cname.IndexOf("Minimap", StringComparison.OrdinalIgnoreCase) >= 0)
-                _minimapCanvasRef = canvas;
-        }
-
-        // Reparent pass: canvases physically inside GameCanvas (or any other scaled canvas)
-        // inherit the parent's world scale AND get dragged whenever the parent moves.
-        // Fix both problems by reparenting them to the scene root so they are truly
-        // independent world-space objects.  Set localScale to the desired world scale directly.
-        // Run after ALL root canvases have been converted so every parent has its final scale.
-        foreach (var kvp in _managedCanvases)
-        {
-            var c = kvp.Value;
-            if (c == null) continue;
-            if (_nestedCanvasIds.Contains(kvp.Key)) continue;
-
-            if (c.transform.parent != null)
-            {
-                float parentWS = 1.0f;
-                try { parentWS = c.transform.parent.lossyScale.x; } catch { }
-                if (parentWS < 0.0001f || Mathf.Approximately(parentWS, 1.0f)) continue;
-                // Reparent to scene root — preserves world position/rotation.
-                try { c.transform.SetParent(null, true); } catch { continue; }
-
-                // Nested canvases inherit WorldSpace from their parent. After reparent
-                // they become root canvases and revert to ScreenSpaceOverlay — invisible
-                // in VR. Force WorldSpace + GraphicRaycaster so they render and interact.
-                if (c.renderMode != RenderMode.WorldSpace)
-                {
-                    c.renderMode = RenderMode.WorldSpace;
-                    Log.LogInfo($"[VRCamera] Reparented '{c.gameObject.name}' → WorldSpace (was nested)");
-                }
-                try
-                {
-                    var gr = c.GetComponent<GraphicRaycaster>();
-                    if (gr == null) c.gameObject.AddComponent<GraphicRaycaster>();
-                    string rpName = c.gameObject.name ?? "";
-                    if (_gameCamRef != null && string.Equals(rpName, "CaseCanvas", StringComparison.OrdinalIgnoreCase))
-                        c.worldCamera = _gameCamRef;
-                    else if (_leftCam != null)
-                        c.worldCamera = _leftCam;
-                }
-                catch { }
-            }
-
-            // Enforce correct scale — the game may reset localScale when it opens/closes
-            // UI panels (e.g. WindowCanvas when opening notebook). Re-apply every scan.
-            // Skip Tooltip canvases when dialog is active — PositionCanvases manages their scale.
-            var cd = CanvasCategoryInfo.GetCategoryDefaults(CanvasCategoryInfo.GetCanvasCategory(c.gameObject.name ?? ""));
-            if (cd.RepositionEveryFrame)
-            {
-                bool dlgUp = (_popupMessageGO != null && _popupMessageGO.activeSelf)
-                          || (_tutorialMessageGO != null && _tutorialMessageGO.activeSelf);
-                if (dlgUp) continue;
-            }
-            var rtAfter = c.GetComponent<RectTransform>();
-            var sdAfter = rtAfter != null ? rtAfter.sizeDelta : Vector2.zero;
-            // Skip canvases with zero sizeDelta — scale calculation would be invalid.
-            if (sdAfter.x < 1f) continue;
-            float dynScale = cd.TargetWorldWidth / sdAfter.x;
-            float curScale = c.transform.localScale.x;
-            if (!Mathf.Approximately(curScale, dynScale))
-            {
-                c.transform.localScale = Vector3.one * dynScale;
-                Log.LogInfo($"[VRCamera] ScaleFix '{c.gameObject.name}': {curScale:F6} → {dynScale:F6} sizeDelta=({sdAfter.x:F0},{sdAfter.y:F0}) worldW={sdAfter.x*dynScale:F2}m");
-            }
-        }
-
-        foreach (var kvp in _managedCanvases)
-        {
-            if (kvp.Value == null) continue;
-            // Rate-limit rescans: skip canvases that were recently rescanned.
-            // This prevents MinimapCanvas (1300+ graphics) from creating hundreds
-            // of new Material instances every scan cycle, which causes D3D device loss.
-            int cid = kvp.Key;
-            if (_lastRescanFrame.TryGetValue(cid, out int lastFrame) &&
-                (_frameCount - lastFrame) < RescanCooldownFrames)
-                continue;
-            _lastRescanFrame[cid] = _frameCount;
-            _materialPatcher.RescanCanvasAlpha(kvp.Value, _ownedCanvasIds, _managedCanvases, _managedFades);
-        }
-
-        var rootList = new List<Canvas>(_managedCanvases.Values);
-        foreach (var root in rootList)
-        {
-            if (root == null) continue;
-            Canvas[] nested;
-            try { nested = root.GetComponentsInChildren<Canvas>(true); }
-            catch { continue; }
-            foreach (var nc in nested)
-            {
-                if (nc == null) continue;
-                int nid = nc.GetInstanceID();
-                if (nid == root.GetInstanceID()) continue;
-                if (_managedCanvases.ContainsKey(nid)) continue;
-
-                // Skip dynamically-instantiated prefab canvases (name contains "(Clone)").
-                // The game spawns hundreds of these for map components (MapButtonComponent,
-                // MapLayer, MapDuctComponent, Vent, Duct, Key etc.); tracking them inflates
-                // _managedCanvases and causes ForceUIZTestAlways to break their materials.
-                // Genuine UI sub-panels (WindowCanvas, LocationDetailsCanvas, ActionPanelCanvas)
-                // are all root canvases, not nested, so this filter does not affect them.
-                string ncName = nc.gameObject.name ?? "";
-                if (ncName.IndexOf("(Clone)", StringComparison.OrdinalIgnoreCase) >= 0) continue;
-                // Also skip Loading Icon regardless of clone suffix — it is transient.
-                if (ncName.IndexOf("Loading Icon", StringComparison.OrdinalIgnoreCase) >= 0) continue;
-
-                // Disable CanvasScaler on nested canvases too — same inflation bug
-                // as root canvases. Without this, nested sizeDelta can be 2–4× too large.
-                try
-                {
-                    var nestedScaler = nc.GetComponent<CanvasScaler>();
-                    if (nestedScaler != null)
-                    {
-                        nestedScaler.enabled = false;
-                        Log.LogInfo($"[VRCamera] Disabled CanvasScaler on nested '{ncName}'");
-                    }
-                }
-                catch { }
-                // Log nested canvas size for debugging — include world-space data (first time only)
-                try
-                {
-                    var nrt = nc.GetComponent<RectTransform>();
-                    if (nrt != null)
-                    {
-                        var nsd = nrt.sizeDelta;
-                        var nls = nc.transform.localScale;
-                        var wls = nc.transform.lossyScale;
-                        var wpos = nc.transform.position;
-                        float worldW = nsd.x * wls.x;
-                        float worldH = nsd.y * wls.y;
-                        Log.LogInfo($"[VRCamera] NestedSize '{ncName}': sizeDelta=({nsd.x:F0},{nsd.y:F0}) localScale=({nls.x:F4},{nls.y:F4},{nls.z:F4}) lossyScale=({wls.x:F6},{wls.y:F6},{wls.z:F6}) worldSize=({worldW:F2},{worldH:F2})m pos=({wpos.x:F2},{wpos.y:F2},{wpos.z:F2})");
-                    }
-                }
-                catch { }
-                int patched = _materialPatcher.ForceUIZTestAlways(nc, _managedFades, logQueueMap: true);
-                // Only add to _managedCanvases if not already tracked — prevents NestedSize
-                // logging spam on every scan cycle for the same canvas.
-                if (!_managedCanvases.ContainsKey(nid))
-                    _managedCanvases[nid] = nc;
-
-                // NOTE: "Content", "Lines", "Strings" under GameCanvas are MAP overlay canvases
-                // (PaperImg, CityText, DrawingBrush, Key, Vent, Duct etc.) — NOT the case board.
-                // The actual case-board investigation content (pins, notes, connections) lives
-                // elsewhere (likely in GameCanvas's direct graphic hierarchy, found dynamically).
-                // PopupMessage and TutorialMessage are dialog sub-canvases nested under
-                // TooltipCanvas. They stay nested (not reparented) — when active,
-                // PositionCanvases switches TooltipCanvas from tooltip to dialog mode.
-                if (ncName.Equals("PopupMessage", StringComparison.OrdinalIgnoreCase))
-                {
-                    _popupMessageGO = nc.gameObject;
-                    _popupMessageCanvas = nc;
-                    // Give PopupMessage its own GraphicRaycaster — the parent
-                    // TooltipCanvas raycaster can't resolve hits on deeply nested
-                    // sub-canvas children at localScale 0.2.
-                    try
-                    {
-                        if (nc.GetComponent<GraphicRaycaster>() == null)
-                            nc.gameObject.AddComponent<GraphicRaycaster>();
-                        nc.worldCamera = _leftCam;
-                    }
-                    catch { }
-                }
-                else if (ncName.Equals("TutorialMessage", StringComparison.OrdinalIgnoreCase))
-                {
-                    _tutorialMessageGO = nc.gameObject;
-                    _tutorialMessageCanvas = nc;
-                    try
-                    {
-                        if (nc.GetComponent<GraphicRaycaster>() == null)
-                            nc.gameObject.AddComponent<GraphicRaycaster>();
-                        nc.worldCamera = _leftCam;
-                    }
-                    catch { }
-                }
-                _nestedCanvasIds.Add(nid);   // always nested — never independently positioned
-
-                // ScrollRect content canvases render on top of their parent canvas's sibling
-                // elements (e.g. MapControls buttons) in WorldSpace because nested canvases
-                // bypass hierarchy draw order. Fix: push them below the parent by setting
-                // sortingOrder = -1. MapControls buttons (renderQueue 3008) then win.
-                try
-                {
-                    bool isScrollContent = false;
-                    var scrollWalker = nc.transform.parent;
-                    for (int sw = 0; sw < 4 && scrollWalker != null; sw++)
-                    {
-                        if (scrollWalker.GetComponent<ScrollRect>() != null) { isScrollContent = true; break; }
-                        scrollWalker = scrollWalker.parent;
-                    }
-                    if (isScrollContent)
-                    {
-                        nc.overrideSorting = true;
-                        nc.sortingOrder = -1;
-                        Log.LogInfo($"[VRCamera] NestedCanvas '{nc.gameObject.name}' in '{root.gameObject.name}': sortingOrder=-1 (ScrollRect content)");
-                    }
-                }
-                catch { }
-
-                Log.LogInfo($"[VRCamera] NestedCanvas '{nc.gameObject.name}' in '{root.gameObject.name}' patched={patched}");
-            }
-        }
-
-        // Ensure worldCamera is set on all managed canvases.
-        var wcam = _leftCam;
-        if (wcam != null)
-        {
-            foreach (var c in _managedCanvases.Values)
-                if (c != null && c.worldCamera == null) c.worldCamera = wcam;
-        }
-
-        // Rebuild the WindowCanvas nested canvas list for per-frame Z-separation.
-        // (Actual Z offsets are applied in LateUpdate since game layout resets them every frame.)
-        try
-        {
-            _windowNestedList.Clear();
-            foreach (var kvp in _managedCanvases)
-            {
-                if (!_nestedCanvasIds.Contains(kvp.Key)) continue;
-                var nc = kvp.Value;
-                if (nc == null) continue;
-                Transform walker = nc.transform.parent;
-                for (int w = 0; w < 10 && walker != null; w++)
-                {
-                    if (walker.gameObject.name?.Equals("WindowCanvas", StringComparison.OrdinalIgnoreCase) == true)
-                    { _windowNestedList.Add(nc); break; }
-                    walker = walker.parent;
-                }
-            }
-        }
-        catch { }
-
-        // Update no-CanvasGroup interactable cache.
-        // For canvases without a CanvasGroup, we can't detect visibility via alpha.
-        // Instead, count active Graphics — if below threshold, the canvas is "hidden"
-        // (e.g. MenuCanvas has ~3 active decorative Graphics when the pause menu is closed,
-        // but hundreds when the menu is actually open).
-        _noGroupInteractable.Clear();
-        foreach (var kvp in _managedCanvases)
-        {
-            var c = kvp.Value;
-            if (c == null || !c.gameObject.activeSelf || !c.enabled) continue;
-            // Only check canvases without CanvasGroup — others use CG alpha.
-            try
-            {
-                var cg = c.GetComponent<CanvasGroup>();
-                if (cg != null) continue;  // CanvasGroup exists → handled by alpha check
-            }
-            catch { continue; }
-            try
-            {
-                var graphics = c.GetComponentsInChildren<Graphic>(false);  // false = active only
-                if (graphics.Count >= MinActiveGraphicsForInteractable)
-                    _noGroupInteractable.Add(kvp.Key);
-            }
-            catch { }
-        }
-    }
     // Set ZoomContent.zoomLimit.x and desiredZoom so the full city fits within the Viewport
     // at minimum zoom — eliminating map overflow at zoom-out.
     // Called once after _materialPatcher.MinimapViewportTransform is cached and MapController is ready.
@@ -1594,127 +1250,6 @@ public class VRCamera : MonoBehaviour
         }
     }
 
-    private void ConvertCanvasToWorldSpace(Canvas canvas)
-    {
-        // CRITICAL: disable CanvasScaler FIRST.
-        // Without this, CanvasScaler inflates sizeDelta from the reference resolution (e.g. 1280×720)
-        // to match the display resolution (~2720×1680), making every canvas 2–4 m wide.
-        // After disabling, sizeDelta stays at the authored reference size.
-        var scaler = canvas.GetComponent<CanvasScaler>();
-        if (scaler != null)
-        {
-            try { scaler.enabled = false; } catch { }
-        }
-
-        // CRITICAL: Reset scaleFactor to 1.0 after disabling CanvasScaler.
-        // CanvasScaler in ScreenSpace "Scale With Screen Size" mode sets canvas.scaleFactor
-        // to match the display resolution ratio. Disabling CanvasScaler freezes this value.
-        // In WorldSpace mode, a non-1.0 scaleFactor causes a coordinate scaling mismatch
-        // between transform.position and the Canvas renderer's visual placement.
-        float oldScaleFactor = canvas.scaleFactor;
-        if (Math.Abs(canvas.scaleFactor - 1f) > 0.001f)
-        {
-            canvas.scaleFactor = 1f;
-            Log.LogInfo($"[VRCamera] Reset scaleFactor for '{canvas.gameObject.name}': {oldScaleFactor:F4} → 1.0");
-        }
-
-        // Read sizeDelta NOW (after disabling scaler) — this is the reference size.
-        var rt = canvas.GetComponent<RectTransform>();
-        var sd = rt != null ? rt.sizeDelta : new Vector2(1920f, 1080f);
-        float sizeW = sd.x > 0 ? sd.x : 1920f;
-        float sizeH = sd.y > 0 ? sd.y : 1080f;
-
-        canvas.renderMode = RenderMode.WorldSpace;
-
-        var cat    = CanvasCategoryInfo.GetCanvasCategory(canvas.gameObject.name);
-        var catDef = CanvasCategoryInfo.GetCategoryDefaults(cat);
-
-        // Dynamic scale: world width = TargetWorldWidth regardless of actual sizeDelta.
-        // This is immune to CanvasScaler inflation — whatever the actual pixel dimensions are,
-        // the canvas ends up the intended physical width in the world.
-        float scale = catDef.TargetWorldWidth / sizeW;
-        canvas.transform.localScale = Vector3.one * scale;
-
-        int patched = _materialPatcher.ForceUIZTestAlways(canvas, _managedFades);
-
-        try
-        {
-            var gr = canvas.GetComponent<GraphicRaycaster>();
-            if (gr == null) gr = canvas.gameObject.AddComponent<GraphicRaycaster>();
-            gr.blockingMask = 0;
-            // CaseCanvas uses the game camera so the game's native Input.mousePosition →
-            // canvas.worldCamera pipeline works for drag/click interaction.
-            // All other canvases use _leftCam for VR GraphicRaycaster hit-testing.
-            string wcName = canvas.gameObject.name ?? "";
-            if (_gameCamRef != null && string.Equals(wcName, "CaseCanvas", StringComparison.OrdinalIgnoreCase))
-                canvas.worldCamera = _gameCamRef;
-            else if (_leftCam != null)
-                canvas.worldCamera = _leftCam;
-        }
-        catch (Exception ex) { Log.LogWarning($"[VRCamera] GraphicRaycaster setup: {ex.Message}"); }
-
-        float worldW = sizeW * scale;
-        float worldH = sizeH * scale;
-        string parentName = canvas.transform.parent != null ? (canvas.transform.parent.name ?? "?") : "root";
-        Log.LogInfo($"[VRCamera] Canvas '{canvas.gameObject.name}' [{cat}] -> WorldSpace ({sizeW:F0}x{sizeH:F0}px, scale={scale:F6}, world={worldW:F2}x{worldH:F2}m, parent='{parentName}', patched={patched})");
-    }
-
-    // Finds buttons in MenuCanvas whose label text equals "Settings" and replaces their
-    // onClick listener to open the VR Settings panel. Called once per MenuCanvas instance.
-    // Cannot use GetComponentInParent<Button>() in IL2CPP — walks parents manually.
-    private void PatchMenuSettingsButton(Canvas menuCanvas)
-    {
-        try
-        {
-            var texts = menuCanvas.GetComponentsInChildren<TMP_Text>(true);
-            int patched = 0;
-            foreach (var t in texts)
-            {
-                if (t == null) continue;
-                string? s = t.text;
-                if (s == null) continue;
-                if (!s.Equals("Settings", StringComparison.OrdinalIgnoreCase)) continue;
-
-                // Walk up the parent chain to find the Button (IL2CPP GetComponentInParent is broken).
-                Button? btn = null;
-                var tr = t.transform;
-                for (int i = 0; i < 5 && tr != null; i++)
-                {
-                    btn = tr.gameObject.GetComponent<Button>();
-                    if (btn != null) break;
-                    tr = tr.parent;
-                }
-                if (btn == null) continue;
-
-                // Replace onClick to suppress the game's persistent listener.
-                // The actual VR panel open is handled in TryClickCanvas via _menuSettingsBtnId
-                // to avoid IL2CPP AddListener reliability issues on freshly-created events.
-                btn.onClick = new Button.ButtonClickedEvent();
-                int btnId = btn.gameObject.GetInstanceID();
-                _menuSettingsBtnId = btnId;
-                // Log full parent chain so we can see which panel this button belongs to
-                var chain = new System.Text.StringBuilder();
-                var ctr = btn.transform;
-                for (int ci = 0; ci < 6 && ctr != null; ci++)
-                {
-                    chain.Append(ctr.gameObject.name);
-                    chain.Append('(');
-                    chain.Append(ctr.gameObject.GetInstanceID());
-                    chain.Append(')');
-                    if (ci < 5 && ctr.parent != null) chain.Append('→');
-                    ctr = ctr.parent;
-                }
-                patched++;
-                Log.LogInfo($"[VRCamera] Patched Settings button id={btnId} active={btn.gameObject.activeInHierarchy} chain: {chain}");
-            }
-            Log.LogInfo($"[VRCamera] PatchMenuSettingsButton: {patched} button(s) redirected to VR panel");
-        }
-        catch (Exception ex)
-        {
-            Log.LogWarning($"[VRCamera] PatchMenuSettingsButton failed: {ex.Message}");
-        }
-    }
-
 
     private void PositionCanvases()
     {
@@ -1749,7 +1284,8 @@ public class VRCamera : MonoBehaviour
                 bool menuNowActive = _menuCanvasRef.isActiveAndEnabled;
                 if (menuNowActive && !_menuWasActive)
                 {
-                    PatchMenuSettingsButton(_menuCanvasRef);
+                    var patchedId = CanvasConversionScanner.PatchMenuSettingsButton(_menuCanvasRef);
+                    if (patchedId.HasValue) _menuSettingsBtnId = patchedId.Value;
                     // MenuCanvas just became interactable — add it to the no-CanvasGroup
                     // interactable cache immediately so TryClickCanvas doesn't skip it.
                     // The next forced scan will rebuild the cache from scratch.
