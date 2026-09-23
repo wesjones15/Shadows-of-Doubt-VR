@@ -245,12 +245,18 @@ internal static class CameraRig
     /// "overwrote the scene with blue/black". Explicitly setting ClearColorMode.None here is the
     /// fix that attempt never had.
     /// </summary>
-    public static void SetupUICam(Camera cam, RenderTexture rt, int uiLayer)
+    public static void SetupUICam(Camera cam, RenderTexture rt, int uiLayer, Camera mainCam)
     {
         cam.targetTexture = rt;             // SAME texture the corresponding main eye camera uses
         cam.stereoTargetEye = StereoTargetEyeMask.None;
         cam.enabled = false;                // manual render only
         cam.cullingMask = 1 << uiLayer;
+        // Match the main eye camera's near/far — doesn't affect X/Y screen position (the frustum's
+        // l/r/t/b bounds scale proportionally with near, which cancels out of the projection
+        // matrix's X/Y terms), but a mismatched depth-precision curve between two cameras writing
+        // into the same shared depth buffer is never correct.
+        cam.nearClipPlane = mainCam.nearClipPlane;
+        cam.farClipPlane  = mainCam.farClipPlane;
 
         try
         {
@@ -261,6 +267,12 @@ internal static class CameraRig
             // The fix: render on top of whatever's already in the shared RT, clear nothing.
             hd.clearColorMode = HDAdditionalCameraData.ClearColorMode.None;
             hd.clearDepth = false;
+
+            // No antialiasing — TAA keeps its own per-camera history/reprojection buffer, and this
+            // camera's history has nothing meaningful to reproject against (it's drawing fresh UI
+            // geometry into a shared RT another camera just rendered). A mismatched TAA history is
+            // a well-known source of exactly the head-motion-linked ghosting this was producing.
+            hd.antialiasing = HDAdditionalCameraData.AntialiasingMode.None;
 
             // Post-processing disabled for this camera only. m_RenderingPathCustomFrameSettings is
             // the backing field exposed as a plain get/set property — NOT the ref-returning

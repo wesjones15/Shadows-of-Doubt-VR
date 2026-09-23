@@ -513,6 +513,17 @@ public class VRCamera : MonoBehaviour
             CameraRig.SetProjection(_leftUICam,  _leftEye);
             CameraRig.SetProjection(_rightUICam, _rightEye);
 
+            // DIAGNOSTIC: direct numerical comparison of each eye's camera pair, to confirm whether
+            // the head-motion-linked ghosting traces to a pose/projection mismatch or is happening
+            // below what's inspectable from C# camera state. Throttled to ~1/sec.
+            if ((_frameCount % 90) == 0)
+            {
+                Log.LogInfo($"[VRCamera] DIAG LeftCam   pos={_leftCam.transform.position.ToString("F5")} rot={_leftCam.transform.rotation.eulerAngles.ToString("F3")} near={_leftCam.nearClipPlane} far={_leftCam.farClipPlane}\nproj=\n{_leftCam.projectionMatrix}");
+                Log.LogInfo($"[VRCamera] DIAG LeftUICam pos={_leftUICam.transform.position.ToString("F5")} rot={_leftUICam.transform.rotation.eulerAngles.ToString("F3")} near={_leftUICam.nearClipPlane} far={_leftUICam.farClipPlane}\nproj=\n{_leftUICam.projectionMatrix}");
+                Log.LogInfo($"[VRCamera] DIAG RightCam   pos={_rightCam.transform.position.ToString("F5")} rot={_rightCam.transform.rotation.eulerAngles.ToString("F3")} near={_rightCam.nearClipPlane} far={_rightCam.farClipPlane}\nproj=\n{_rightCam.projectionMatrix}");
+                Log.LogInfo($"[VRCamera] DIAG RightUICam pos={_rightUICam.transform.position.ToString("F5")} rot={_rightUICam.transform.rotation.eulerAngles.ToString("F3")} near={_rightUICam.nearClipPlane} far={_rightUICam.farClipPlane}\nproj=\n{_rightUICam.projectionMatrix}");
+            }
+
             // NOTE: Do NOT copy VR projectionMatrix to Camera.main — it breaks interaction.
             // VR projection is asymmetric for 2554x2756, while Camera.main is 1920x1080.
             // The resolution mismatch corrupts Camera.main.ScreenPointToRay and
@@ -717,12 +728,12 @@ public class VRCamera : MonoBehaviour
         var leftUIGO = new GameObject("LeftEyeUI");
         leftUIGO.transform.SetParent(_cameraOffset, false);
         _leftUICam = leftUIGO.AddComponent<Camera>();
-        CameraRig.SetupUICam(_leftUICam, _leftRT, UILayer);
+        CameraRig.SetupUICam(_leftUICam, _leftRT, UILayer, _leftCam);
 
         var rightUIGO = new GameObject("RightEyeUI");
         rightUIGO.transform.SetParent(_cameraOffset, false);
         _rightUICam = rightUIGO.AddComponent<Camera>();
-        CameraRig.SetupUICam(_rightUICam, _rightRT, UILayer);
+        CameraRig.SetupUICam(_rightUICam, _rightRT, UILayer, _rightCam);
 
         _voidRoom.CaptureNeutralEnv(_leftCam);
         _heldItem.SetOrigin(transform);
@@ -1093,6 +1104,13 @@ public class VRCamera : MonoBehaviour
             rightUIHD.volumeLayerMask = rightHD.volumeLayerMask;
             rightUIHD.probeLayerMask  = rightHD.probeLayerMask;
         }
+
+        // SetupUICam copied near/far from the main cameras' pre-copy defaults at rig-build time —
+        // sync again now that CopyGameCameraSettings just gave the main cameras their real values.
+        _leftUICam.nearClipPlane  = _leftCam.nearClipPlane;
+        _leftUICam.farClipPlane   = _leftCam.farClipPlane;
+        _rightUICam.nearClipPlane = _rightCam.nearClipPlane;
+        _rightUICam.farClipPlane  = _rightCam.farClipPlane;
 
         _voidRoom.CaptureGameplayState(_leftCam);
         Log.LogInfo($"[VRCamera] VRCam after copy: clearFlags={_leftCam.clearFlags}" +
