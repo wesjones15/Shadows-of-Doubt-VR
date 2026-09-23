@@ -64,6 +64,15 @@ internal sealed class MenuRTPanel
     public int SettingsBtnId => _settingsBtnId;
 
     /// <summary>
+    /// True exactly while the quad is placed and visible in the world — Unity's own stable
+    /// GameObject.activeSelf, not a freshly recomputed heuristic. This is the signal callers should
+    /// use to decide "should I be showing my own laser / suppressing the legacy one right now",
+    /// since it can't disagree frame-to-frame with what UpdateInteraction itself gates on below —
+    /// both read the same field rather than each re-evaluating IsShowing independently.
+    /// </summary>
+    public bool IsInteractable => _quadGO != null && _quadGO.activeSelf;
+
+    /// <summary>
     /// True while MenuCanvas is actually showing the main menu or the pause menu, as opposed to
     /// sitting dormant with only its ~3 decorative Graphics active during normal gameplay. Same
     /// no-CanvasGroup active-Graphics-count heuristic CanvasCategoryInfo.IsCanvasEffectivelyHidden
@@ -173,7 +182,7 @@ internal sealed class MenuRTPanel
         Dictionary<int, Canvas> managedCanvases, Dictionary<int, int> lastRescanFrame,
         Action requestForceScan, Action onSaveLoadButtonClicked)
     {
-        if (!IsShowing || _quadGO == null || !_quadGO.activeSelf)
+        if (!IsInteractable)
         {
             _pointer.Clear();
             return;

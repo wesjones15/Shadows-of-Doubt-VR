@@ -213,8 +213,10 @@ internal sealed class RTPanelPointer
         _laserLine = laserGO.AddComponent<LineRenderer>();
         _laserLine.useWorldSpace = true;
         _laserLine.positionCount = 2;
-        _laserLine.startWidth = 0.004f;
-        _laserLine.endWidth = 0.0015f;
+        // Absolute thin-laser-pointer widths, not sized relative to the mod's original beam —
+        // ~2.5mm tapering to ~0.8mm, comparable to a real laser pointer's apparent width.
+        _laserLine.startWidth = 0.0025f;
+        _laserLine.endWidth = 0.0008f;
         _laserLine.numCapVertices = 0;
         _laserLine.numCornerVertices = 0;
         _laserLine.shadowCastingMode = ShadowCastingMode.Off;

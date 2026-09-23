@@ -1266,10 +1266,11 @@ public class VRCamera : MonoBehaviour
         _caseBoard.UpdateGripDrag();
         (_minimapBBtnLocalOffset, _minimapBBtnLocalRot, _minimapBBtnHasOffset) = _caseBoard.MinimapBBtnResult;
 
-        // MenuRTPanel owns its own laser/cursor/hover/click while the menu is showing — the
+        // MenuRTPanel owns its own laser/cursor/hover/click while its quad is visible — the
         // legacy laser/cursor-dot system is for the WorldSpace-canvas pipeline and would otherwise
-        // draw a second, redundant beam alongside it.
-        if (_menuRTPanel.IsShowing)
+        // draw a second, redundant beam alongside it. IsInteractable (not IsShowing) so this and
+        // MenuRTPanel's own interaction gate read the exact same stable signal every frame.
+        if (_menuRTPanel.IsInteractable)
         {
             if (_cursorRect != null && _cursorRect.gameObject.activeSelf) _cursorRect.gameObject.SetActive(false);
             if (_laserLine != null && _laserLine.enabled) _laserLine.enabled = false;
