@@ -1250,7 +1250,7 @@ public class VRCamera : MonoBehaviour
         _caseBoard.SetFrameContext(
             _managedCanvases, _noGroupInteractable,
             _lastRescanFrame, () => _forceScanFrames = 30, OnSaveLoadButtonClicked,
-            _menuRTPanel.SettingsBtnId, _menuRTPanel.Canvas, _menuRTPanel,
+            _menuRTPanel.SettingsBtnId, _menuRTPanel.Canvas,
             _leftCam, _gameCamRef, _rightControllerGO, _leftControllerGO,
             _actionPanelCanvas, _casePanelCanvas, _minimapCanvasRef,
             _popupMessageGO, _tutorialMessageGO,
@@ -1266,9 +1266,28 @@ public class VRCamera : MonoBehaviour
         _caseBoard.UpdateGripDrag();
         (_minimapBBtnLocalOffset, _minimapBBtnLocalRot, _minimapBBtnHasOffset) = _caseBoard.MinimapBBtnResult;
 
-        _controllerInteraction.UpdateCursorDot(_cursorRect, _cursorCanvas, _rightControllerGO);
-        _controllerInteraction.UpdateLaser(_laserLine, _rightControllerGO, _cursorHasTarget, _cursorTargetPos);
-        _controllerInteraction.UpdateLeftLaser(_leftLaserLine, _leftControllerGO);
+        // MenuRTPanel owns its own laser/cursor/hover/click while the menu is showing — the
+        // legacy laser/cursor-dot system is for the WorldSpace-canvas pipeline and would otherwise
+        // draw a second, redundant beam alongside it.
+        if (_menuRTPanel.IsShowing)
+        {
+            if (_cursorRect != null && _cursorRect.gameObject.activeSelf) _cursorRect.gameObject.SetActive(false);
+            if (_laserLine != null && _laserLine.enabled) _laserLine.enabled = false;
+            if (_leftLaserLine != null && _leftLaserLine.enabled) _leftLaserLine.enabled = false;
+        }
+        else
+        {
+            _controllerInteraction.UpdateCursorDot(_cursorRect, _cursorCanvas, _rightControllerGO);
+            _controllerInteraction.UpdateLaser(_laserLine, _rightControllerGO, _cursorHasTarget, _cursorTargetPos);
+            _controllerInteraction.UpdateLeftLaser(_leftLaserLine, _leftControllerGO);
+        }
+        try
+        {
+            _menuRTPanel.UpdateInteraction(_rightControllerGO, _leftControllerGO,
+                _managedCanvases, _lastRescanFrame, () => _forceScanFrames = 30, OnSaveLoadButtonClicked);
+        }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.UpdateInteraction: {ex.Message}"); }
+
         _controllerInteraction.UpdateLeftInteractMarker(_leftControllerGO, _menuRTPanel.Canvas, _gameCamRef,
             _leftCam, _interactionLayerMask, _baseInteractionRange);
 

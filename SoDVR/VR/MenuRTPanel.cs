@@ -4,6 +4,7 @@ using BepInEx.Logging;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.HighDefinition;
 using UnityEngine.UI;
 
@@ -22,7 +23,10 @@ namespace SoDVR.VR;
 /// Sole owner of MenuCanvas: CanvasConversionScanner skips it by name so the old WorldSpace pipeline
 /// never touches it, and this class reimplements the pieces that pipeline used to provide for it
 /// (Settings-button patch, hide-while-VR-settings-open, the no-CanvasGroup content-visibility check)
-/// rather than leaving the old system running alongside this one with exemptions.
+/// rather than leaving the old system running alongside this one with exemptions. It also owns its
+/// own laser/cursor/hover/click interaction end to end — replacing the mod's original laser pointer
+/// for this panel entirely — rather than routing through the generic managedCanvases click pipeline,
+/// which has no notion of continuous hover or per-panel controller selection.
 /// </summary>
 internal sealed class MenuRTPanel
 {
@@ -47,6 +51,14 @@ internal sealed class MenuRTPanel
     private bool _wasShowing;
     private bool _vrSettingsHidden;
     private int _discoveryCooldown;
+
+    // ── Interaction: laser, cursor dot, hover, controller selection ──────────────────────────
+    private LineRenderer? _laserLine;
+    private GameObject? _cursorDotGO;
+    private Selectable? _hoveredSelectable;
+    private bool _useRightController = true;
+    private bool _prevRightTrigger;
+    private bool _prevLeftTrigger;
 
     public MenuRTPanel(int quadLayer) { _quadLayer = quadLayer; }
 
@@ -115,6 +127,7 @@ internal sealed class MenuRTPanel
             }
             catch (Exception ex) { Log.LogWarning($"[MenuRTPanel] Settings-button re-patch: {ex.Message}"); }
             _quadPlaced = false; // recentre in front of the current head pose on every fresh open
+            _useRightController = true; // default hand on every fresh open
         }
         _wasShowing = showing;
 
@@ -128,9 +141,7 @@ internal sealed class MenuRTPanel
             float dist = VRSettingsPanel.MenuDistance;
 
             _quadGO.transform.position = headPos + forward * dist + Vector3.up * catDef.VerticalOffset;
-            // Quad primitives face +Z locally; the panel needs to face back at the player standing
-            // at -forward from it, so the yaw gets a 180 flip on top of the canvas convention.
-            _quadGO.transform.rotation = yawOnly * Quaternion.Euler(0f, 180f, 0f);
+            _quadGO.transform.rotation = yawOnly;
             _quadPlaced = true;
             Log.LogInfo($"[MenuRTPanel] Placed at dist={dist:F2}m yaw={headYaw:F1}°");
         }
@@ -140,6 +151,8 @@ internal sealed class MenuRTPanel
             bool wantActive = showing && _quadPlaced;
             if (_quadGO.activeSelf != wantActive) _quadGO.SetActive(wantActive);
         }
+
+        if (!showing) ClearInteractionVisuals();
     }
 
     /// <summary>Called from VRCamera's LateUpdate, before the real eye cameras render, so the
@@ -152,61 +165,108 @@ internal sealed class MenuRTPanel
     }
 
     /// <summary>
-    /// Ray-vs-quad hit test plus the same click dispatch CanvasClickRouter.TryClick uses for every
-    /// other canvas (Button persistent-listener invoke, ExecuteEvents fallback, TMP_InputField
-    /// activation) — reused via CanvasClickRouter.InvokeButtonClick rather than reimplemented. The
-    /// only genuinely new piece is the front end: a physical ray-vs-quad hit (via the quad's own
-    /// MeshCollider) gives a UV directly, which is exactly the screen point GraphicRaycaster expects
-    /// since MenuCanvas.worldCamera is this panel's own projector camera, sized to the RT's pixels.
-    /// Returns true once the ray has physically hit the quad, even if nothing was clickable there,
-    /// so the caller doesn't fall through and route the same trigger press to something behind it.
+    /// Full interaction pass: laser + on-panel cursor + hover highlight + trigger click, for
+    /// whichever controller currently owns the panel. Owns its own trigger polling and controller
+    /// selection rather than routing through CaseBoardInteraction's shared trigger/cooldown state —
+    /// that system has no notion of continuous hover, and case board / the pause menu can never be
+    /// open at once anyway, so there's no real ownership conflict in sharing the physical trigger.
+    /// Called unconditionally every frame; no-ops (and hides its visuals) when not showing.
     /// </summary>
-    public bool TryClick(Vector3 origin, Vector3 direction,
+    public void UpdateInteraction(GameObject? rightControllerGO, GameObject? leftControllerGO,
         Dictionary<int, Canvas> managedCanvases, Dictionary<int, int> lastRescanFrame,
         Action requestForceScan, Action onSaveLoadButtonClicked)
     {
-        if (_canvas == null || _quadCollider == null || _rt == null) return false;
-        if (!IsShowing) return false;
+        if (!IsShowing || _canvas == null || _quadCollider == null || _rt == null || _quadGO == null || !_quadGO.activeSelf)
+        {
+            ClearInteractionVisuals();
+            return;
+        }
 
-        var ray = new Ray(origin, direction);
-        if (!_quadCollider.Raycast(ray, out var hit, MaxRayDistance)) return false;
+        OpenXRManager.GetTriggerState(true, out bool rightTriggerNow);
+        OpenXRManager.GetTriggerState(false, out bool leftTriggerNow);
+        bool rightEdge = rightTriggerNow && !_prevRightTrigger;
+        bool leftEdge = leftTriggerNow && !_prevLeftTrigger;
+        _prevRightTrigger = rightTriggerNow;
+        _prevLeftTrigger = leftTriggerNow;
 
+        // Default right controller. The first trigger press on the OTHER hand just swaps
+        // ownership over (so an imprecise aim mid-swap doesn't also fire a click); every press
+        // after that on the now-active hand clicks normally.
+        bool swappedThisFrame = false;
+        if (_useRightController && leftEdge && leftControllerGO != null)
+        {
+            _useRightController = false;
+            swappedThisFrame = true;
+            Log.LogInfo("[MenuRTPanel] Active controller swapped to LEFT");
+        }
+        else if (!_useRightController && rightEdge && rightControllerGO != null)
+        {
+            _useRightController = true;
+            swappedThisFrame = true;
+            Log.LogInfo("[MenuRTPanel] Active controller swapped to RIGHT");
+        }
+
+        var activeGO = _useRightController ? rightControllerGO : leftControllerGO;
+        if (activeGO == null) { ClearInteractionVisuals(); return; }
+
+        bool clickThisFrame = !swappedThisFrame && (_useRightController ? rightEdge : leftEdge);
+
+        Vector3 origin = activeGO.transform.position;
+        Vector3 direction = activeGO.transform.forward;
+        bool hitQuad = _quadCollider.Raycast(new Ray(origin, direction), out var hit, MaxRayDistance);
+
+        UpdateLaser(origin, direction, hitQuad ? hit.point : (Vector3?)null);
+
+        if (!hitQuad)
+        {
+            HideCursorDot();
+            UpdateHover(null, null);
+            return;
+        }
+
+        ShowCursorDot(hit.point, hit.normal);
+
+        var gr = _canvas.GetComponent<GraphicRaycaster>();
+        var es = EventSystem.current;
+        if (gr == null || !gr.enabled || es == null) { UpdateHover(null, null); return; }
+
+        Vector2 screenPt = new Vector2(hit.textureCoord.x * _rt.width, hit.textureCoord.y * _rt.height);
+        var ped = new PointerEventData(es) { position = screenPt };
+        var results = new Il2CppSystem.Collections.Generic.List<RaycastResult>();
+        gr.Raycast(ped, results);
+        var hitGo = results.Count > 0 ? results[0].gameObject : null;
+
+        UpdateHover(hitGo, ped);
+
+        if (clickThisFrame && hitGo != null)
+            Dispatch(hitGo, ped, results[0], managedCanvases, lastRescanFrame, requestForceScan, onSaveLoadButtonClicked);
+    }
+
+    private void Dispatch(GameObject go, PointerEventData ped, RaycastResult raycastResult,
+        Dictionary<int, Canvas> managedCanvases, Dictionary<int, int> lastRescanFrame,
+        Action requestForceScan, Action onSaveLoadButtonClicked)
+    {
         try
         {
-            var gr = _canvas.GetComponent<GraphicRaycaster>();
-            if (gr == null || !gr.enabled) return true;
-
-            var es = EventSystem.current;
-            if (es == null) return true;
-
-            Vector2 screenPt = new Vector2(hit.textureCoord.x * _rt.width, hit.textureCoord.y * _rt.height);
-            var ped = new PointerEventData(es) { position = screenPt };
-
-            var results = new Il2CppSystem.Collections.Generic.List<RaycastResult>();
-            gr.Raycast(ped, results);
-            if (results.Count == 0) return true;
-
-            var go = results[0].gameObject;
-
             if (_settingsBtnId != 0)
             {
-                var tr = go?.transform;
+                var tr = go.transform;
                 for (int i = 0; i < 8 && tr != null; i++)
                 {
                     if (tr.gameObject.GetInstanceID() == _settingsBtnId)
                     {
                         Log.LogInfo("[MenuRTPanel] Settings button intercepted → VRSettingsPanel.Toggle");
                         VRSettingsPanel.Toggle();
-                        return true;
+                        return;
                     }
                     tr = tr.parent;
                 }
             }
 
-            // Continue/New Game/New City are about to tear down the physics hierarchy — the caller
-            // needs to know before ExecuteEvents propagates the click, same as CanvasClickRouter.
+            // Continue/New Game/New City are about to tear down the physics hierarchy — the
+            // caller needs to know before ExecuteEvents propagates the click.
             {
-                var slWalker = go?.transform;
+                var slWalker = go.transform;
                 for (int i = 0; i < 6 && slWalker != null; i++)
                 {
                     string n = (slWalker.gameObject.name ?? "").ToLowerInvariant();
@@ -221,39 +281,143 @@ internal sealed class MenuRTPanel
             ped.rawPointerPress       = go;
             ped.pointerDrag           = go;
             ped.pressPosition         = ped.position;
-            ped.pointerCurrentRaycast = results[0];
-            ped.pointerPressRaycast   = results[0];
+            ped.pointerCurrentRaycast = raycastResult;
+            ped.pointerPressRaycast   = raycastResult;
             ped.eligibleForClick      = true;
             ped.button                = PointerEventData.InputButton.Left;
 
-            Log.LogInfo($"[MenuRTPanel] Trigger click: '{go?.name}'");
+            Log.LogInfo($"[MenuRTPanel] Trigger click ({(_useRightController ? "R" : "L")}): '{go.name}'");
 
-            bool handledByButton = CanvasClickRouter.InvokeButtonClick(go, _canvas, managedCanvases, lastRescanFrame, requestForceScan);
+            bool handledByButton = CanvasClickRouter.InvokeButtonClick(go, _canvas!, managedCanvases, lastRescanFrame, requestForceScan);
             if (!handledByButton)
             {
-                ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerEnterHandler);
                 ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerDownHandler);
                 ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerUpHandler);
                 ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerClickHandler);
                 ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.submitHandler);
             }
 
-            var ifWalker = go?.transform;
+            var ifWalker = go.transform;
             for (int i = 0; i < 6 && ifWalker != null; i++)
             {
                 var tmpIF = ifWalker.GetComponent<TMP_InputField>();
                 if (tmpIF != null)
                 {
-                    es.SetSelectedGameObject(ifWalker.gameObject);
+                    EventSystem.current?.SetSelectedGameObject(ifWalker.gameObject);
                     tmpIF.ActivateInputField();
                     break;
                 }
                 ifWalker = ifWalker.parent;
             }
         }
-        catch (Exception ex) { Log.LogWarning($"[MenuRTPanel] TryClick: {ex.Message}"); }
+        catch (Exception ex) { Log.LogWarning($"[MenuRTPanel] Dispatch: {ex.Message}"); }
+    }
 
-        return true;
+    /// <summary>Fires pointerEnter/pointerExit on the nearest Selectable ancestor so Unity's own
+    /// Button/Toggle highlight-state transition drives the hover visuals — the same mechanism a
+    /// real mouse hover uses, just fed by our own controller-ray hit instead.</summary>
+    private void UpdateHover(GameObject? hitGo, PointerEventData? ped)
+    {
+        Selectable? sel = null;
+        var tr = hitGo?.transform;
+        for (int i = 0; i < 8 && tr != null; i++)
+        {
+            sel = tr.GetComponent<Selectable>();
+            if (sel != null) break;
+            tr = tr.parent;
+        }
+
+        if (sel == _hoveredSelectable) return;
+
+        var es = EventSystem.current;
+        if (_hoveredSelectable != null && es != null)
+            ExecuteEvents.Execute(_hoveredSelectable.gameObject, new PointerEventData(es), ExecuteEvents.pointerExitHandler);
+
+        _hoveredSelectable = sel;
+
+        if (_hoveredSelectable != null && ped != null)
+            ExecuteEvents.Execute(_hoveredSelectable.gameObject, ped, ExecuteEvents.pointerEnterHandler);
+    }
+
+    private void ClearInteractionVisuals()
+    {
+        if (_laserLine != null && _laserLine.enabled) _laserLine.enabled = false;
+        HideCursorDot();
+        UpdateHover(null, null);
+    }
+
+    private void EnsureLaser()
+    {
+        if (_laserLine != null) return;
+        var laserGO = new GameObject("SoDVR_MenuRTPanel_Laser");
+        laserGO.layer = _quadLayer;
+        UnityEngine.Object.DontDestroyOnLoad(laserGO);
+        _laserLine = laserGO.AddComponent<LineRenderer>();
+        _laserLine.useWorldSpace = true;
+        _laserLine.positionCount = 2;
+        _laserLine.startWidth = 0.012f;
+        _laserLine.endWidth = 0.006f;
+        _laserLine.numCapVertices = 4;
+        _laserLine.shadowCastingMode = ShadowCastingMode.Off;
+        _laserLine.receiveShadows = false;
+        var shader = Shader.Find("HDRP/Unlit") ?? Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default");
+        if (shader != null)
+        {
+            var mat = new Material(shader) { name = "SoDVR_MenuRTPanel_LaserMat" };
+            var color = new Color(0f, 4096f, 4096f, 1f); // HDR cyan, matches the mod's original laser
+            mat.color = color;
+            try { mat.SetColor("_UnlitColor", color); } catch { }
+            try { mat.SetColor("_BaseColor", color); } catch { }
+            mat.renderQueue = 5000;
+            _laserLine.material = mat;
+        }
+        _laserLine.enabled = false;
+    }
+
+    private void UpdateLaser(Vector3 origin, Vector3 direction, Vector3? hitPoint)
+    {
+        EnsureLaser();
+        if (_laserLine == null) return;
+        Vector3 end = hitPoint ?? (origin + direction * MaxRayDistance);
+        _laserLine.SetPosition(0, origin);
+        _laserLine.SetPosition(1, end);
+        if (!_laserLine.enabled) _laserLine.enabled = true;
+    }
+
+    private void EnsureCursorDot()
+    {
+        if (_cursorDotGO != null) return;
+        _cursorDotGO = GameObject.CreatePrimitive(PrimitiveType.Quad);
+        _cursorDotGO.name = "SoDVR_MenuRTPanel_Cursor";
+        _cursorDotGO.layer = _quadLayer;
+        UnityEngine.Object.DontDestroyOnLoad(_cursorDotGO);
+        var col = _cursorDotGO.GetComponent<Collider>();
+        if (col != null) UnityEngine.Object.Destroy(col); // visual only, must not intercept our own raycasts
+        _cursorDotGO.transform.localScale = Vector3.one * 0.015f;
+        var mr = _cursorDotGO.GetComponent<MeshRenderer>();
+        var shader = Shader.Find("UI/Default");
+        if (shader != null && mr != null)
+        {
+            var mat = new Material(shader);
+            mat.color = new Color(64f, 0f, 64f, 1f); // HDR magenta, matches this mod's existing aim-dot convention
+            mat.renderQueue = 4000;
+            mr.material = mat;
+        }
+        _cursorDotGO.SetActive(false);
+    }
+
+    private void ShowCursorDot(Vector3 hitPoint, Vector3 hitNormal)
+    {
+        EnsureCursorDot();
+        if (_cursorDotGO == null) return;
+        _cursorDotGO.transform.position = hitPoint + hitNormal * 0.005f; // avoid z-fighting with the panel
+        _cursorDotGO.transform.rotation = Quaternion.LookRotation(hitNormal);
+        if (!_cursorDotGO.activeSelf) _cursorDotGO.SetActive(true);
+    }
+
+    private void HideCursorDot()
+    {
+        if (_cursorDotGO != null && _cursorDotGO.activeSelf) _cursorDotGO.SetActive(false);
     }
 
     private void TryDiscover()
