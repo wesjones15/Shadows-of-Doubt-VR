@@ -1308,7 +1308,7 @@ public class VRCamera : MonoBehaviour
                 _nestedCanvasIds, _nestedDragTransforms, _noGroupInteractable);
 
         float legacyHitDistance = _caseBoard.HasActiveGesture ? 0f
-                                : aim.HasTarget ? aim.HitDistance
+                                : aim.HasTarget ? _controllerInteraction.NearestLegacyUIHitDistance(_rightControllerGO.transform.position)
                                 : float.PositiveInfinity;
         try
         {

@@ -368,7 +368,6 @@ internal sealed class ControllerInteraction
             Vector3 dHeadPos = leftCam.transform.position;
             Vector3 dHeadFwd = leftCam.transform.forward;
             float   bestDepth  = float.MaxValue;
-            float   bestHitDist = float.PositiveInfinity;
             Canvas? bestCanvas = null;
             bool    foundHit   = false;
 
@@ -421,7 +420,7 @@ internal sealed class ControllerInteraction
                 // Record this hit for aim dot positioning
                 _aimDotHits.Add((depth, c, worldHitPt));
 
-                if (!foundHit || depth < bestDepth) { bestDepth = depth; bestHitDist = hitDist; bestCanvas = c; foundHit = true; }
+                if (!foundHit || depth < bestDepth) { bestDepth = depth; bestCanvas = c; foundHit = true; }
             }
 
             if (foundHit && bestCanvas != null)
@@ -431,7 +430,6 @@ internal sealed class ControllerInteraction
                 result.TargetPos = bestCanvas.transform.position;
                 result.TargetRot = bestCanvas.transform.rotation;
                 result.AimDepth = bestDepth - 0.01f;
-                result.HitDistance = bestHitDist;
             }
             else
             {
@@ -469,6 +467,50 @@ internal sealed class ControllerInteraction
         return result;
     }
 
+    /// <summary>
+    /// Ray distance to the nearest canvas from this frame's depth scan that actually has a
+    /// raycastable graphic under the ray, or +Infinity. The depth scan itself only tests canvas
+    /// rects, so an always-active but empty container (WindowCanvas with no windows open sits just
+    /// in front of the pause menu) would otherwise count as a hit and steal the pointer from an RT
+    /// panel behind it. Checks nested canvases' own raycasters too, since a parent's raycaster never
+    /// resolves a nested canvas's graphics.
+    /// </summary>
+    public float NearestLegacyUIHitDistance(Vector3 rayOrigin)
+    {
+        var es = UnityEngine.EventSystems.EventSystem.current;
+        if (es == null) return float.PositiveInfinity;
+
+        float best = float.PositiveInfinity;
+        foreach (var (_, canvas, worldHit) in _aimDotHits)
+        {
+            float dist = Vector3.Distance(rayOrigin, worldHit);
+            if (dist >= best || canvas == null) continue;
+            if (HasGraphicAt(canvas, worldHit, es)) best = dist;
+        }
+        return best;
+    }
+
+    private static bool HasGraphicAt(Canvas canvas, Vector3 worldPoint, UnityEngine.EventSystems.EventSystem es)
+    {
+        try
+        {
+            foreach (var gr in canvas.GetComponentsInChildren<GraphicRaycaster>(false))
+            {
+                if (gr == null || !gr.enabled) continue;
+                var cam = gr.eventCamera;
+                if (cam == null) continue;
+                Vector3 sp = cam.WorldToScreenPoint(worldPoint);
+                if (sp.z <= 0f) continue;
+                var ped = new UnityEngine.EventSystems.PointerEventData(es) { position = new Vector2(sp.x, sp.y) };
+                var results = new Il2CppSystem.Collections.Generic.List<UnityEngine.EventSystems.RaycastResult>();
+                gr.Raycast(ped, results);
+                if (results.Count > 0) return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
     /// <summary>Hides every pooled aim dot. Called on frames an RT panel owns the pointer — that
     /// pool is a legacy-WorldSpace-canvas visual, hardcoded to the right controller, with no notion
     /// of an RT panel's own laser or its hand swap.</summary>
@@ -502,5 +544,4 @@ internal struct AimScanResult
     public Vector3 TargetPos;
     public Quaternion TargetRot;
     public float AimDepth;
-    public float HitDistance;
 }
