@@ -27,12 +27,14 @@ classDiagram
     VRCamera *-- CaseBoardInteraction : _caseBoard
     VRCamera *-- CanvasMaterialPatcher : _materialPatcher
     VRCamera *-- CanvasPlacement : _canvasPlacement
+    VRCamera *-- MenuRTPanel : _menuRTPanel
+    VRCamera *-- TooltipRTPanel : _tooltipRTPanel
+    VRCamera *-- PostFXOverlayCompositor : _overlay
 
     VRCamera ..> CameraRig : calls (static)
     VRCamera ..> CanvasConversionScanner : calls (static)
     VRCamera ..> CanvasCategoryInfo : calls (static)
     VRCamera ..> VRSettingsPanel : calls (static)
-    VRCamera ..> PostProcessingOverride : calls (static)
     VRCamera ..> TextGraphicDump : calls (static, debug hotkey)
 
     class VoidRoomController { <<instance>> }
@@ -47,7 +49,9 @@ classDiagram
     class CanvasConversionScanner { <<static>> }
     class CanvasCategoryInfo { <<static>> }
     class VRSettingsPanel { <<static>> }
-    class PostProcessingOverride { <<static>> }
+    class MenuRTPanel { <<instance>> }
+    class TooltipRTPanel { <<instance>> }
+    class PostFXOverlayCompositor { <<instance>> }
     class TextGraphicDump { <<static>> }
 ```
 
@@ -149,12 +153,14 @@ These don't participate in the canvas pipeline at all — separate concerns, lis
 | `TextMaterialPatcher.cs` | static (shared material cache) | — | `CanvasMaterialPatcher`, `TextGraphicDump` |
 | `TextGraphicDump.cs` | static (debug dump, End key) | `TextMaterialPatcher` | `VRCamera` only |
 | `NativeInput.cs` | static (Win32 P/Invoke) | — | `LocomotionController`, `CaseBoardInteraction`, `Rooms/VoidRoomController` |
-| `PostProcessingOverride.cs` | static | — | `VRCamera` only; config bound in `Plugin.cs` |
+| `MenuRTPanel.cs`, `TooltipRTPanel.cs` | instance (`_menuRTPanel`, `_tooltipRTPanel`) | `CameraRig`, `RTPanelPointer` | `VRCamera` only; each hands its quad (and laser) to `PostFXOverlayCompositor` via `AppendOverlay` |
+| `RTPanelPointer.cs` | instance (one per RT panel) | `CanvasClickRouter` | `MenuRTPanel`, `TooltipRTPanel` |
+| `PostFXOverlayCompositor.cs` | instance (`_overlay`) | — | `VRCamera` only; draws RT panels + lasers into the eye RTs after `Camera.Render()`, so HDRP post-processing never touches them |
 | `VRSettingsPanel.cs` | static | — | `LocomotionController`, `HeldItemTracker`, `CanvasMaterialPatcher`, `CanvasPlacement`, `CanvasClickRouter`, `VRCamera` |
 | `HudController.cs` | instance (`_hud`) | — | `VRCamera` only |
 | `HeldItemTracker.cs` | instance (`_heldItem`) | `VRSettingsPanel` | `VRCamera` only |
 | `Rooms/VoidRoomController.cs` + `Rooms/VoidRoom.cs` | instance (`_voidRoom`) | `NativeInput` | `VRCamera` only — fully independent island, no canvas-subsystem coupling |
-| `Plugin.cs` | BepInPlugin entry point | — | instantiates `VRCamera` via `AddComponent`, binds config for `PostProcessingOverride` + `VoidRoomController` |
+| `Plugin.cs` | BepInPlugin entry point | — | instantiates `VRCamera` via `AddComponent`, binds config for `VoidRoomController` |
 
 ## Durable vs. disposable — the fact that actually matters here
 
@@ -172,7 +178,7 @@ which are expected to *survive* a rewrite conceptually:
 - **Orthogonal** (not part of the canvas/interaction layer at all, no rewrite impact either way):
   `CameraRig.cs` (core VR stereo rendering, not UI), `NativeInput.cs` (general OS input injection,
   not canvas-specific), `LocomotionController.cs`, `HeldItemTracker.cs`, `HudController.cs`,
-  `Rooms/VoidRoomController.cs`, `VRSettingsPanel.cs`, `PostProcessingOverride.cs`,
+  `Rooms/VoidRoomController.cs`, `VRSettingsPanel.cs`, `PostFXOverlayCompositor.cs`,
   `TextGraphicDump.cs`.
 
 This is why the disposable files' headers explicitly say "not permanent architecture" and why they

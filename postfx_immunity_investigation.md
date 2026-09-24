@@ -21,7 +21,8 @@ history and need to stay separate:
    with post-processing disabled for that camera specifically.
 2. **Display immunity** — once that content is shown in the world (as world-space geometry, or a
    quad displaying a texture), does *that displayed object* also escape the *main* camera's post
-   stack? This is the hard, still-unsolved part, and is what this whole document is about.
+   stack? This is the hard part, and is what this whole document is about. Eras 2–4 failed to
+   solve it inside HDRP; Era 5 solves it by drawing after HDRP.
 
 ## Why this is hard here specifically
 
@@ -311,6 +312,60 @@ already confirmed enabled and durable from 4b.
 blurry** under DoF. Clean negative result: every prerequisite gate identifiable so far is correctly
 set, and the mechanism still doesn't exempt this object.
 
+**Probable cause (unverified in this build)**: in HDRP 12 (this game ships Unity 2021.3.45f2),
+`RenderAfterPostProcessObjects` builds its renderer lists for the `ForwardOnly` shader pass name
+only. `UI/Default` has no `ForwardOnly` pass, so no render-queue value could have made it eligible.
+This comes from HDRP 12 source knowledge, not from inspecting this build. Nothing below depends on
+it; it's recorded so nobody re-tests the queue path with `UI/Default`.
+
+## Era 5 — resolution: draw panels after HDRP, don't ask HDRP to exempt them
+
+Every attempt in Eras 2 and 4 tried to get HDRP to leave a quad out of its own post stack. The
+mod never needed that. It already owns everything that happens after HDRP returns:
+
+```
+_rightCam.Render(); _leftCam.Render();   // HDRP: scene + full post stack
+<-- nothing touches _leftRT/_rightRT here -->
+CameraRig.CopyEye(...)                   // raw D3D11 CopyResource to the OpenXR swapchain
+OpenXRManager.FrameEndStereo(...)        // the mod's own xrEndFrame
+```
+
+`Camera.Render()` is synchronous, so when it returns the eye RT holds the finished, post-processed
+frame. `PostFXOverlayCompositor` draws the RT panel quads and their lasers into each eye RT at that
+point, with a plain `CommandBuffer` (`SetViewProjectionMatrices` with that eye's own matrices, then
+`DrawMesh`, then `Graphics.ExecuteCommandBuffer`) and the same legacy `UI/Default` material the quad
+always used. HDRP never sees this geometry, so TAA, DoF, bloom, exposure and tonemapping can't
+apply to it.
+
+- **Not camera stacking** (the Era 2e disqualifier): there's no second camera and no second HDRP
+  render contributing to the frame, only immediate-mode draws into a texture the mod owns. TAA
+  history is safe too, because HDRP keeps it in its own internal buffers, not in the camera target.
+- **No HDRP internals involved**: no FrameSettings, no custom pass, no HDRP shader or render-queue
+  semantics. That removes the whole black-box problem this document was about.
+- **Always on top of the world**: the eye RT's depth attachment is cleared before drawing (HDRP
+  renders depth into its own buffers, not the camera target), so panels aren't occluded by world
+  geometry. This was accepted deliberately (2026-09-24), and it's the norm for VR menus.
+- **The laser is now immune too.** It's drawn by the compositor after the panels, as plain SDR
+  cyan. Era 3's "laser cannot be made immune" held only while the laser was a scene renderer.
+- **Panel content TAA removed as well**: the projector cameras now use `antialiasing = None`, and
+  panel textures are mipmapped (trilinear). The text aliasing TAA was masking is minification of a
+  ~1920px canvas into a few hundred eye-buffer pixels, which mips address directly.
+- **The DoF stopgap is gone**: `PostProcessingOverride.cs` and `Rendering.ForceDisableDepthOfField`
+  were deleted, so the world gets DoF again. Legacy WorldSpace canvases (HUD, case board, dialogs
+  not yet on RT panels) are still inside the HDRP frame and get blurred again until they migrate.
+  Migrating one is now mostly a matter of an `AppendOverlay`.
+
+**Verification status**: implemented and building. At the time of writing it has **not yet been
+verified in the headset**. The Y orientation is the main reasoned-but-unconfirmed piece: the eye
+RTs hold HDRP `ForceFlipY` output and `SetViewProjectionMatrices` applies Unity's own
+render-into-texture flip, so the compositor counter-flips with one named constant (`FlipY`). If the
+panel shows upside down, remove that flip. The compositor logs the eye RT format and projection
+once on its first composite.
+
+**Possible follow-up**: submit panels as OpenXR `XrCompositionLayerQuad` layers through the mod's
+own `xrEndFrame` for sharper text (no resampling through the 0.7-scale eye buffer). The laser
+would still need the eye-buffer overlay so it draws over the quad.
+
 ---
 
 ## What's actually been tested, as a matrix
@@ -326,69 +381,39 @@ varied and what didn't:
 | 4b.4 (magenta) | `CustomPassVolume` @ `AfterPostProcess` | `UI/Default` (MenuRTPanel quad) | Yes — both `supportCustomPass` and `CustomPass` bit confirmed | Fires (PressAnyKey content), but not this quad |
 | 4b.6 | `CustomPassVolume` @ `AfterPostProcess` | `HDRP/Unlit` (MenuRTPanel quad) | Yes | Crashed once; didn't work on the run that survived |
 | 4c (`bad627a`) | Native `HDRenderQueue.AfterPostProcess` | `UI/Default` (MenuRTPanel quad) | Yes — `AfterPostprocess` bit confirmed | renderQueue write confirmed; still blurry |
+| 5 | Post-HDRP `CommandBuffer` draw into the eye RT (`PostFXOverlayCompositor`) | `UI/Default` | None needed — outside HDRP | Implemented; headset verification pending |
 
-**Combinations never tried**:
-- Native `HDRenderQueue.AfterPostProcess` queue **with `HDRP/Unlit`** (or any properly HDRP-tagged
-  shader) — the one cell in this matrix that most directly tests whether the native queue path has
-  the *same* shader-tag eligibility requirement `DrawRenderersCustomPass` appears to have, isolated
-  from the crash that derailed the last shader-swap attempt.
-- `BeforePostProcess` depth-write, in any form — not tried at all, isolated or combined with anything.
-- `HDRP/Unlit`'s `Exposure Weight = 0` — not tried at all.
-- A custom-authored shader (not a stock one) with a deliberately distinct `LightMode` tag, targeted
-  by either mechanism's shader-tag/pass filter — the fix this document's evidence increasingly points
-  toward, not yet built. This repo currently has **zero** shader-authoring or AssetBundle
-  infrastructure (`.pecheck`-style interop inspection only), so this is a real infrastructure cost,
-  not a small addition.
+**Combinations never tried in Eras 2–4**: the native queue with `HDRP/Unlit`, a `BeforePostProcess`
+depth write, `HDRP/Unlit`'s `Exposure Weight = 0`, and a custom-authored `LightMode`-tagged shader
+shipped in an AssetBundle. Era 5 made all of these unnecessary. Revisit them only if drawing after
+HDRP (Era 5) turns out to be unworkable.
 
-## Recommended next step, ranked
+## Ranked next steps (superseded)
 
-If picking this up cold, don't start by re-deriving a plan from the matrix above — start here:
+This section used to rank the untried HDRP-side combinations above. Era 5 replaced that approach.
+What's left:
 
-1. **Retry `HDRP/Unlit` eligibility, but on the native queue path (4c), not `CustomPassVolume` (4b).**
-   This is the one untested cell that would most cheaply confirm or kill the "needs a properly
-   HDRP-tagged shader" theory, without repeating 4b.6's crash — the crash happened while testing the
-   `CustomPassVolume` mechanism specifically; whether it repeats on the queue-based path is itself
-   unknown and worth finding out with a save backed up first. If it crashes here too, that's evidence
-   the crash is about the shader/material manipulation itself, not the mechanism — informs whether a
-   custom-authored shader is truly required before touching `HDRP/Unlit` again at all.
-2. **If that's inconclusive or crashes again**: stand up the shader-authoring/AssetBundle pipeline and
-   build a minimal purpose-made shader, rather than continuing to guess at stock shaders' undocumented
-   property/tag expectations from outside. This is the path the evidence has been pointing toward
-   since 4b.6, and removes the guessing-at-a-black-box risk entirely — testable in the Unity Editor
-   before it ever touches this game.
-3. **`BeforePostProcess` depth-write** remains a smaller, lower-effort fallback that only fixes DoF
-   specifically (not TAA/bloom/exposure) — worth doing only if 1–2 stall out completely and a partial
-   fix is judged better than none.
+1. Verify Era 5 in the headset: orientation, laser-tip alignment with the hovered button, stereo
+   depth, a sharp panel over a DoF-blurred world, and no TAA smear under head motion.
+2. Migrate the remaining legacy WorldSpace canvases to RT panels. Each one then only needs to hand
+   its quad to `PostFXOverlayCompositor`.
+3. Optional: OpenXR quad layers for text sharpness (see Era 5).
 
-## Current live code state — what's actually in the codebase right now
+## Current live code state
 
-Not all of the above was cleanly reverted. A fresh session should know exactly what's still sitting in
-production files before assuming the code reflects settled architecture:
-
-- **`SoDVR/VR/CameraRig.cs`**: `SetupPostFXExemptPass` still installs the magenta `overrideMaterial`
-  smoke test from §4b.4 (`Shader.Find("Sprites/Default")`, `Color.magenta`) — still called from
-  `VRCamera.cs`, still live. `DiagnoseDefaultFrameSettingsCustomPass` (§4b.1–4b.3's diagnostic writes
-  and logging) is also still present and still called once at startup. `PeriodicCheckFrameSettingsBits`
-  (§4b.5) is still called **every single frame** from `VRCamera.Update()` — harmless (only logs on
-  change, and hasn't logged since frame 0) but real per-frame overhead sitting in a hot path.
-- **`SoDVR/VR/MenuRTPanel.cs`**: the `renderQueue` test from §4c (`bad627a`) is still live in `Setup()`
-  — the quad's material still has its `renderQueue` forced into
-  `HDRenderQueue.k_RenderQueue_AfterPostProcessTransparent`'s range. This has no visible effect today
-  (confirmed still blurry) but means the quad is *not* currently on its original default render queue.
-- **`SoDVR/VR/PostProcessingOverride.cs`**: unchanged throughout this whole investigation —
-  `ForceDisableDepthOfField` is still the only thing actually suppressing the symptom in the shipped
-  build.
-- **Reverted, not live**: the `HDRP/Unlit` shader-eligibility test (§4b.6) — reverted in `1311e7b`,
-  `MenuRTPanel`'s quad is back on `UI/Default`.
-- **`.pecheck/Program.cs`** is a scratch tool, not a persisted reference — it currently sits pointed at
-  whatever was last inspected (`RenderQueueRange` in `UnityEngine.CoreModule.dll`, from §4c's
-  investigation) and gets overwritten by whatever the next interop question is. Don't treat its current
-  contents as meaningful; treat the *technique* (decode a specific interop DLL's metadata for a
-  specific type/method, via `System.Reflection.Metadata`/`PortableExecutable`) as the reusable part.
-
-None of this diagnostic/test code should be treated as intentional design — it's exactly what CLAUDE.md's
-no-coexistence rule means to flag for cleanup once a real fix lands or this investigation is shelved,
-not evidence of a decision to keep any of it.
+- **`SoDVR/VR/PostFXOverlayCompositor.cs`**: draws every visible RT panel quad, then the lasers,
+  into each eye RT right after `Camera.Render()` in `VRCamera.LateUpdate`.
+- **`CameraRig.CreateRTPanelQuad`**: the quad's `MeshRenderer` is disabled. Its collider still drives
+  `RTPanelPointer`, and its active state is still the panel's visibility flag.
+- **`RTPanelPointer`**: no `LineRenderer`. It keeps only laser state and hands it to the compositor.
+- **`CameraRig.SetupRTPanelProjectorCamera`**: `antialiasing = None`. Panel textures come from
+  `CameraRig.CreateRTPanelTexture` (mipmapped) and get `GenerateMips()` after each projector render.
+- **Deleted**: `SetupPostFXExemptPass` (magenta smoke test), `DiagnoseDefaultFrameSettingsCustomPass`,
+  `PeriodicCheckFrameSettingsBits`, MenuRTPanel's AfterPostProcess renderQueue test, and
+  `PostProcessingOverride.cs` together with its `Rendering.ForceDisableDepthOfField` config key.
+- **`.pecheck/Program.cs`** is a scratch tool, not a persisted reference. Its contents at any moment
+  are whatever was last inspected; the reusable part is the technique (decoding interop DLL metadata
+  with `System.Reflection.Metadata`).
 
 ## Standing constraints, confirmed across multiple eras
 
@@ -397,12 +422,13 @@ not evidence of a decision to keep any of it.
 - **No free Unity layer exists** — all 32 (0–31) are named/claimed by the base game, confirmed via a
   full audit (Era 2b, re-confirmed Era 4). Any fix relying on layer-based isolation needs a different
   mechanism (shader-tag filtering, explicit renderer lists, render-queue ranges) instead.
-- **The laser cannot be made display-immune** — must exist as live 3D geometry, inherits the full
-  post stack unconditionally. Not in scope for any technique in this document.
+- **Anything drawn by the eye cameras inherits their post stack.** Immunity comes from drawing
+  after `Camera.Render()` returns (Era 5), not from exempting objects inside HDRP. That applies to
+  the laser too: it's immune now because the compositor draws it, not a scene renderer.
 - **IL2CPP interop silently drops writes through ref-returning getters/methods**, repeatedly
   confirmed (`renderingPathCustomFrameSettings`, `GetDefaultFrameSettings`) — any future HDRP API
   interaction should be checked for this shape (a `ref`-returning accessor) before trusting a write
   through it, and reads through the same shape should be treated as unreliable too (per 4b.2).
-- **`PostProcessingOverride.cs`'s global `ForceDisableDepthOfField` config toggle remains the only
-  currently-deployed mitigation** — a blanket, non-surgical stopgap its own doc comment already
-  flags as temporary. Still active; nothing in this document has replaced it yet.
+- **Panels drawn by `PostFXOverlayCompositor` are always on top of the world** (the eye RT's depth is
+  cleared first). Occluding them by world geometry would mean getting HDRP's internal depth buffer
+  out, which is deliberately not done.
