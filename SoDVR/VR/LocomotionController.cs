@@ -151,14 +151,14 @@ internal sealed class LocomotionController
 
     /// <summary>
     /// Rotates VROrigin around Y via snap or smooth turning (configurable in VR Settings).
-    /// Skipped while the VR settings panel is open (right stick Y is used for scrolling there).
+    /// Skipped while the VR settings panel is open or the pointer is on an RT panel — right stick Y
+    /// scrolls in both, and a slightly diagonal scroll must not also turn the player.
     /// </summary>
-    public void UpdateSnapTurn(Transform vrOrigin, bool inVoidMode)
+    public void UpdateSnapTurn(Transform vrOrigin, bool inVoidMode, bool pointerOnPanel)
     {
         _snapCooldown -= Time.deltaTime;
 
-        // Don't turn while settings panel is open (right stick scrolls it instead)
-        if (VRSettingsPanel.RootGO?.activeSelf == true) return;
+        if (VRSettingsPanel.RootGO?.activeSelf == true || pointerOnPanel) return;
         // Nor in the void room: there is no world to turn to look at.
         if (inVoidMode) return;
 

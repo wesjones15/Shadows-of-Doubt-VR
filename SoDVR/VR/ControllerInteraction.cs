@@ -368,6 +368,7 @@ internal sealed class ControllerInteraction
             Vector3 dHeadPos = leftCam.transform.position;
             Vector3 dHeadFwd = leftCam.transform.forward;
             float   bestDepth  = float.MaxValue;
+            float   bestHitDist = float.PositiveInfinity;
             Canvas? bestCanvas = null;
             bool    foundHit   = false;
 
@@ -420,7 +421,7 @@ internal sealed class ControllerInteraction
                 // Record this hit for aim dot positioning
                 _aimDotHits.Add((depth, c, worldHitPt));
 
-                if (!foundHit || depth < bestDepth) { bestDepth = depth; bestCanvas = c; foundHit = true; }
+                if (!foundHit || depth < bestDepth) { bestDepth = depth; bestHitDist = hitDist; bestCanvas = c; foundHit = true; }
             }
 
             if (foundHit && bestCanvas != null)
@@ -430,6 +431,7 @@ internal sealed class ControllerInteraction
                 result.TargetPos = bestCanvas.transform.position;
                 result.TargetRot = bestCanvas.transform.rotation;
                 result.AimDepth = bestDepth - 0.01f;
+                result.HitDistance = bestHitDist;
             }
             else
             {
@@ -467,10 +469,9 @@ internal sealed class ControllerInteraction
         return result;
     }
 
-    /// <summary>Hides every pooled aim dot without scanning. Call instead of
-    /// ScanAndRenderAimDots on frames an RT panel owns interaction — that pool is a legacy-
-    /// WorldSpace-canvas visual, hardcoded to the right controller, with no notion of an RT panel's
-    /// own laser/cursor or its hand swap.</summary>
+    /// <summary>Hides every pooled aim dot. Called on frames an RT panel owns the pointer — that
+    /// pool is a legacy-WorldSpace-canvas visual, hardcoded to the right controller, with no notion
+    /// of an RT panel's own laser or its hand swap.</summary>
     public void HideAllAimDots()
     {
         for (int i = 0; i < _aimDotPool.Count; i++)
@@ -501,4 +502,5 @@ internal struct AimScanResult
     public Vector3 TargetPos;
     public Quaternion TargetRot;
     public float AimDepth;
+    public float HitDistance;
 }

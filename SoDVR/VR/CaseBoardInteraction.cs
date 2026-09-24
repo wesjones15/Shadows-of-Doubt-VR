@@ -150,6 +150,12 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     }
 
     public bool GripDragActive => _gripDragCanvas != null;
+
+    /// <summary>A legacy press/drag/grip is mid-gesture — RTPanelInput must not take the pointer
+    /// until it ends, or the gesture would never see its release.</summary>
+    public bool HasActiveGesture =>
+        _cbDragActive || _stringDragActive || _cbMidDragActive || _minimapPanActive
+        || _gripDragCanvas != null || _gripDragIsNested;
     public Canvas? GripDragCanvas => _gripDragCanvas;
     public Vector3 GripDragDesiredPos => _gripDragDesiredPos;
     public Quaternion GripDragDesiredRot => _gripDragDesiredRot;
@@ -1081,7 +1087,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     /// continuous chain sharing mutable locals across its whole length in the original code —
     /// relocated mechanically as one method rather than split further; see this file's header.
     /// </summary>
-    public void Tick()
+    public void Tick(bool pointerOwnedByRTPanel)
     {
         if (_ctxRightControllerGO == null) return;
 
@@ -1089,6 +1095,12 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         bool triggerEdge = triggerNow && !_prevTrigger;
         bool triggerRelease = !triggerNow && _prevTrigger;
         _prevTrigger = triggerNow;
+
+        if (pointerOwnedByRTPanel)
+        {
+            YieldPointerToRTPanel(triggerNow);
+            return;
+        }
 
         bool cbOpen = _ctxActionPanelCanvas != null && _ctxActionPanelCanvas.gameObject.activeSelf;
         // When the pause menu OR VR Settings panel is open, force cbOpen=false so that
@@ -2156,6 +2168,24 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 _minimapPanActive = false;
             }
         }
+    }
+
+    /// <summary>Keeps edge state current and marks every held button as needing a release, so a
+    /// press that an RT panel consumed can't reappear here as a fresh press once the pointer
+    /// moves back to a legacy canvas.</summary>
+    private void YieldPointerToRTPanel(bool triggerNow)
+    {
+        if (triggerNow) _triggerNeedsRelease = true;
+        if (_ctxLeftControllerGO != null)
+        {
+            OpenXRManager.GetTriggerState(false, out bool leftNow);
+            _prevTriggerLeft = leftNow;
+            if (leftNow) _leftTriggerNeedsRelease = true;
+        }
+        OpenXRManager.GetButtonAState(out bool aNow);
+        if (aNow) _cbANeedsRelease = true;
+        OpenXRManager.GetButtonBState(out bool bNow);
+        if (bNow) _cbBNeedsRelease = true;
     }
 
     // ── ICanvasClickExtensions: case-board/minimap-specific hooks for CanvasClickRouter ────────

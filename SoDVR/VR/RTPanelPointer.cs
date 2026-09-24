@@ -8,27 +8,56 @@ using UnityEngine.UI;
 
 namespace SoDVR.VR;
 
+/// <summary>What one frame of controller input looks like to the RT panel that has focus.</summary>
+internal readonly struct RTPointerInput
+{
+    public readonly Ray Ray;
+    public readonly bool Press;
+    public readonly bool Held;
+    public readonly bool Release;
+    public readonly bool SecondaryClick;
+    public readonly float Scroll;
+    public readonly bool RightHand;
+
+    public RTPointerInput(Ray ray, bool press, bool held, bool release, bool secondaryClick, float scroll, bool rightHand)
+    {
+        Ray = ray; Press = press; Held = held; Release = release;
+        SecondaryClick = secondaryClick; Scroll = scroll; RightHand = rightHand;
+    }
+}
+
+/// <summary>Legacy-pipeline state CanvasClickRouter.InvokeButtonClick still needs when a click
+/// spawns new content (rescan-cooldown clearing).</summary>
+internal readonly struct RTPanelClickContext
+{
+    public readonly Dictionary<int, Canvas> ManagedCanvases;
+    public readonly Dictionary<int, int> LastRescanFrame;
+    public readonly Action RequestForceScan;
+
+    public RTPanelClickContext(Dictionary<int, Canvas> managedCanvases, Dictionary<int, int> lastRescanFrame, Action requestForceScan)
+    {
+        ManagedCanvases = managedCanvases; LastRescanFrame = lastRescanFrame; RequestForceScan = requestForceScan;
+    }
+}
+
 /// <summary>
-/// Reusable controller-ray interaction for an RT panel quad: a thin laser that only shows while
-/// actually aiming at the panel (its endpoint is the cursor — a separate on-panel cursor dot was
-/// tried and dropped; the laser's own tip is enough; PostFXOverlayCompositor draws it, not a
-/// scene renderer, so it's immune to post-processing like the panel), hover-driven Button highlighting, and
-/// trigger-as-click. One instance is meant to be owned per RT panel (MenuRTPanel today; future RT
-/// panels — case board, popups — construct their own instance and Bind it to their own
-/// canvas/collider/RT once set up) rather than duplicating this logic per panel.
+/// Turns controller input into Unity pointer events for one RT panel, the way a real input module
+/// would for a mouse: hover enter/exit along the hierarchy, press, drag, release, click, a secondary
+/// (right-button) click and scroll. Screen positions are RT pixels, which equal the canvas's own
+/// screen pixels because the canvas renders through its projector camera — so the game's own
+/// handlers see correct coordinates with no mouse involved. <see cref="RTPanelInput"/> decides which
+/// panel has focus and hands this class the frame's input; one instance per RT panel.
 /// </summary>
 internal sealed class RTPanelPointer
 {
     private static ManualLogSource Log => Plugin.Log;
 
-    private const float MaxRayDistance = 15f;
-
-    // Which hand owns pointer interaction — shared across every RTPanelPointer instance (every RT
-    // panel), not per-panel: swapping hands on one panel should carry over to the next one you aim
-    // at, not silently reset. Right by default each session.
-    private static bool s_useRightController = true;
+    // Hand tremor at arm's length easily exceeds Unity's default 10px drag threshold; measured on
+    // the panel surface instead so it doesn't depend on the canvas's resolution.
+    private const float DragThresholdMeters = 0.015f;
 
     private readonly string _logTag;
+    private readonly Func<GameObject, bool>? _onBeforeClick;
 
     private Canvas? _canvas;
     private Collider? _quadCollider;
@@ -36,34 +65,44 @@ internal sealed class RTPanelPointer
 
     // Nested content canvases (e.g. a dialog box nested inside a bigger panel canvas) that also
     // need hit-testing — Unity's GraphicRaycaster only resolves Graphics belonging to its OWN
-    // canvas, never a nested child canvas's, so a panel with dialog-style nested content must
-    // register it here to be clickable at all. Tried most-recently-added first (topmost/most
-    // specific), falling back to the root canvas bound via Bind().
+    // canvas, never a nested child canvas's. Tried most-recently-added first, falling back to the
+    // root canvas bound via Bind().
     private readonly List<Canvas> _overlayCanvases = new();
 
-    private bool _laserVisible;
-    private Vector3 _laserOrigin;
-    private Vector3 _laserEnd;
-    private Selectable? _hoveredSelectable;
-    private bool _prevRightTrigger;
-    private bool _prevLeftTrigger;
+    private PointerEventData? _ped;
+    private EventSystem? _pedEventSystem;
+    private GameObject? _hovered;
+    private GameObject? _pressed;
+    private Vector3 _pressWorldPoint;
+    private bool _dragging;
+    private bool _dragRejected;
 
-    public RTPanelPointer(string logTag) { _logTag = logTag; }
+    /// <param name="onBeforeClick">Called with the clicked object before the generic click
+    /// dispatch; return true to fully handle the click there (e.g. a Settings-button intercept).</param>
+    public RTPanelPointer(string logTag, Func<GameObject, bool>? onBeforeClick = null)
+    {
+        _logTag = logTag;
+        _onBeforeClick = onBeforeClick;
+    }
+
+    /// <summary>Set by the owning panel every tick: whether this panel can currently take focus.</summary>
+    public bool Enabled { get; set; }
+
+    public string LogTag => _logTag;
+    public bool IsPressed => _pressed != null;
 
     /// <summary>(Re)binds the panel this pointer aims at. Call whenever the panel's canvas,
-    /// collider or RenderTexture change (normally once, right after the panel's own setup).</summary>
+    /// collider or RenderTexture change.</summary>
     public void Bind(Canvas canvas, Collider quadCollider, RenderTexture rt)
     {
+        Clear();
         _canvas = canvas;
         _quadCollider = quadCollider;
         _rt = rt;
         _overlayCanvases.Clear();
     }
 
-    /// <summary>Registers a nested content canvas (e.g. a dialog box) as also hit-testable —
-    /// needed because Unity's GraphicRaycaster never resolves a nested child canvas's Graphics
-    /// through its parent's raycaster. Safe to call repeatedly; a canvas already registered is not
-    /// added twice.</summary>
+    /// <summary>Registers a nested content canvas as also hit-testable. Safe to call repeatedly.</summary>
     public void AddOverlayCanvas(Canvas canvas)
     {
         if (canvas != null && !_overlayCanvases.Contains(canvas)) _overlayCanvases.Add(canvas);
@@ -71,188 +110,303 @@ internal sealed class RTPanelPointer
 
     public void RemoveOverlayCanvas(Canvas canvas) => _overlayCanvases.Remove(canvas);
 
-    /// <summary>Hides the laser/cursor and clears hover state. Call whenever the panel stops being
-    /// interactable (closed, or the owner otherwise wants interaction paused).</summary>
-    public void Clear()
+    internal bool TryRaycastQuad(Ray ray, float maxDistance, out float distance, out Vector3 point)
     {
-        HideLaser();
-        UpdateHover(null, null);
+        distance = 0f; point = default;
+        if (!Enabled || _canvas == null || _quadCollider == null || _rt == null) return false;
+        if (!_quadCollider.gameObject.activeInHierarchy) return false;
+        if (!_quadCollider.Raycast(ray, out var hit, maxDistance)) return false;
+        distance = hit.distance;
+        point = hit.point;
+        return true;
     }
 
-    /// <summary>
-    /// Full interaction pass for one frame. <paramref name="onBeforeClick"/> is called with the
-    /// clicked GameObject before the generic Button/ExecuteEvents dispatch runs — return true if it
-    /// fully handled the click (e.g. a panel-specific intercept like a Settings button), which skips
-    /// the generic dispatch for that press.
-    /// </summary>
-    public void UpdateInteraction(GameObject? rightControllerGO, GameObject? leftControllerGO,
-        Dictionary<int, Canvas> managedCanvases, Dictionary<int, int> lastRescanFrame,
-        Action requestForceScan, Func<GameObject, bool>? onBeforeClick = null)
+    /// <summary>While a press is held, keeps tracking the ray on the panel's plane even after it
+    /// leaves the quad, so drags don't stall at the panel edge.</summary>
+    internal bool TryRaycastPlane(Ray ray, out float distance, out Vector3 point)
     {
-        if (_canvas == null || _quadCollider == null || _rt == null) { Clear(); return; }
-
-        OpenXRManager.GetTriggerState(true, out bool rightTriggerNow);
-        OpenXRManager.GetTriggerState(false, out bool leftTriggerNow);
-        bool rightEdge = rightTriggerNow && !_prevRightTrigger;
-        bool leftEdge = leftTriggerNow && !_prevLeftTrigger;
-        _prevRightTrigger = rightTriggerNow;
-        _prevLeftTrigger = leftTriggerNow;
-
-        // Default right controller. The first trigger press on the OTHER hand just swaps
-        // ownership over (so an imprecise aim mid-swap doesn't also fire a click); every press
-        // after that on the now-active hand clicks normally. Shared across all RT panels (see
-        // s_useRightController) — swapping here also applies the next time any RT panel is aimed at.
-        bool swappedThisFrame = false;
-        if (s_useRightController && leftEdge && leftControllerGO != null)
+        distance = 0f; point = default;
+        if (_quadCollider == null) return false;
+        var t = _quadCollider.transform;
+        var plane = new Plane(t.forward, t.position);
+        if (!plane.Raycast(ray, out distance) || distance <= 0f)
         {
-            s_useRightController = false;
-            swappedThisFrame = true;
-            Log.LogInfo($"[{_logTag}] Active controller swapped to LEFT");
+            plane = new Plane(-t.forward, t.position);
+            if (!plane.Raycast(ray, out distance) || distance <= 0f) return false;
         }
-        else if (!s_useRightController && rightEdge && rightControllerGO != null)
-        {
-            s_useRightController = true;
-            swappedThisFrame = true;
-            Log.LogInfo($"[{_logTag}] Active controller swapped to RIGHT");
-        }
+        point = ray.GetPoint(distance);
+        return true;
+    }
 
-        var activeGO = s_useRightController ? rightControllerGO : leftControllerGO;
-        if (activeGO == null) { Clear(); return; }
-
-        bool clickThisFrame = !swappedThisFrame && (s_useRightController ? rightEdge : leftEdge);
-
-        Vector3 origin = activeGO.transform.position;
-        Vector3 direction = activeGO.transform.forward;
-        bool hitQuad = _quadCollider.Raycast(new Ray(origin, direction), out var hit, MaxRayDistance);
-
-        if (!hitQuad)
-        {
-            HideLaser();
-            UpdateHover(null, null);
-            return;
-        }
-
-        ShowLaser(origin, hit.point);
-
+    internal void Process(in RTPointerInput input, Vector3 worldPoint, in RTPanelClickContext ctx)
+    {
         var es = EventSystem.current;
-        if (es == null) { UpdateHover(null, null); return; }
+        if (es == null || _canvas == null || _rt == null) { Clear(); return; }
+        if (_ped == null || _pedEventSystem != es)
+        {
+            Clear();
+            _ped = new PointerEventData(es);
+            _pedEventSystem = es;
+        }
 
-        Vector2 screenPt = new Vector2(hit.textureCoord.x * _rt.width, hit.textureCoord.y * _rt.height);
-        var ped = new PointerEventData(es) { position = screenPt };
+        Vector2 screenPt = PixelAt(worldPoint);
+        _ped.delta = screenPt - _ped.position;
+        _ped.position = screenPt;
 
-        GameObject? hitGo = null;
-        Il2CppSystem.Collections.Generic.List<RaycastResult>? hitResults = null;
-        for (int i = _overlayCanvases.Count - 1; i >= 0 && hitGo == null; i--)
+        GameObject? hitGo = RaycastUI(_ped, out var hitResult);
+        _ped.pointerCurrentRaycast = hitResult;
+
+        UpdateHover(hitGo);
+        if (hitGo != null && _ped.delta.sqrMagnitude > 0f)
+            ExecuteEvents.ExecuteHierarchy(hitGo, _ped, ExecuteEvents.pointerMoveHandler);
+
+        if (input.Press) BeginPress(hitGo, hitResult, worldPoint);
+        if (input.Held && _pressed != null) ContinuePress(worldPoint);
+        if (input.Release && _pressed != null) EndPress(hitGo, ctx);
+
+        if (input.SecondaryClick && hitGo != null) SecondaryClick(hitGo, hitResult);
+        if (Mathf.Abs(input.Scroll) > 0f && hitGo != null)
+        {
+            _ped.scrollDelta = new Vector2(0f, input.Scroll);
+            ExecuteEvents.ExecuteHierarchy(hitGo, _ped, ExecuteEvents.scrollHandler);
+            _ped.scrollDelta = Vector2.zero;
+        }
+    }
+
+    /// <summary>Focus moved elsewhere: drop hover. An in-progress press is kept — RTPanelInput
+    /// keeps a pressed panel captured until release.</summary>
+    internal void LoseFocus() => UpdateHover(null);
+
+    /// <summary>Drops hover and cancels any in-progress press. Call when the panel closes.</summary>
+    public void Clear()
+    {
+        UpdateHover(null);
+        if (_pressed == null || _ped == null) { ResetPress(); return; }
+        try
+        {
+            ExecuteEvents.Execute(_ped.pointerPress ?? _pressed, _ped, ExecuteEvents.pointerUpHandler);
+            if (_dragging && _ped.pointerDrag != null)
+                ExecuteEvents.Execute(_ped.pointerDrag, _ped, ExecuteEvents.endDragHandler);
+        }
+        catch (Exception ex) { Log.LogWarning($"[{_logTag}] Cancel press: {ex.Message}"); }
+        ResetPress();
+    }
+
+    private void BeginPress(GameObject? hitGo, RaycastResult hitResult, Vector3 worldPoint)
+    {
+        if (hitGo == null || _ped == null) return;
+        _pressed = hitGo;
+        _pressWorldPoint = worldPoint;
+        _dragging = false;
+        _dragRejected = false;
+
+        _ped.button = PointerEventData.InputButton.Left;
+        _ped.eligibleForClick = true;
+        _ped.pressPosition = _ped.position;
+        _ped.pointerPressRaycast = hitResult;
+        _ped.rawPointerPress = hitGo;
+        _ped.useDragThreshold = true;
+        _ped.dragging = false;
+        _ped.pointerDrag = null!;
+        try
+        {
+            var downHandler = ExecuteEvents.ExecuteHierarchy(hitGo, _ped, ExecuteEvents.pointerDownHandler);
+            _ped.pointerPress = downHandler ?? hitGo;
+            ExecuteEvents.ExecuteHierarchy(hitGo, _ped, ExecuteEvents.initializePotentialDrag);
+        }
+        catch (Exception ex) { Log.LogWarning($"[{_logTag}] Press: {ex.Message}"); }
+    }
+
+    private void ContinuePress(Vector3 worldPoint)
+    {
+        if (_ped == null || _pressed == null) return;
+        try
+        {
+            if (!_dragging && !_dragRejected
+                && Vector3.Distance(worldPoint, _pressWorldPoint) >= DragThresholdMeters)
+            {
+                var dragHandler = ExecuteEvents.ExecuteHierarchy(_pressed, _ped, ExecuteEvents.beginDragHandler);
+                if (dragHandler != null)
+                {
+                    _dragging = true;
+                    _ped.dragging = true;
+                    _ped.pointerDrag = dragHandler;
+                    _ped.eligibleForClick = false;
+                    Log.LogInfo($"[{_logTag}] Drag begin: '{dragHandler.name}'");
+                }
+                else _dragRejected = true;
+            }
+            if (_dragging && _ped.pointerDrag != null)
+                ExecuteEvents.Execute(_ped.pointerDrag, _ped, ExecuteEvents.dragHandler);
+        }
+        catch (Exception ex) { Log.LogWarning($"[{_logTag}] Drag: {ex.Message}"); }
+    }
+
+    private void EndPress(GameObject? hitGo, in RTPanelClickContext ctx)
+    {
+        if (_ped == null || _pressed == null) return;
+        var pressed = _pressed;
+        try
+        {
+            ExecuteEvents.Execute(_ped.pointerPress ?? pressed, _ped, ExecuteEvents.pointerUpHandler);
+            if (_dragging && _ped.pointerDrag != null)
+            {
+                if (hitGo != null) ExecuteEvents.ExecuteHierarchy(hitGo, _ped, ExecuteEvents.dropHandler);
+                ExecuteEvents.Execute(_ped.pointerDrag, _ped, ExecuteEvents.endDragHandler);
+                Log.LogInfo($"[{_logTag}] Drag end: '{_ped.pointerDrag.name}'");
+            }
+            else
+            {
+                Click(pressed, ctx);
+            }
+        }
+        catch (Exception ex) { Log.LogWarning($"[{_logTag}] Release: {ex.Message}"); }
+        ResetPress();
+    }
+
+    private void Click(GameObject go, in RTPanelClickContext ctx)
+    {
+        if (_ped == null || _canvas == null) return;
+        if (_onBeforeClick != null && _onBeforeClick(go)) return;
+
+        Log.LogInfo($"[{_logTag}] Click: '{go.name}'");
+        bool handledByButton = CanvasClickRouter.InvokeButtonClick(go, _canvas, ctx.ManagedCanvases, ctx.LastRescanFrame, ctx.RequestForceScan);
+        if (!handledByButton)
+        {
+            ExecuteEvents.ExecuteHierarchy(go, _ped, ExecuteEvents.pointerClickHandler);
+            ExecuteEvents.ExecuteHierarchy(go, _ped, ExecuteEvents.submitHandler);
+        }
+
+        var walker = go.transform;
+        for (int i = 0; i < 6 && walker != null; i++)
+        {
+            var tmpIF = walker.GetComponent<TMP_InputField>();
+            if (tmpIF != null)
+            {
+                EventSystem.current?.SetSelectedGameObject(walker.gameObject);
+                tmpIF.ActivateInputField();
+                break;
+            }
+            walker = walker.parent;
+        }
+    }
+
+    /// <summary>A complete right-button press/release/click on whatever is under the pointer, on
+    /// its own event data so it never disturbs an in-progress left press.</summary>
+    private void SecondaryClick(GameObject hitGo, RaycastResult hitResult)
+    {
+        var es = EventSystem.current;
+        if (es == null || _ped == null) return;
+        var ped = new PointerEventData(es)
+        {
+            button = PointerEventData.InputButton.Right,
+            position = _ped.position,
+            pressPosition = _ped.position,
+            pointerCurrentRaycast = hitResult,
+            pointerPressRaycast = hitResult,
+            rawPointerPress = hitGo,
+            eligibleForClick = true,
+        };
+        try
+        {
+            var downHandler = ExecuteEvents.ExecuteHierarchy(hitGo, ped, ExecuteEvents.pointerDownHandler);
+            ped.pointerPress = downHandler ?? hitGo;
+            ExecuteEvents.Execute(ped.pointerPress, ped, ExecuteEvents.pointerUpHandler);
+            var clickHandler = ExecuteEvents.ExecuteHierarchy(hitGo, ped, ExecuteEvents.pointerClickHandler);
+            Log.LogInfo($"[{_logTag}] Secondary click: '{hitGo.name}' handledBy='{clickHandler?.name ?? "none"}'");
+        }
+        catch (Exception ex) { Log.LogWarning($"[{_logTag}] Secondary click: {ex.Message}"); }
+    }
+
+    /// <summary>Unity's own hover semantics: exit is sent up the old hierarchy and enter up the new
+    /// one, each stopping at their common ancestor — so a game component anywhere in the chain (not
+    /// only a Selectable) gets the same enter/exit a real mouse would give it.</summary>
+    private void UpdateHover(GameObject? newGo)
+    {
+        if (newGo == _hovered) return;
+        var ped = _ped;
+        var common = FindCommonRoot(_hovered, newGo);
+
+        try
+        {
+            if (_hovered != null && ped != null)
+            {
+                for (var t = _hovered.transform; t != null && t != common; t = t.parent)
+                    ExecuteEvents.Execute(t.gameObject, ped, ExecuteEvents.pointerExitHandler);
+            }
+
+            _hovered = newGo;
+            if (ped != null) ped.pointerEnter = newGo;
+
+            if (newGo != null && ped != null)
+            {
+                for (var t = newGo.transform; t != null && t != common; t = t.parent)
+                    ExecuteEvents.Execute(t.gameObject, ped, ExecuteEvents.pointerEnterHandler);
+            }
+        }
+        catch (Exception ex)
+        {
+            _hovered = newGo;
+            Log.LogWarning($"[{_logTag}] Hover: {ex.Message}");
+        }
+    }
+
+    private static Transform? FindCommonRoot(GameObject? a, GameObject? b)
+    {
+        if (a == null || b == null) return null;
+        for (var ta = a.transform; ta != null; ta = ta.parent)
+            for (var tb = b.transform; tb != null; tb = tb.parent)
+                if (ta == tb) return ta;
+        return null;
+    }
+
+    // RaycastResult is a boxed value type across the IL2CPP boundary, so `default` would be null
+    // rather than an empty result — every out path below yields a real instance instead.
+    private GameObject? RaycastUI(PointerEventData ped, out RaycastResult result)
+    {
+        result = new RaycastResult();
+        for (int i = _overlayCanvases.Count - 1; i >= 0; i--)
         {
             var overlay = _overlayCanvases[i];
             if (overlay == null) { _overlayCanvases.RemoveAt(i); continue; }
-            var ogr = overlay.GetComponent<GraphicRaycaster>();
-            if (ogr == null || !ogr.enabled) continue;
-            var oResults = new Il2CppSystem.Collections.Generic.List<RaycastResult>();
-            ogr.Raycast(ped, oResults);
-            if (oResults.Count > 0) { hitGo = oResults[0].gameObject; hitResults = oResults; }
+            if (TryRaycastCanvas(overlay, ped, out result)) return result.gameObject;
         }
-        if (hitGo == null)
+        return _canvas != null && TryRaycastCanvas(_canvas, ped, out result) ? result.gameObject : null;
+    }
+
+    private static bool TryRaycastCanvas(Canvas canvas, PointerEventData ped, out RaycastResult result)
+    {
+        result = new RaycastResult();
+        var gr = canvas.GetComponent<GraphicRaycaster>();
+        if (gr == null || !gr.enabled) return false;
+        var results = new Il2CppSystem.Collections.Generic.List<RaycastResult>();
+        gr.Raycast(ped, results);
+        if (results.Count == 0 || results[0].gameObject == null) return false;
+        result = results[0];
+        return true;
+    }
+
+    /// <summary>World point on the quad → RT pixel. A Unity Quad spans -0.5..0.5 locally with UV
+    /// 0..1, so this matches <c>RaycastHit.textureCoord</c> and also works for off-quad plane
+    /// points during a drag.</summary>
+    private Vector2 PixelAt(Vector3 worldPoint)
+    {
+        var local = _quadCollider!.transform.InverseTransformPoint(worldPoint);
+        return new Vector2((local.x + 0.5f) * _rt!.width, (local.y + 0.5f) * _rt.height);
+    }
+
+    private void ResetPress()
+    {
+        _pressed = null;
+        _dragging = false;
+        _dragRejected = false;
+        if (_ped != null)
         {
-            var gr = _canvas.GetComponent<GraphicRaycaster>();
-            if (gr != null && gr.enabled)
-            {
-                var results = new Il2CppSystem.Collections.Generic.List<RaycastResult>();
-                gr.Raycast(ped, results);
-                if (results.Count > 0) { hitGo = results[0].gameObject; hitResults = results; }
-            }
+            _ped.pointerPress = null!;
+            _ped.rawPointerPress = null!;
+            _ped.pointerDrag = null!;
+            _ped.dragging = false;
+            _ped.eligibleForClick = false;
         }
-
-        UpdateHover(hitGo, ped);
-
-        if (clickThisFrame && hitGo != null && hitResults != null)
-            Dispatch(hitGo, ped, hitResults[0], managedCanvases, lastRescanFrame, requestForceScan, onBeforeClick);
     }
-
-    private void Dispatch(GameObject go, PointerEventData ped, RaycastResult raycastResult,
-        Dictionary<int, Canvas> managedCanvases, Dictionary<int, int> lastRescanFrame,
-        Action requestForceScan, Func<GameObject, bool>? onBeforeClick)
-    {
-        try
-        {
-            if (onBeforeClick != null && onBeforeClick(go)) return;
-
-            ped.pointerEnter          = go;
-            ped.pointerPress          = go;
-            ped.rawPointerPress       = go;
-            ped.pointerDrag           = go;
-            ped.pressPosition         = ped.position;
-            ped.pointerCurrentRaycast = raycastResult;
-            ped.pointerPressRaycast   = raycastResult;
-            ped.eligibleForClick      = true;
-            ped.button                = PointerEventData.InputButton.Left;
-
-            Log.LogInfo($"[{_logTag}] Trigger click ({(s_useRightController ? "R" : "L")}): '{go.name}'");
-
-            bool handledByButton = CanvasClickRouter.InvokeButtonClick(go, _canvas!, managedCanvases, lastRescanFrame, requestForceScan);
-            if (!handledByButton)
-            {
-                ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerDownHandler);
-                ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerUpHandler);
-                ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerClickHandler);
-                ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.submitHandler);
-            }
-
-            var ifWalker = go.transform;
-            for (int i = 0; i < 6 && ifWalker != null; i++)
-            {
-                var tmpIF = ifWalker.GetComponent<TMP_InputField>();
-                if (tmpIF != null)
-                {
-                    EventSystem.current?.SetSelectedGameObject(ifWalker.gameObject);
-                    tmpIF.ActivateInputField();
-                    break;
-                }
-                ifWalker = ifWalker.parent;
-            }
-        }
-        catch (Exception ex) { Log.LogWarning($"[{_logTag}] Dispatch: {ex.Message}"); }
-    }
-
-    /// <summary>Fires pointerEnter/pointerExit on the nearest Selectable ancestor so Unity's own
-    /// Button/Toggle highlight-state transition drives the hover visuals — the same mechanism a
-    /// real mouse hover uses, just fed by our own controller-ray hit instead.</summary>
-    private void UpdateHover(GameObject? hitGo, PointerEventData? ped)
-    {
-        Selectable? sel = null;
-        var tr = hitGo?.transform;
-        for (int i = 0; i < 8 && tr != null; i++)
-        {
-            sel = tr.GetComponent<Selectable>();
-            if (sel != null) break;
-            tr = tr.parent;
-        }
-
-        if (sel == _hoveredSelectable) return;
-
-        var es = EventSystem.current;
-        if (_hoveredSelectable != null && es != null)
-            ExecuteEvents.Execute(_hoveredSelectable.gameObject, new PointerEventData(es), ExecuteEvents.pointerExitHandler);
-
-        _hoveredSelectable = sel;
-
-        if (_hoveredSelectable != null && ped != null)
-            ExecuteEvents.Execute(_hoveredSelectable.gameObject, ped, ExecuteEvents.pointerEnterHandler);
-    }
-
-    /// <summary>Hands this frame's laser (if showing) to the compositor, which draws it after HDRP's
-    /// post stack and on top of the panel it hits.</summary>
-    public void AppendOverlay(PostFXOverlayCompositor overlay)
-    {
-        if (_laserVisible) overlay.AddLaser(_laserOrigin, _laserEnd);
-    }
-
-    private void ShowLaser(Vector3 origin, Vector3 hitPoint)
-    {
-        _laserOrigin = origin;
-        _laserEnd = hitPoint;
-        _laserVisible = true;
-    }
-
-    private void HideLaser() => _laserVisible = false;
 }

@@ -60,8 +60,9 @@ public class VRCamera : MonoBehaviour
     private readonly CaseBoardInteraction _caseBoard = new();
     private readonly CanvasMaterialPatcher _materialPatcher = new();
     private readonly CanvasPlacement _canvasPlacement = new();
-    private readonly MenuRTPanel _menuRTPanel = new(UILayer);
-    private readonly TooltipRTPanel _tooltipRTPanel = new(UILayer);
+    private readonly RTPanelInput _rtPanelInput = new();
+    private MenuRTPanel _menuRTPanel = null!;
+    private TooltipRTPanel _tooltipRTPanel = null!;
     private readonly PostFXOverlayCompositor _overlay = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
@@ -251,6 +252,8 @@ public class VRCamera : MonoBehaviour
     {
         // Stop the background frame thread; we take over the frame loop from here.
         OpenXRManager.StopFrameThread();
+        _menuRTPanel = new MenuRTPanel(UILayer, _rtPanelInput, OnSaveLoadButtonClicked);
+        _tooltipRTPanel = new TooltipRTPanel(UILayer, _rtPanelInput, OnSaveLoadButtonClicked);
         Log.LogInfo("[VRCamera] Awake — polling for SYNCHRONIZED state before swapchain setup.");
     }
 
@@ -583,17 +586,19 @@ public class VRCamera : MonoBehaviour
                 bool isPausedForLocomotion = caseBoardOpenForInput || _menuRTPanel.IsShowing;
                 bool vrSettingsOpenForInput = VRSettingsPanel.RootGO?.activeSelf == true;
 
-                _locomotion.UpdateSnapTurn(transform, _voidRoom.InVoidMode);
+                bool pointerOnUI = _cursorHasTarget || _rtPanelInput.HasFocus;
+
+                _locomotion.UpdateSnapTurn(transform, _voidRoom.InVoidMode, _rtPanelInput.HasFocus);
                 _locomotion.UpdateLocomotion(_leftCam, _voidRoom.InVoidMode, isPausedForLocomotion, _sceneLoadGrace);
                 if (_locomotion.UpdateMenuButton()) _canvasTick = UICanvasScanRate;
-                _locomotion.UpdateJump(caseBoardOpenForInput, _cursorHasTarget, _movementDiscoveryDone, _sceneLoadGrace);
+                _locomotion.UpdateJump(caseBoardOpenForInput, pointerOnUI, _movementDiscoveryDone, _sceneLoadGrace);
                 _locomotion.UpdateInteract();
                 _locomotion.UpdateCrouch();
                 _locomotion.UpdateYButton();
                 _locomotion.UpdateSprint();
 
                 var notebookOutcome = _locomotion.UpdateNotebook(vrSettingsOpenForInput, caseBoardOpenForInput,
-                    _rightControllerGO, _leftCam, _cursorHasTarget, _minimapCanvasRef, transform);
+                    _rightControllerGO, _leftCam, pointerOnUI, _minimapCanvasRef, transform);
                 if (notebookOutcome.TabJustReleased)
                 {
                     if (notebookOutcome.HasMinimapOffset)
@@ -1210,6 +1215,7 @@ public class VRCamera : MonoBehaviour
                     _overlay.BeginFrame();
                     _menuRTPanel.AppendOverlay(_overlay);
                     _tooltipRTPanel.AppendOverlay(_overlay);
+                    _rtPanelInput.AppendOverlay(_overlay);
                     _overlay.Composite(_rightCam, _rightRT);
                     _overlay.Composite(_leftCam, _leftRT);
                 }
@@ -1285,20 +1291,37 @@ public class VRCamera : MonoBehaviour
         _caseBoard.UpdateGripDrag();
         (_minimapBBtnLocalOffset, _minimapBBtnLocalRot, _minimapBBtnHasOffset) = _caseBoard.MinimapBBtnResult;
 
-        // Any RT panel owns its own laser/cursor/hover/click while its quad is visible — the
-        // legacy laser/cursor-dot system is for the WorldSpace-canvas pipeline and would otherwise
-        // draw a second, redundant beam alongside it. IsInteractable (not IsShowing) so this and
-        // each RT panel's own interaction gate read the exact same stable signal every frame.
-        //
-        // Also suppressed for the whole void-room period (_gameCam == null: press-any-key, main
-        // menu, loading) regardless of MenuRTPanel's own discovery/placement timing — reported bug:
-        // 2 legacy aim-dots visible right where the menu panel was about to appear, in the frames
-        // before MenuRTPanel had discovered/placed its quad. Nothing legacy (case board, notebook
-        // windows, any of it) can exist while there's no real game camera, so there's nothing this
-        // would incorrectly suppress — nothing legitimate is reachable there in the first place.
-        bool suppressLegacyPointer = _gameCam == null || _menuRTPanel.IsInteractable || _tooltipRTPanel.IsInteractable;
-        if (suppressLegacyPointer)
+        _controllerInteraction.UpdateLeftInteractMarker(_leftControllerGO, _menuRTPanel.Canvas, _gameCamRef,
+            _leftCam, _interactionLayerMask, _baseInteractionRange);
+
+        _caseBoard.PreAimScan();
+
+        // Legacy depth scan first, so RTPanelInput can tell whether a legacy WorldSpace canvas sits
+        // in front of the nearest RT panel. The whole void-room period (_gameCam == null) has no
+        // legacy canvases worth reaching, and skipping it there avoids stray aim dots where the menu
+        // panel is about to appear.
+        bool voidPeriod = _gameCam == null;
+        AimScanResult aim = voidPeriod
+            ? default
+            : _controllerInteraction.ScanAndRenderAimDots(_rightControllerGO, _leftCam,
+                _managedCanvases, _cursorCanvas, _caseBoard.ContextMenuActive, _popupMessageGO, _tutorialMessageGO,
+                _nestedCanvasIds, _nestedDragTransforms, _noGroupInteractable);
+
+        float legacyHitDistance = _caseBoard.HasActiveGesture ? 0f
+                                : aim.HasTarget ? aim.HitDistance
+                                : float.PositiveInfinity;
+        try
         {
+            _rtPanelInput.Update(_rightControllerGO, _leftControllerGO, legacyHitDistance,
+                new RTPanelClickContext(_managedCanvases, _lastRescanFrame, () => _forceScanFrames = 30));
+        }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] RTPanelInput.Update: {ex.Message}"); }
+
+        bool rtOwnsPointer = _rtPanelInput.HasFocus || _rtPanelInput.IsCapturing;
+        if (voidPeriod || rtOwnsPointer)
+        {
+            _controllerInteraction.HideAllAimDots();
+            aim = default;
             if (_cursorRect != null && _cursorRect.gameObject.activeSelf) _cursorRect.gameObject.SetActive(false);
             if (_laserLine != null && _laserLine.enabled) _laserLine.enabled = false;
             if (_leftLaserLine != null && _leftLaserLine.enabled) _leftLaserLine.enabled = false;
@@ -1306,42 +1329,8 @@ public class VRCamera : MonoBehaviour
         else
         {
             _controllerInteraction.UpdateCursorDot(_cursorRect, _cursorCanvas, _rightControllerGO);
-            _controllerInteraction.UpdateLaser(_laserLine, _rightControllerGO, _cursorHasTarget, _cursorTargetPos);
+            _controllerInteraction.UpdateLaser(_laserLine, _rightControllerGO, aim.HasTarget, aim.TargetPos);
             _controllerInteraction.UpdateLeftLaser(_leftLaserLine, _leftControllerGO);
-        }
-        try
-        {
-            _menuRTPanel.UpdateInteraction(_rightControllerGO, _leftControllerGO,
-                _managedCanvases, _lastRescanFrame, () => _forceScanFrames = 30, OnSaveLoadButtonClicked);
-        }
-        catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.UpdateInteraction: {ex.Message}"); }
-        try
-        {
-            _tooltipRTPanel.UpdateInteraction(_rightControllerGO, _leftControllerGO,
-                _managedCanvases, _lastRescanFrame, () => _forceScanFrames = 30, OnSaveLoadButtonClicked);
-        }
-        catch (Exception ex) { Log.LogWarning($"[VRCamera] TooltipRTPanel.UpdateInteraction: {ex.Message}"); }
-
-        _controllerInteraction.UpdateLeftInteractMarker(_leftControllerGO, _menuRTPanel.Canvas, _gameCamRef,
-            _leftCam, _interactionLayerMask, _baseInteractionRange);
-
-        _caseBoard.PreAimScan();
-
-        // Depth scan: find ALL managed canvases the controller ray hits within their rects, and
-        // render a world-space aim dot at every hit. The nearest hit drives the primary cursor
-        // canvas (for click targeting / tooltip depth). Skipped under the same conditions as the
-        // legacy laser above — see suppressLegacyPointer's comment.
-        AimScanResult aim;
-        if (suppressLegacyPointer)
-        {
-            _controllerInteraction.HideAllAimDots();
-            aim = default;
-        }
-        else
-        {
-            aim = _controllerInteraction.ScanAndRenderAimDots(_rightControllerGO, _leftCam,
-                _managedCanvases, _cursorCanvas, _caseBoard.ContextMenuActive, _popupMessageGO, _tutorialMessageGO,
-                _nestedCanvasIds, _nestedDragTransforms, _noGroupInteractable);
         }
         _cursorHasTarget    = aim.HasTarget;
         _cursorTargetCanvas = aim.TargetCanvas;
@@ -1350,7 +1339,7 @@ public class VRCamera : MonoBehaviour
         _cursorAimDepth     = aim.AimDepth;
 
         _caseBoard.PostAimScan();
-        _caseBoard.Tick();
+        _caseBoard.Tick(rtOwnsPointer);
 
         _controllerInteraction.UpdateVrSettingsScroll();
         _controllerInteraction.UpdateLeftPose(displayTime, transform, _leftControllerGO);

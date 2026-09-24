@@ -72,10 +72,14 @@ internal sealed class TooltipRTPanel
     private Canvas? _ownedTutorialCanvas;
     private int _discoveryCooldown;
 
-    public TooltipRTPanel(int quadLayer)
+    private readonly Action _onSaveLoadButtonClicked;
+
+    public TooltipRTPanel(int quadLayer, RTPanelInput input, Action onSaveLoadButtonClicked)
     {
         _quadLayer = quadLayer;
-        _pointer = new RTPanelPointer("TooltipRTPanel");
+        _onSaveLoadButtonClicked = onSaveLoadButtonClicked;
+        _pointer = new RTPanelPointer("TooltipRTPanel", OnBeforeClick);
+        input.Register(_pointer);
     }
 
     public Canvas? Canvas => _canvas;
@@ -115,7 +119,7 @@ internal sealed class TooltipRTPanel
             ReleaseOwnership(managedCanvases, leftCam);
         }
 
-        if (!_owned) return;
+        if (!_owned) { _pointer.Enabled = false; return; }
 
         if (!_quadPlaced && leftCam != null && _quadGO != null)
         {
@@ -135,6 +139,7 @@ internal sealed class TooltipRTPanel
         }
 
         if (_quadGO != null && _quadGO.activeSelf != _quadPlaced) _quadGO.SetActive(_quadPlaced);
+        _pointer.Enabled = IsInteractable;
     }
 
     private void TakeOwnership(Dictionary<int, Canvas> managedCanvases, Canvas? popupMessageCanvas, Canvas? tutorialMessageCanvas)
@@ -198,20 +203,9 @@ internal sealed class TooltipRTPanel
     {
         if (!IsInteractable || _quadMesh == null || _quadMaterial == null) return;
         overlay.AddPanel(_quadMesh, _quadGO!.transform.localToWorldMatrix, _quadMaterial);
-        _pointer.AppendOverlay(overlay);
     }
 
-    public void UpdateInteraction(GameObject? rightControllerGO, GameObject? leftControllerGO,
-        Dictionary<int, Canvas> managedCanvases, Dictionary<int, int> lastRescanFrame,
-        Action requestForceScan, Action onSaveLoadButtonClicked)
-    {
-        if (!IsInteractable) { _pointer.Clear(); return; }
-
-        _pointer.UpdateInteraction(rightControllerGO, leftControllerGO, managedCanvases, lastRescanFrame,
-            requestForceScan, go => OnBeforeClick(go, onSaveLoadButtonClicked));
-    }
-
-    private bool OnBeforeClick(GameObject go, Action onSaveLoadButtonClicked)
+    private bool OnBeforeClick(GameObject go)
     {
         // PopupMessage's two buttons are literally named "Left Button"/"Right Button" (a generic,
         // reused confirm-dialog component — not "Yes"/"No"). Confirmed via BepInEx/LogOutput.log
@@ -228,7 +222,7 @@ internal sealed class TooltipRTPanel
             {
                 if ((tr.gameObject.name ?? "").Equals("Right Button", StringComparison.OrdinalIgnoreCase))
                 {
-                    onSaveLoadButtonClicked();
+                    _onSaveLoadButtonClicked();
                     break;
                 }
                 tr = tr.parent;

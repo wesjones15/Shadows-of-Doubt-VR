@@ -18,9 +18,8 @@ namespace SoDVR.VR;
 /// Sole owner of MenuCanvas: CanvasConversionScanner skips it by name so the old WorldSpace pipeline
 /// never touches it, and this class reimplements the pieces that pipeline used to provide for it
 /// (Settings-button patch, hide-while-VR-settings-open, the no-CanvasGroup content-visibility check)
-/// rather than leaving the old system running alongside this one with exemptions. Laser/cursor/hover/
-/// click interaction is delegated to RTPanelPointer — a reusable component future RT panels (case
-/// board, popups) can compose the same way rather than each reimplementing it.
+/// rather than leaving the old system running alongside this one with exemptions. Pointer interaction
+/// goes through its own RTPanelPointer, registered with the shared RTPanelInput arbiter.
 /// </summary>
 internal sealed class MenuRTPanel
 {
@@ -38,6 +37,7 @@ internal sealed class MenuRTPanel
 
     private readonly int _quadLayer;
     private readonly RTPanelPointer _pointer;
+    private readonly Action _onSaveLoadButtonClicked;
 
     private Canvas? _canvas;
     private Camera? _projectorCam;
@@ -53,10 +53,15 @@ internal sealed class MenuRTPanel
     private bool _vrSettingsHidden;
     private int _discoveryCooldown;
 
-    public MenuRTPanel(int quadLayer)
+    /// <param name="onSaveLoadButtonClicked">Fired before a Continue/New Game/New City click
+    /// propagates — that click is about to tear down the physics hierarchy and callers need to
+    /// quiesce first.</param>
+    public MenuRTPanel(int quadLayer, RTPanelInput input, Action onSaveLoadButtonClicked)
     {
         _quadLayer = quadLayer;
-        _pointer = new RTPanelPointer("MenuRTPanel");
+        _onSaveLoadButtonClicked = onSaveLoadButtonClicked;
+        _pointer = new RTPanelPointer("MenuRTPanel", OnBeforeClick);
+        input.Register(_pointer);
     }
 
     public Canvas? Canvas => _canvas;
@@ -65,9 +70,9 @@ internal sealed class MenuRTPanel
     /// <summary>
     /// True exactly while the quad is placed and visible in the world — Unity's own stable
     /// GameObject.activeSelf, not a freshly recomputed heuristic. This is the signal callers should
-    /// use to decide "should I be showing my own laser / suppressing the legacy one right now",
-    /// since it can't disagree frame-to-frame with what UpdateInteraction itself gates on below —
-    /// both read the same field rather than each re-evaluating IsShowing independently.
+    /// use for "is this panel interactable right now", since it can't disagree frame-to-frame with
+    /// the pointer's own Enabled flag — both come from the same field rather than each
+    /// re-evaluating IsShowing independently.
     /// </summary>
     public bool IsInteractable => _quadGO != null && _quadGO.activeSelf;
 
@@ -158,6 +163,7 @@ internal sealed class MenuRTPanel
         }
 
         if (!showing) _pointer.Clear();
+        _pointer.Enabled = IsInteractable;
     }
 
     /// <summary>Called from VRCamera's LateUpdate, before the real eye cameras render, so the
@@ -177,31 +183,12 @@ internal sealed class MenuRTPanel
     {
         if (!IsInteractable || _quadMesh == null || _quadMaterial == null) return;
         overlay.AddPanel(_quadMesh, _quadGO!.transform.localToWorldMatrix, _quadMaterial);
-        _pointer.AppendOverlay(overlay);
     }
 
-    /// <summary>
-    /// Delegates laser/cursor/hover/click to RTPanelPointer, injecting the two pieces of behavior
-    /// that are specific to MenuCanvas rather than generic to any RT panel: intercepting the
-    /// Settings button (opens VRSettingsPanel instead of the game's own handler) and flagging a
-    /// Continue/New Game/New City click before it propagates, since that's about to tear down the
-    /// physics hierarchy and callers need to quiesce first.
-    /// </summary>
-    public void UpdateInteraction(GameObject? rightControllerGO, GameObject? leftControllerGO,
-        Dictionary<int, Canvas> managedCanvases, Dictionary<int, int> lastRescanFrame,
-        Action requestForceScan, Action onSaveLoadButtonClicked)
-    {
-        if (!IsInteractable)
-        {
-            _pointer.Clear();
-            return;
-        }
-
-        _pointer.UpdateInteraction(rightControllerGO, leftControllerGO, managedCanvases, lastRescanFrame,
-            requestForceScan, go => OnBeforeClick(go, onSaveLoadButtonClicked));
-    }
-
-    private bool OnBeforeClick(GameObject go, Action onSaveLoadButtonClicked)
+    /// <summary>The two MenuCanvas-specific click behaviors: the Settings button opens
+    /// VRSettingsPanel instead of the game's own handler, and a save-load click is flagged before
+    /// it propagates.</summary>
+    private bool OnBeforeClick(GameObject go)
     {
         if (_settingsBtnId != 0)
         {
@@ -223,7 +210,7 @@ internal sealed class MenuRTPanel
         {
             string n = (slWalker.gameObject.name ?? "").ToLowerInvariant();
             if (n.Contains("continue") || n.Contains("new game") || n.Contains("new city"))
-            { onSaveLoadButtonClicked(); break; }
+            { _onSaveLoadButtonClicked(); break; }
             slWalker = slWalker.parent;
         }
 
