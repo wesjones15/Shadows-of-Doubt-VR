@@ -50,8 +50,6 @@ public class VRCamera : MonoBehaviour
 
     // Unity built-in UI layer. Every attempt to find a genuinely unused layer 8-31 failed — the
     // base game names all of them (see CameraRig.LogLayerAudit) — so this stays 5.
-    // Post-FX immunity is handled by CameraRig.SetupPostFXExemptPass's AfterPostProcess custom
-    // pass, not by excluding this layer from the main eye cameras — they still render it normally.
     internal const int UILayer      = 5;
 
     private readonly Rooms.VoidRoomController _voidRoom = new(UILayer);
@@ -271,8 +269,6 @@ public class VRCamera : MonoBehaviour
 
         PostProcessingOverride.Tick();
         _voidRoom.UpdatePressAnyKeyClick(_gameCam == null);
-
-        CameraRig.PeriodicCheckFrameSettingsBits(_frameCount);
 
         // Detect scene changes and apply a grace period during which we skip
         // ScanAndConvertCanvases.  This prevents us from touching canvas/camera
@@ -699,10 +695,8 @@ public class VRCamera : MonoBehaviour
         _hudAnchor = hudAnchorGO.transform;
 
         // ── Scene cameras — render EVERYTHING including UI layer ────────────────
-        // UI visibility/post-FX immunity is handled by CameraRig.SetupPostFXExemptPass's
-        // AfterPostProcess custom pass, not by a second camera — a second-camera approach (both
-        // clearFlags=Depth in-place compositing and a separate-RT-plus-blit composite) was tried
-        // here before and reverted; see git history around this block for why both failed.
+        // One camera per eye, never a second camera contributing to the same frame: HDRP doesn't
+        // support camera stacking (see postfx_immunity_investigation.md, Era 2e).
         var leftGO = new GameObject("LeftEye");
         leftGO.transform.SetParent(_cameraOffset, false);
         _leftCam = leftGO.AddComponent<Camera>();
@@ -721,8 +715,6 @@ public class VRCamera : MonoBehaviour
         _heldItem.SetOrigin(transform);
 
         CameraRig.LogLayerAudit();
-        CameraRig.SetupPostFXExemptPass(UILayer);
-        CameraRig.DiagnoseDefaultFrameSettingsCustomPass();
 
         // Try to find and disable the game camera now. If it's not available yet
         // (e.g. main menu hasn't spawned one), TryFindGameCamera() will keep retrying in Update().

@@ -8,10 +8,9 @@ namespace SoDVR.VR;
 
 /// <summary>
 /// Owns MenuCanvas end to end: renders it via an independent, non-stacked projector camera into
-/// its own RenderTexture, and displays that texture on a plain world-space quad that the real eye
-/// cameras render like any other scene object. Genuinely immune to post-processing (bloom/DoF/etc)
-/// because the quad shows pre-rendered pixels, not live geometry sharing the scene's HDRP stack —
-/// unlike the WorldSpace-canvas-conversion pipeline every other managed canvas still uses.
+/// its own RenderTexture, and displays that texture on a plain world-space quad. The texture's
+/// content is free of scene post-processing (the projector camera has none); the quad itself is
+/// still drawn by the eye cameras and inherits their post stack.
 ///
 /// MenuCanvas is the pause menu too — the game reuses one Canvas for both (see v1_findings.md §2),
 /// so this class owns both states; there is no separate "PauseCanvas" to migrate later.
@@ -273,23 +272,6 @@ internal sealed class MenuRTPanel
         catch (Exception ex) { Log.LogWarning($"[MenuRTPanel] GraphicRaycaster setup: {ex.Message}"); }
 
         (_quadGO, _quadCollider, _quadMaterial) = CameraRig.CreateRTPanelQuad("MenuRTPanel", _quadLayer, _rt);
-
-        // TEMPORARY test: HDRP has a native queue-based AfterPostProcess mechanism, entirely
-        // separate from CustomPassVolume — any material whose renderQueue falls in
-        // HDRenderQueue.k_RenderQueue_AfterPostProcessTransparent's range gets drawn by HDRP's own
-        // internal RenderAfterPostProcessObjects pass, after the whole post stack. Unlike the
-        // reverted HDRP/Unlit test, this doesn't touch the shader or any material property we don't
-        // already understand — the quad keeps its existing, proven-stable UI/Default material; only
-        // its renderQueue int changes. FrameSettingsField.AfterPostprocess is already confirmed
-        // enabled and durable across the whole session (see CameraRig's periodic bit tracker).
-        try
-        {
-            var range = UnityEngine.Rendering.HighDefinition.HDRenderQueue.k_RenderQueue_AfterPostProcessTransparent;
-            _quadMaterial.renderQueue = range.lowerBound;
-            Log.LogInfo($"[MenuRTPanel] TEST: quad renderQueue set to AfterPostProcessTransparent range " +
-                        $"[{range.lowerBound}, {range.upperBound}], using value {range.lowerBound}");
-        }
-        catch (Exception ex) { Log.LogWarning($"[MenuRTPanel] TEST: renderQueue set failed: {ex.Message}"); }
 
         float worldH = PanelWorldWidth * ((float)rtH / rtW);
         _quadGO.transform.localScale = new Vector3(PanelWorldWidth, worldH, 1f);
