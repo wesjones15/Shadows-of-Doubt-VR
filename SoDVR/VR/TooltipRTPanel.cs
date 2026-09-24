@@ -58,10 +58,20 @@ internal sealed class TooltipRTPanel
     private Collider? _quadCollider;
     private Material? _quadMaterial;
 
+    // PopupMessage/TutorialMessage only fill a fraction of TooltipCanvas's full authored extent —
+    // the quad displays that whole extent, so their content reads small within the panel. Scaled up
+    // around their own (centered) pivot while owned; safe to touch directly (unlike the root
+    // canvas's scale) because nested canvases are explicitly excluded from
+    // CanvasConversionScanner's own scale-enforcement pass (nestedCanvasIds are skipped outright
+    // there), so nothing fights this.
+    private const float ContentScaleMultiplier = 2f;
+
     private bool _quadPlaced;
     private bool _owned;             // true while this panel has pulled TooltipCanvas out of the legacy pipeline
     private Canvas? _ownedPopupCanvas;
     private Canvas? _ownedTutorialCanvas;
+    private Vector3 _popupOriginalScale;
+    private Vector3 _tutorialOriginalScale;
     private int _discoveryCooldown;
 
     public TooltipRTPanel(int quadLayer)
@@ -140,8 +150,20 @@ internal sealed class TooltipRTPanel
 
             _ownedPopupCanvas = (popupMessageCanvas != null && popupMessageCanvas.gameObject.activeSelf) ? popupMessageCanvas : null;
             _ownedTutorialCanvas = (tutorialMessageCanvas != null && tutorialMessageCanvas.gameObject.activeSelf) ? tutorialMessageCanvas : null;
-            if (_ownedPopupCanvas != null) { _ownedPopupCanvas.worldCamera = _projectorCam; _pointer.AddOverlayCanvas(_ownedPopupCanvas); }
-            if (_ownedTutorialCanvas != null) { _ownedTutorialCanvas.worldCamera = _projectorCam; _pointer.AddOverlayCanvas(_ownedTutorialCanvas); }
+            if (_ownedPopupCanvas != null)
+            {
+                _ownedPopupCanvas.worldCamera = _projectorCam;
+                _popupOriginalScale = _ownedPopupCanvas.transform.localScale;
+                _ownedPopupCanvas.transform.localScale = _popupOriginalScale * ContentScaleMultiplier;
+                _pointer.AddOverlayCanvas(_ownedPopupCanvas);
+            }
+            if (_ownedTutorialCanvas != null)
+            {
+                _ownedTutorialCanvas.worldCamera = _projectorCam;
+                _tutorialOriginalScale = _ownedTutorialCanvas.transform.localScale;
+                _ownedTutorialCanvas.transform.localScale = _tutorialOriginalScale * ContentScaleMultiplier;
+                _pointer.AddOverlayCanvas(_ownedTutorialCanvas);
+            }
 
             _owned = true;
             _quadPlaced = false; // recentre in front of the current head pose on every fresh open
@@ -159,8 +181,20 @@ internal sealed class TooltipRTPanel
             _canvas.worldCamera = leftCam;
             managedCanvases[_canvas.GetInstanceID()] = _canvas; // hand back to the legacy pipeline
 
-            if (_ownedPopupCanvas != null) { _ownedPopupCanvas.worldCamera = leftCam; _pointer.RemoveOverlayCanvas(_ownedPopupCanvas); _ownedPopupCanvas = null; }
-            if (_ownedTutorialCanvas != null) { _ownedTutorialCanvas.worldCamera = leftCam; _pointer.RemoveOverlayCanvas(_ownedTutorialCanvas); _ownedTutorialCanvas = null; }
+            if (_ownedPopupCanvas != null)
+            {
+                _ownedPopupCanvas.worldCamera = leftCam;
+                _ownedPopupCanvas.transform.localScale = _popupOriginalScale;
+                _pointer.RemoveOverlayCanvas(_ownedPopupCanvas);
+                _ownedPopupCanvas = null;
+            }
+            if (_ownedTutorialCanvas != null)
+            {
+                _ownedTutorialCanvas.worldCamera = leftCam;
+                _ownedTutorialCanvas.transform.localScale = _tutorialOriginalScale;
+                _pointer.RemoveOverlayCanvas(_ownedTutorialCanvas);
+                _ownedTutorialCanvas = null;
+            }
 
             _owned = false;
             _quadPlaced = false;
