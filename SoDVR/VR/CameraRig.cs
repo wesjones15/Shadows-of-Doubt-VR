@@ -242,6 +242,7 @@ internal static class CameraRig
     {
         var camGO = new GameObject($"SoDVR_{logTag}_Camera");
         UnityEngine.Object.DontDestroyOnLoad(camGO);
+        camGO.transform.position = NextProjectorIsolationPosition();
         var cam = camGO.AddComponent<Camera>();
         cam.enabled = false; // manual render only
         cam.stereoTargetEye = StereoTargetEyeMask.None;
@@ -287,6 +288,17 @@ internal static class CameraRig
 
         return cam;
     }
+
+    // A ScreenSpaceCamera canvas sits planeDistance in front of its projector, and every projector
+    // culls the shared UI layer — so two projectors at the same spot could each see the other's
+    // canvas, and one near the player could see legacy WorldSpace UI. Each gets its own spot far
+    // below anything in the city, further apart than a projector's far clip plane.
+    private const float ProjectorIsolationDepth = -10000f;
+    private const float ProjectorIsolationSpacing = 50f;
+    private static int s_projectorCount;
+
+    private static Vector3 NextProjectorIsolationPosition() =>
+        new(s_projectorCount++ * ProjectorIsolationSpacing, ProjectorIsolationDepth, 0f);
 
     /// <summary>
     /// An RT panel's target texture. Mipmapped with trilinear filtering because the panel is shown
