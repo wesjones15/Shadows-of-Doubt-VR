@@ -277,6 +277,27 @@ internal static class CameraRig
                 layerMask = 1 << uiLayer,
                 renderQueueType = CustomPass.RenderQueueType.All,
             };
+
+            // TEMPORARY smoke test: does this pass fire at all for these manually-rendered eye
+            // cameras (cam.enabled=false, driven by explicit Camera.Render() calls — an atypical
+            // invocation pattern for HDRP that could plausibly skip some injection points for
+            // reasons unrelated to the FrameSettings gates already confirmed set). An unmistakable
+            // solid color, built from a shader already proven loadable in this codebase, answers
+            // this with a look in-game rather than more reflection-based guessing. Remove once
+            // answered either way — this is not meant to survive into the real fix.
+            var smokeTestShader = Shader.Find("Sprites/Default");
+            if (smokeTestShader != null)
+            {
+                var smokeTestMat = new Material(smokeTestShader) { color = Color.magenta };
+                pass.overrideMaterial = smokeTestMat;
+                pass.overrideMaterialPassIndex = 0;
+                Log.LogInfo("[CameraRig] Smoke test: overrideMaterial=magenta Sprites/Default installed on AfterPostProcess pass");
+            }
+            else
+            {
+                Log.LogWarning("[CameraRig] Smoke test: Shader.Find(\"Sprites/Default\") returned null, skipping overrideMaterial");
+            }
+
             volume.customPasses.Add(pass);
 
             Log.LogInfo($"[CameraRig] Custom pass volume created: " +
