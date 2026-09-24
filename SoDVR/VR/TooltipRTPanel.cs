@@ -32,6 +32,15 @@ namespace SoDVR.VR;
 /// popupMessageCanvas/tutorialMessageCanvas fields — no separate discovery needed), only overriding
 /// their worldCamera to this panel's projector camera while it owns them, and registering them with
 /// RTPanelPointer via AddOverlayCanvas so clicks resolve against them specifically.
+///
+/// The RT/quad are sized from whichever dialog canvas is ACTUALLY active, not from TooltipCanvas's
+/// own RectTransform — TooltipCanvas is a shared container (tooltips and dialogs both live under it)
+/// and its authored size reflects that whole container, not either dialog's own content, which is
+/// why an earlier version of this (sizing from TooltipCanvas, then scaling the dialog 2x to
+/// compensate) left the dialog looking small within an oversized panel. Sizing directly from the
+/// active dialog's own RectTransform.sizeDelta — recomputed each time TakeOwnership runs, since
+/// PopupMessage and TutorialMessage aren't guaranteed to be the same size — makes the panel tight to
+/// its content by construction, the same way MenuRTPanel is tight to MenuCanvas.
 /// </summary>
 internal sealed class TooltipRTPanel
 {
@@ -40,12 +49,10 @@ internal sealed class TooltipRTPanel
     private const string CanvasName = "TooltipCanvas";
     private const int DiscoveryRetryFrames = 90;
 
-    // TooltipCanvas's own width — deliberately separate from MenuRTPanel.PanelWorldWidth (1.6m) and
-    // from CanvasCategoryInfo's shared Tooltip category default. Read once from TooltipCanvas's own
-    // RectTransform.sizeDelta at discovery time and never recomputed per mode, so the panel's
-    // physical size stays the same whether it's currently (conceptually) showing a tooltip or this
-    // dialog — one fixed authored canvas size underlies both, even though only dialog mode is
-    // actually RT-rendered today.
+    // Fixed world WIDTH across every dialog this panel ever shows (matches the earlier "consistent
+    // size within the tooltip family" direction) — but unlike before, only the width is fixed; the
+    // aspect ratio (and so the world height) comes from whichever dialog is actually active, so the
+    // panel's world size always matches that dialog's real proportions instead of a guessed default.
     private const float PanelWorldWidth = 0.9f;
 
     private readonly int _quadLayer;
@@ -58,20 +65,10 @@ internal sealed class TooltipRTPanel
     private Collider? _quadCollider;
     private Material? _quadMaterial;
 
-    // PopupMessage/TutorialMessage only fill a fraction of TooltipCanvas's full authored extent —
-    // the quad displays that whole extent, so their content reads small within the panel. Scaled up
-    // around their own (centered) pivot while owned; safe to touch directly (unlike the root
-    // canvas's scale) because nested canvases are explicitly excluded from
-    // CanvasConversionScanner's own scale-enforcement pass (nestedCanvasIds are skipped outright
-    // there), so nothing fights this.
-    private const float ContentScaleMultiplier = 2f;
-
     private bool _quadPlaced;
     private bool _owned;             // true while this panel has pulled TooltipCanvas out of the legacy pipeline
     private Canvas? _ownedPopupCanvas;
     private Canvas? _ownedTutorialCanvas;
-    private Vector3 _popupOriginalScale;
-    private Vector3 _tutorialOriginalScale;
     private int _discoveryCooldown;
 
     public TooltipRTPanel(int quadLayer)
@@ -150,20 +147,12 @@ internal sealed class TooltipRTPanel
 
             _ownedPopupCanvas = (popupMessageCanvas != null && popupMessageCanvas.gameObject.activeSelf) ? popupMessageCanvas : null;
             _ownedTutorialCanvas = (tutorialMessageCanvas != null && tutorialMessageCanvas.gameObject.activeSelf) ? tutorialMessageCanvas : null;
-            if (_ownedPopupCanvas != null)
-            {
-                _ownedPopupCanvas.worldCamera = _projectorCam;
-                _popupOriginalScale = _ownedPopupCanvas.transform.localScale;
-                _ownedPopupCanvas.transform.localScale = _popupOriginalScale * ContentScaleMultiplier;
-                _pointer.AddOverlayCanvas(_ownedPopupCanvas);
-            }
-            if (_ownedTutorialCanvas != null)
-            {
-                _ownedTutorialCanvas.worldCamera = _projectorCam;
-                _tutorialOriginalScale = _ownedTutorialCanvas.transform.localScale;
-                _ownedTutorialCanvas.transform.localScale = _tutorialOriginalScale * ContentScaleMultiplier;
-                _pointer.AddOverlayCanvas(_ownedTutorialCanvas);
-            }
+
+            var activeDialog = _ownedPopupCanvas ?? _ownedTutorialCanvas;
+            if (activeDialog != null) ResizeForDialog(activeDialog);
+
+            if (_ownedPopupCanvas != null) { _ownedPopupCanvas.worldCamera = _projectorCam; _pointer.AddOverlayCanvas(_ownedPopupCanvas); }
+            if (_ownedTutorialCanvas != null) { _ownedTutorialCanvas.worldCamera = _projectorCam; _pointer.AddOverlayCanvas(_ownedTutorialCanvas); }
 
             _owned = true;
             _quadPlaced = false; // recentre in front of the current head pose on every fresh open
@@ -181,20 +170,8 @@ internal sealed class TooltipRTPanel
             _canvas.worldCamera = leftCam;
             managedCanvases[_canvas.GetInstanceID()] = _canvas; // hand back to the legacy pipeline
 
-            if (_ownedPopupCanvas != null)
-            {
-                _ownedPopupCanvas.worldCamera = leftCam;
-                _ownedPopupCanvas.transform.localScale = _popupOriginalScale;
-                _pointer.RemoveOverlayCanvas(_ownedPopupCanvas);
-                _ownedPopupCanvas = null;
-            }
-            if (_ownedTutorialCanvas != null)
-            {
-                _ownedTutorialCanvas.worldCamera = leftCam;
-                _ownedTutorialCanvas.transform.localScale = _tutorialOriginalScale;
-                _pointer.RemoveOverlayCanvas(_ownedTutorialCanvas);
-                _ownedTutorialCanvas = null;
-            }
+            if (_ownedPopupCanvas != null) { _ownedPopupCanvas.worldCamera = leftCam; _pointer.RemoveOverlayCanvas(_ownedPopupCanvas); _ownedPopupCanvas = null; }
+            if (_ownedTutorialCanvas != null) { _ownedTutorialCanvas.worldCamera = leftCam; _pointer.RemoveOverlayCanvas(_ownedTutorialCanvas); _ownedTutorialCanvas = null; }
 
             _owned = false;
             _quadPlaced = false;
@@ -263,50 +240,79 @@ internal sealed class TooltipRTPanel
             catch (Exception ex) { Log.LogWarning($"[TooltipRTPanel] Setup failed: {ex.Message}"); return; }
 
             _canvas = canvas;
-            Log.LogInfo("[TooltipRTPanel] TooltipCanvas discovered; own projector camera/quad ready, not yet owned (legacy pipeline keeps driving normal tooltips until a dialog opens).");
+            Log.LogInfo("[TooltipRTPanel] TooltipCanvas discovered; projector camera ready, RT/quad deferred until a dialog opens (legacy pipeline keeps driving normal tooltips until then).");
             break;
         }
     }
 
     /// <summary>
-    /// Sets up this panel's OWN infrastructure (RT/camera/quad) only — deliberately does NOT touch
-    /// canvas.renderMode/worldCamera here, unlike MenuRTPanel's one-time permanent conversion.
-    /// TooltipCanvas keeps behaving exactly as the legacy pipeline already has it (it discovers and
-    /// WorldSpace-converts TooltipCanvas on its own, same as any other canvas) until a dialog opens
-    /// and TakeOwnership flips it over for the duration.
+    /// Sets up this panel's OWN infrastructure (just the projector camera) — deliberately does NOT
+    /// touch canvas.renderMode/worldCamera here, unlike MenuRTPanel's one-time permanent conversion,
+    /// and deliberately does NOT create the RT/quad yet either, since the right size for them isn't
+    /// known until a specific dialog is actually active (see ResizeForDialog). TooltipCanvas keeps
+    /// behaving exactly as the legacy pipeline already has it until a dialog opens and TakeOwnership
+    /// flips it over for the duration.
     /// </summary>
     private void Setup(Canvas canvas)
     {
-        // Disable CanvasScaler / reset scaleFactor ourselves rather than assuming the legacy
-        // scanner already has — it only runs every UICanvasScanRate (90) frames, while this
-        // discovery can fire as early as frame 1. Idempotent either way (a no-op if the legacy
-        // scanner already did it), so no ordering dependency between the two.
         var scaler = canvas.GetComponent<CanvasScaler>();
         if (scaler != null) { try { scaler.enabled = false; } catch { } }
         if (Math.Abs(canvas.scaleFactor - 1f) > 0.001f) canvas.scaleFactor = 1f;
 
-        var rectT = canvas.GetComponent<RectTransform>();
-        var sd = rectT != null ? rectT.sizeDelta : new Vector2(800f, 450f);
-        int rtW = Mathf.Clamp(Mathf.RoundToInt(sd.x > 0f ? sd.x : 800f), 64, 4096);
-        int rtH = Mathf.Clamp(Mathf.RoundToInt(sd.y > 0f ? sd.y : 450f), 64, 4096);
-
-        _rt = new RenderTexture(rtW, rtH, 0, RenderTextureFormat.ARGB32) { name = "SoDVR_TooltipRTPanel_RT" };
-        _rt.Create();
-
         int canvasLayer = canvas.gameObject.layer;
         _projectorCam = CameraRig.SetupRTPanelProjectorCamera("TooltipRTPanel", canvasLayer);
-        _projectorCam.targetTexture = _rt;
 
         // planeDistance only matters once TakeOwnership switches renderMode to ScreenSpaceCamera;
         // harmless to set now while the canvas is still WorldSpace.
         canvas.planeDistance = 1f;
 
-        (_quadGO, _quadCollider, _quadMaterial) = CameraRig.CreateRTPanelQuad("TooltipRTPanel", _quadLayer, _rt);
-        float worldH = PanelWorldWidth * ((float)rtH / rtW);
-        _quadGO.transform.localScale = new Vector3(PanelWorldWidth, worldH, 1f);
+        Log.LogInfo($"[TooltipRTPanel] Setup complete (camera only; RT/quad deferred) canvasLayer={canvasLayer}");
+    }
 
-        _pointer.Bind(canvas, _quadCollider, _rt);
+    /// <summary>
+    /// (Re)sizes the RT and quad to match the currently-active dialog's own RectTransform, creating
+    /// them on first use. Cheap to skip when unchanged (dialogs reopening at the same size don't pay
+    /// for a fresh RenderTexture), and safe to call every TakeOwnership — PopupMessage and
+    /// TutorialMessage aren't guaranteed to share a size, so this is recomputed per dialog rather
+    /// than assumed stable.
+    /// </summary>
+    private void ResizeForDialog(Canvas dialogCanvas)
+    {
+        var dialogScaler = dialogCanvas.GetComponent<CanvasScaler>();
+        if (dialogScaler != null) { try { dialogScaler.enabled = false; } catch { } }
 
-        Log.LogInfo($"[TooltipRTPanel] Setup complete: rt={rtW}x{rtH} worldSize={PanelWorldWidth:F2}x{worldH:F2}m canvasLayer={canvasLayer}");
+        var rectT = dialogCanvas.GetComponent<RectTransform>();
+        var sd = rectT != null ? rectT.sizeDelta : new Vector2(800f, 450f);
+        int rtW = Mathf.Clamp(Mathf.RoundToInt(sd.x > 0f ? sd.x : 800f), 64, 4096);
+        int rtH = Mathf.Clamp(Mathf.RoundToInt(sd.y > 0f ? sd.y : 450f), 64, 4096);
+
+        if (_rt == null || _rt.width != rtW || _rt.height != rtH)
+        {
+            var oldRt = _rt;
+            _rt = new RenderTexture(rtW, rtH, 0, RenderTextureFormat.ARGB32) { name = "SoDVR_TooltipRTPanel_RT" };
+            _rt.Create();
+            if (_projectorCam != null) _projectorCam.targetTexture = _rt;
+
+            if (_quadGO == null)
+                (_quadGO, _quadCollider, _quadMaterial) = CameraRig.CreateRTPanelQuad("TooltipRTPanel", _quadLayer, _rt);
+            else if (_quadMaterial != null)
+                _quadMaterial.mainTexture = _rt;
+
+            if (_canvas != null && _quadCollider != null) _pointer.Bind(_canvas, _quadCollider, _rt);
+
+            if (oldRt != null)
+            {
+                try { oldRt.Release(); } catch { }
+                try { UnityEngine.Object.Destroy(oldRt); } catch { }
+            }
+
+            Log.LogInfo($"[TooltipRTPanel] Resized for '{dialogCanvas.gameObject.name}': rt={rtW}x{rtH}");
+        }
+
+        if (_quadGO != null)
+        {
+            float worldH = PanelWorldWidth * ((float)rtH / rtW);
+            _quadGO.transform.localScale = new Vector3(PanelWorldWidth, worldH, 1f);
+        }
     }
 }
