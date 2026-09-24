@@ -1,17 +1,32 @@
 # SoDVR case-board findings
 
 Scoping notes for migrating the detective case-board UI onto the RT-panel architecture
-(`MenuRTPanel.cs`/`TooltipRTPanel.cs`/`RTPanelPointer.cs`/`CameraRig.cs`'s projector-camera
-helpers). Written the same way `v1_findings.md` was — for whoever picks this up next, including a
-future instance of the assistant that helped scope it — so the same investigation doesn't have to
-be redone. See `v1_findings.md` for the general RT-panel history/lessons and `ARCHITECTURE.md` for
-how the current canvas subsystem files fit together; this document is case-board-specific and
-narrower.
+(`MenuRTPanel.cs`/`TooltipRTPanel.cs`/`RTPanelPointer.cs`/`CameraRig.cs`/`PostFXOverlayCompositor.cs`).
+Written the same way `v1_findings.md` was — for whoever picks this up next, including a future
+instance of the assistant that helped scope it — so the same investigation doesn't have to be
+redone.
+
+**`postfx_immune_ui.md` is the source of truth for how the RT-panel pipeline actually works
+end-to-end** (projector camera → mipmapped RT → disabled-renderer quad → `PostFXOverlayCompositor`
+drawing panels *and* the laser into each eye's RenderTexture with a `CommandBuffer` after
+`Camera.Render()` returns, immune to HDRP post-processing entirely) — read it before writing any
+case-board RT code. `v1_findings.md` is cited below only for still-valid historical/structural
+lessons (why a composite-canvas approach was abandoned) that predate and aren't superseded by that
+rewrite. `ARCHITECTURE.md` covers how the current canvas subsystem files fit together generally.
 
 **Status as of 2026-09-24: scoping only. No case-board-specific RT code has been written yet.**
-`MenuCanvas` and `TooltipCanvas`'s dialog mode are already migrated; the case board is the next
-target, sequenced last per the original rewrite plan because it was already the hardest surface in
-the base mod.
+`MenuCanvas` and `TooltipCanvas`'s dialog mode are already migrated onto the compositor-based
+pipeline; the case board is the next target, sequenced last per the original rewrite plan because
+it was already the hardest surface in the base mod.
+
+**Important correction to earlier case-board planning discussion:** an RT panel's laser was
+previously believed to be unable to escape HDRP post-processing (it has to exist in real, moving
+3D space, so it was drawn by the eye camera and inherited full bloom/exposure — the same bloom
+problems chased on `MenuRTPanel`'s laser in an earlier session). **That's no longer true.**
+`postfx_immune_ui.md` §4 documents the laser now being drawn by `PostFXOverlayCompositor` in the
+same post-HDRP `CommandBuffer` pass as the panels — genuinely immune, no HDR color-tuning tradeoff
+needed anymore, plain SDR cyan. Whatever corkboard-interaction laser/cursor work the `CaseCanvas`
+migration needs should use this pattern from the start, not the older tuned-color approach.
 
 ---
 
@@ -54,24 +69,48 @@ Four distinct pieces, not one panel:
    `CursorRigidbody` 2D-physics object and warps the OS mouse cursor directly
    (`CaseBoardInteraction.cs:967-1074`, `GetCanvasScreenPos` `2790-2841`) because the underlying
    pin hit-testing (`DragCasePanel`, `CursorRigidbody`) expects real `Input.mousePosition`, not
-   `GraphicRaycaster`.
+   `GraphicRaycaster`. **Confirmed via the F9 dump (2026-09-24):** `CaseCanvas`'s `worldCamera` is
+   literally the game's real `Main Camera`, not the mod's `LeftEye` — every other case-board canvas
+   (`ActionPanelCanvas`, `BioDisplayCanvas`, `LocationDetailsCanvas`, `WindowCanvas`) reads
+   `worldCam=LeftEye`. This is the concrete mechanism behind the `CursorRigidbody`/OS-cursor-warp
+   workarounds above: the corkboard is deliberately kept on the real camera so the game's own
+   `Input.mousePosition`-based click detection keeps working. An RT panel replacing `CaseCanvas`
+   removes the need for this entirely (its `GraphicRaycaster` runs against the projector camera
+   like every other RT panel), which is one more reason that legacy code is expected to disappear
+   rather than need porting.
 
 3. **`WindowCanvas`** — a generic nested-canvas host, `CanvasCategory.Menu`
    (`CanvasCategoryInfo.cs:65`, comment: "detail/notebook windows"). Hosts two kinds of content as
-   genuinely nested Unity child canvases (confirmed, `CaseBoardInteraction.cs:336`, `CanvasClickRouter.cs:109`):
-   - **Evidence `Note` windows** — opened by clicking a corkboard pin. **Multiple can be open at
-     once** (confirmed: "click on as many as you want, they will open in space and be
-     grip-draggable" — this is why `CaseBoardInteraction.cs:335-395`'s nested-note grip-drag
+   genuinely nested Unity child canvases (confirmed via code, `CaseBoardInteraction.cs:336`,
+   `CanvasClickRouter.cs:109`; **and now via the F9 dump, 2026-09-24** — both literally named
+   exactly as follows, parented directly under `WindowCanvas`, `worldCam=LeftEye`,
+   `category=Default` since neither name is in `CanvasCategoryInfo`'s taxonomy):
+   - **`Note`** (evidence windows) — opened by clicking a corkboard pin. **Multiple confirmed open
+     simultaneously**: the F9 dump caught two active `Note` canvases at once, both `514x658`,
+     36 active graphics each — matches "click on as many as you want, they will open in space and
+     be grip-draggable." This is why `CaseBoardInteraction.cs:335-395`'s nested-note grip-drag
      pre-pass individually detects and drags one `Note` at a time rather than the whole
-     `WindowCanvas`). Each has a **close button that must be wired up** when migrated — not yet
+     `WindowCanvas`. Each has a **close button that must be wired up** when migrated — not yet
      verified against the click-dispatch path, flag as a required test case.
-   - **Detective's Notebook** — opened via `ActionPanelCanvas`'s Notebook tab, "opens in 3d space
-     like the notes" (same nested-canvas mechanism). Presumably singleton, unconfirmed.
+   - **`Detective's Notebook`** — opened via `ActionPanelCanvas`'s Notebook tab, "opens in 3d space
+     like the notes" (same nested-canvas mechanism). F9 confirms it as a single `920x800` nested
+     canvas with real content (311 active graphics), and reveals it has its **own internal
+     pagination**: a `Page` object containing a further-nested `Scroll View` canvas (also its own
+     `Canvas`/`GraphicRaycaster`, `worldCam=LeftEye`) — i.e. this is a *three-deep* nested-canvas
+     structure (`WindowCanvas` → `Detective's Notebook` → `Page` → `Scroll View`), one level
+     deeper than anything migrated so far. A dynamic RT panel for the Notebook will need to
+     register `Scroll View` as an overlay canvas the same way `TooltipRTPanel` already does for
+     `PopupMessage`/`TutorialMessage` (`RTPanelPointer.AddOverlayCanvas`), not just the Notebook's
+     own root. Whether multiple `Page`/`Scroll View` instances exist (one per page) or it's reused
+     across pages wasn't captured — worth a targeted F9 press while flipping notebook pages.
    Because multiple `Note`s can coexist, **the RT design here can't be one persistent panel like
-   `MenuRTPanel`/`TooltipRTPanel`** — it needs a dynamically-spawned RT panel per open window
-   (own projector camera + quad, created on open, torn down on close), reusing
-   `CameraRig.SetupRTPanelProjectorCamera`/`CreateRTPanelQuad` and `RTPanelPointer` per instance.
-   This specific instancing shape hasn't been built anywhere in the codebase yet.
+   `MenuRTPanel`/`TooltipRTPanel`** — it needs a dynamically-spawned RT panel per open window (own
+   projector camera + RT + disabled-renderer quad, created on open, torn down on close), reusing
+   `CameraRig.SetupRTPanelProjectorCamera`/`CreateRTPanelTexture`/`CreateRTPanelQuad` and
+   `RTPanelPointer` per instance, each registering itself with `PostFXOverlayCompositor` via its own
+   `AppendOverlay` call (see `postfx_immune_ui.md`, "Adding another immune panel") so the
+   coordinator can composite an arbitrary number of simultaneously-open windows, not just a fixed
+   one or two. This specific instancing shape hasn't been built anywhere in the codebase yet.
 
 4. **`MinimapCanvas`** — opened via `ActionPanelCanvas`'s Minimap tab, or independently via a
    controller gesture ("B-button" body-locked mode, `CanvasPlacement.cs:382-412`,
@@ -89,7 +128,15 @@ Four distinct pieces, not one panel:
 special-casing anywhere in `CaseBoardInteraction.cs`** — they're handled purely through the generic
 category-based placement/click machinery. Low risk, but their exact trigger mechanism (what
 specifically shows `BioDisplayCanvas`/`LocationDetailsCanvas` — probably clicking a person/location
-pin, not confirmed) hasn't been verified.
+pin, not confirmed) hasn't been verified. One wrinkle from the F9 dump: `UpgradesDisplayCanvas`
+toggled `active=False`/`True` cleanly (plain `SetActive`) across captures as expected, but
+`BioDisplayCanvas`/`LocationDetailsCanvas` read `active=True` in *every single capture* of the
+session regardless of whether their content was visible, with `activeGraphics` mostly 0-2 and one
+capture catching `BioDisplayCanvas` at 118. That pattern — GameObject always active, content count
+spiking briefly — matches something gated by `CanvasGroup.alpha` rather than `SetActive`
+(`CanvasCategoryInfo.IsCanvasEffectivelyHidden` already handles exactly this elsewhere in the
+codebase). **`CanvasDump` doesn't currently report `CanvasGroup` state** — worth adding before
+relying on it further for these two canvases.
 
 ---
 
@@ -142,33 +189,45 @@ failure mode.
 
 ---
 
-## 4. Open questions — use the F9 canvas dump (below) to resolve, don't guess
+## 4. Open questions — status after the 2026-09-24 F9 test session
 
-- **Does `Inventory` have any VR-canvas presence at all?** No `InventoryCanvas` (or similar) name
-  exists anywhere in the codebase. Today, opening inventory is only a synthetic `X` keypress
-  (`LocomotionController.UpdateInventory`, `LocomotionController.cs:738-762`) simulating the
-  desktop shortcut — unknown whether that renders anything VR-visible or falls back to a
-  non-VR-converted screen overlay.
-- **Is `ActionPanelCanvas`'s Notebook tab button the same action as the Right-B/gesture path**
-  (`LocomotionController.UpdateNotebook`, `LocomotionController.cs:599-673`, also a synthetic
-  `Tab` keypress), or a separate route into the same content?
-- **What actually triggers `BioDisplayCanvas`/`LocationDetailsCanvas`?** No reference to either
-  name exists in `CaseBoardInteraction.cs`.
+Six F9 captures were taken across different case-board states (933-939 `Canvas` components each).
+Findings:
+
+- **Does `Inventory` have any VR-canvas presence at all? Effectively resolved: no.** Across all six
+  captures — 933 to 939 `Canvas` components each time — nothing matching `Inventory` or `Backpack`
+  appeared anywhere in the scene. `LocomotionController.UpdateInventory`'s synthetic `X` keypress
+  (`LocomotionController.cs:738-762`) doesn't appear to be opening anything the mod's canvas
+  discovery can see. Treat Inventory as **out of scope for this migration pass** — there's currently
+  nothing to convert — unless a later, more targeted test (pressing F9 immediately after the
+  inventory-open gesture, rather than after the fact) turns up something transient this capture
+  missed.
+- **Is `ActionPanelCanvas`'s Notebook tab button the same action as the Right-B/gesture path?
+  Still open.** The dump confirms the canvas itself — `Detective's Notebook`, nested under
+  `WindowCanvas` — but can't distinguish which input path opened it in a given capture. Not
+  blocking: the migration only needs to know the canvas exists and what it looks like structurally
+  (now confirmed, §1.3), not which of possibly two input paths triggers it.
+- **What actually triggers `BioDisplayCanvas`/`LocationDetailsCanvas`? Still open, and murkier than
+  expected** — see the `CanvasGroup`-alpha note in §1 above. Both were `active=True` for the entire
+  session regardless of visible content, which means "trigger" may not even be the right frame —
+  they might just always exist, gated by alpha/interactable state instead of being spawned on
+  demand. Needs a `CanvasGroup`-aware follow-up capture, not just repeating the same test.
 
 ---
 
-## 5. New tool: F9 canvas dump
+## 5. Diagnostic tool: F9 canvas dump
 
 `SoDVR/VR/CanvasDump.cs`, wired to the F9 key in `VRCamera.cs` alongside the existing F8
 (recentre)/F10 (VR settings)/End (text-graphic dump) diagnostics. `CanvasDump.DumpAll()` walks
 every `Canvas` in the scene via `Resources.FindObjectsOfTypeAll<Canvas>()` — not just the ones
 already in `_managedCanvases` — and logs, per canvas: name, active state, root-vs-nested,
-`renderMode`, `CanvasCategoryInfo` category (`Default` if untagged — this is what would surface an
-unfamiliar canvas like Inventory), `sizeDelta`, immediate parent name (shows nesting under
-`WindowCanvas`/`TooltipCanvas`), whether it has its own `GraphicRaycaster`, its `worldCamera`, and
-its active-graphics count.
+`renderMode`, `CanvasCategoryInfo` category (`Default` if untagged — this is what surfaced that
+`Note`/`Detective's Notebook`/`Scroll View` aren't in the taxonomy at all), `sizeDelta`, immediate
+parent name (shows nesting depth), whether it has its own `GraphicRaycaster`, its `worldCamera`,
+and its active-graphics count.
 
-**To resolve §4**: open the case board in-game, open the Notebook, open a couple of evidence Notes,
-try Inventory, then press F9 and check `BepInEx/LogOutput.log` for the `[CanvasDump]` block. Every
-open window/tab should show up with its real name and parent, resolving all three open questions
-from one capture.
+**Known gap, found by using it**: it doesn't report `CanvasGroup.alpha`/`interactable`, which is
+exactly the mechanism `BioDisplayCanvas`/`LocationDetailsCanvas` appear to use instead of
+`SetActive` (§4). Worth adding a `CanvasGroup` line per canvas (mirroring
+`CanvasCategoryInfo.IsCanvasEffectivelyHidden`'s existing walk) before using this tool to chase
+those two further.
