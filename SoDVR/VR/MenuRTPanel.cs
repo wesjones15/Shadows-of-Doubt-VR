@@ -273,40 +273,6 @@ internal sealed class MenuRTPanel
         catch (Exception ex) { Log.LogWarning($"[MenuRTPanel] GraphicRaycaster setup: {ex.Message}"); }
 
         (_quadGO, _quadCollider, _quadMaterial) = CameraRig.CreateRTPanelQuad("MenuRTPanel", _quadLayer, _rt);
-
-        // TEMPORARY test: does an HDRP-native shader (vs UI/Default, a legacy pre-SRP shader) let
-        // this quad pass DrawRenderersCustomPass's shader-tag eligibility filter? The magenta smoke
-        // test drew on PressAnyKey content but never on this quad — DrawRenderersCustomPass filters
-        // eligible renderers by matching forwardShaderTags/depthShaderTags against the renderer's
-        // real material, and UI/Default likely doesn't carry those tags. HDRP/Unlit is a stock
-        // shader already shipped with the game — no new asset authoring needed to test this.
-        // Scoped to MenuRTPanel only; TooltipRTPanel's CreateRTPanelQuad call is untouched.
-        var hdrpUnlitShader = Shader.Find("HDRP/Unlit");
-        if (hdrpUnlitShader != null)
-        {
-            var testMat = new Material(hdrpUnlitShader);
-            string? texProp = null;
-            int propCount = hdrpUnlitShader.GetPropertyCount();
-            for (int i = 0; i < propCount; i++)
-            {
-                if (hdrpUnlitShader.GetPropertyType(i) == UnityEngine.Rendering.ShaderPropertyType.Texture)
-                { texProp = hdrpUnlitShader.GetPropertyName(i); break; }
-            }
-            if (texProp != null) testMat.SetTexture(texProp, _rt); else testMat.mainTexture = _rt;
-            // Preserve UI/Default's double-sided rendering — load-bearing for this yaw-only-rotated
-            // quad; single-sided culling caused the original "panel renders backwards" bug earlier
-            // this session.
-            testMat.SetInt("_CullMode", (int)UnityEngine.Rendering.CullMode.Off);
-            testMat.SetFloat("_DoubleSidedEnable", 1f);
-            _quadGO.GetComponent<MeshRenderer>().material = testMat;
-            _quadMaterial = testMat;
-            Log.LogInfo($"[MenuRTPanel] TEST: swapped quad material to HDRP/Unlit, textureProperty={texProp ?? "mainTexture(fallback)"}");
-        }
-        else
-        {
-            Log.LogWarning("[MenuRTPanel] TEST: Shader.Find(\"HDRP/Unlit\") returned null — quad stays on UI/Default");
-        }
-
         float worldH = PanelWorldWidth * ((float)rtH / rtW);
         _quadGO.transform.localScale = new Vector3(PanelWorldWidth, worldH, 1f);
 
