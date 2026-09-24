@@ -179,7 +179,8 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private Camera? _ctxGameCamRef;
     private GameObject? _ctxRightControllerGO;
     private GameObject? _ctxLeftControllerGO;
-    private Canvas? _ctxActionPanelCanvas;
+    private bool _ctxCaseBoardOpen;
+    private Transform _ctxCaseBoardAnchor = null!;
     private Canvas? _ctxCasePanelCanvas;
     private Canvas? _ctxMinimapCanvasRef;
     private GameObject? _ctxPopupMessageGO;
@@ -215,7 +216,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         Dictionary<int, int> lastRescanFrame, Action requestForceScan, Action onSaveLoadButtonClicked,
         int menuSettingsBtnId, Canvas? menuCanvasRef,
         Camera? leftCam, Camera? gameCamRef, GameObject? rightControllerGO, GameObject? leftControllerGO,
-        Canvas? actionPanelCanvas, Canvas? casePanelCanvas, Canvas? minimapCanvasRef,
+        bool caseBoardOpen, Transform caseBoardAnchor, Canvas? casePanelCanvas, Canvas? minimapCanvasRef,
         GameObject? popupMessageGO, GameObject? tutorialMessageGO,
         Canvas? popupMessageCanvas, Canvas? tutorialMessageCanvas, bool tooltipRTPanelOwnsDialog,
         Dictionary<int, (Vector3 worldPos, Quaternion worldRot)> nestedDragTransforms,
@@ -240,7 +241,8 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         _ctxGameCamRef = gameCamRef;
         _ctxRightControllerGO = rightControllerGO;
         _ctxLeftControllerGO = leftControllerGO;
-        _ctxActionPanelCanvas = actionPanelCanvas;
+        _ctxCaseBoardOpen = caseBoardOpen;
+        _ctxCaseBoardAnchor = caseBoardAnchor;
         _ctxCasePanelCanvas = casePanelCanvas;
         _ctxMinimapCanvasRef = minimapCanvasRef;
         _ctxPopupMessageGO = popupMessageGO;
@@ -277,7 +279,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
 
         // Start drag: grip pressed while controller ray hits a draggable canvas.
         // Active when case board is open, a dialog popup is showing, or a context menu is open.
-        bool caseBoardOpen = _ctxActionPanelCanvas != null && _ctxActionPanelCanvas.gameObject.activeSelf;
+        bool caseBoardOpen = _ctxCaseBoardOpen;
         bool dialogNowActive = (_ctxPopupMessageGO != null && _ctxPopupMessageGO.activeSelf)
                             || (_ctxTutorialMessageGO != null && _ctxTutorialMessageGO.activeSelf);
         // Detect context menu active state (child of TooltipCanvas "ContextMenus" has active child).
@@ -417,7 +419,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                     if (!isGrabbableTooltip && dragCat != CanvasCategory.CaseBoard && dragCat != CanvasCategory.Panel && dragCat != CanvasCategory.Menu) continue;
                     string cName = c.gameObject.name ?? "";
                     if (cName.Equals("CaseCanvas",            StringComparison.OrdinalIgnoreCase)) continue;
-                    if (cName.Equals("ActionPanelCanvas",      StringComparison.OrdinalIgnoreCase)) continue;
                     if (cName.Equals("WindowCanvas",           StringComparison.OrdinalIgnoreCase)) continue;  // container for notes — drag individual children via nested pre-pass
                     if (cName.Equals("MenuCanvas",             StringComparison.OrdinalIgnoreCase)) continue;  // ESC menu: not draggable
 
@@ -547,7 +548,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             }
 
             // B-button minimap: save as VROrigin-relative offset (body-locked context).
-            // Skip the ActionPanelCanvas-relative save so case board context is unaffected.
+            // Skip the anchor-relative save so case board context is unaffected.
             string releasedName = _gripDragCanvas.gameObject.name ?? "";
             bool isMinimapBBtn = _ctxMinimapInBBtnContext
                 && releasedName.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase);
@@ -567,18 +568,18 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             }
             else
             {
-                // Store offset in ActionPanelCanvas's LOCAL coordinate space.
+                // Store offset in the case-board anchor's LOCAL coordinate space.
                 // This means the offset rotates with the anchor — when the case board
                 // reopens facing a different direction, the arrangement is preserved.
                 // Skip Tooltip canvas (dialog host) — its position is transient; no persistence needed.
                 var releasedCat = CanvasCategoryInfo.GetCanvasCategory(releasedName);
                 bool isReleasedTooltip = releasedCat == CanvasCategory.Tooltip;
-                if (!isReleasedTooltip && _ctxActionPanelCanvas != null)
+                if (!isReleasedTooltip)
                 {
                     int dragId = _gripDragCanvas.GetInstanceID();
-                    Quaternion invAnchorRot = Quaternion.Inverse(_ctxActionPanelCanvas.transform.rotation);
+                    Quaternion invAnchorRot = Quaternion.Inverse(_ctxCaseBoardAnchor.rotation);
                     _ctxGripDragAnchorOffsets[dragId] = (
-                        invAnchorRot * (_gripDragCanvas.transform.position - _ctxActionPanelCanvas.transform.position),
+                        invAnchorRot * (_gripDragCanvas.transform.position - _ctxCaseBoardAnchor.position),
                         invAnchorRot * _gripDragCanvas.transform.rotation
                     );
                 }
@@ -706,7 +707,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         // the Note's visual center IS at the canvas plane center. The aim dot bounds check then
         // naturally passes for the entire Note.
         _windowNoteWorldOffset = Vector3.zero;
-        if (_ctxActionPanelCanvas != null && _ctxActionPanelCanvas.gameObject.activeSelf)
+        if (_ctxCaseBoardOpen)
         {
             foreach (var kvpWc in _ctxManagedCanvases)
             {
@@ -858,15 +859,14 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         // Dedicated CaseCanvas (pin board) aim dot — raycasts against the CaseCanvas plane
         // WITHOUT bounds checking.  CaseCanvas's sizeDelta doesn't match its visual extent,
         // so the standard bounds check always fails.  This dot only shows when the case board
-        // is open (ActionPanelCanvas active).
+        // is open.
         if (_caseBoardDot != null)
         {
             bool showCaseDot = false;
             try
             {
                 if (_ctxCasePanelCanvas != null
-                    && _ctxActionPanelCanvas != null
-                    && _ctxActionPanelCanvas.gameObject.activeSelf
+                    && _ctxCaseBoardOpen
                     && _ctxCasePanelCanvas.gameObject.activeSelf
                     && _ctxRightControllerGO != null
                     && _ctxLeftCam != null)
@@ -914,8 +914,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             try
             {
                 if (_ctxCasePanelCanvas != null
-                    && _ctxActionPanelCanvas != null
-                    && _ctxActionPanelCanvas.gameObject.activeSelf
+                    && _ctxCaseBoardOpen
                     && _ctxCasePanelCanvas.gameObject.activeSelf
                     && _ctxRightControllerGO != null
                     && _ctxLeftCam != null
@@ -974,7 +973,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         // Directly position the game's CursorRigidbody from VR controller ray → board intersection.
         // This bypasses the broken screen→board projection (game camera rotation mismatch).
         {
-            bool cbOpenCursor = _ctxActionPanelCanvas != null && _ctxActionPanelCanvas.gameObject.activeSelf;
+            bool cbOpenCursor = _ctxCaseBoardOpen;
 
             // Discover CursorRigidbody on first open (or after scene reload)
             if (cbOpenCursor && !_cbCursorRbSearched && _ctxCasePanelCanvas != null)
@@ -1102,7 +1101,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             return;
         }
 
-        bool cbOpen = _ctxActionPanelCanvas != null && _ctxActionPanelCanvas.gameObject.activeSelf;
+        bool cbOpen = _ctxCaseBoardOpen;
         // When the pause menu OR VR Settings panel is open, force cbOpen=false so that
         // trigger presses go through the generic click router instead of the CaseBoard drag path.
         bool menuIsOpen     = _ctxMenuCanvasRef != null && _ctxMenuCanvasRef.isActiveAndEnabled;

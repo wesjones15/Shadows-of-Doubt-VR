@@ -75,7 +75,6 @@ internal static class CanvasCategoryInfo
         ["LocationDetailsCanvas"]     = CanvasCategory.CaseBoard,
 
         // Panel — recentres on activate, interactable, behind Menu
-        ["ActionPanelCanvas"]         = CanvasCategory.Panel,    // action buttons for board elements
         ["contentCanvas"]             = CanvasCategory.Panel,
         ["osCanvas"]                  = CanvasCategory.Panel,
         ["keyboardCanvas"]            = CanvasCategory.Panel,

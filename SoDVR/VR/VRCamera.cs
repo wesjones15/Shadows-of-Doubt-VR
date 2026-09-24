@@ -63,6 +63,7 @@ public class VRCamera : MonoBehaviour
     private readonly RTPanelInput _rtPanelInput = new();
     private MenuRTPanel _menuRTPanel = null!;
     private TooltipRTPanel _tooltipRTPanel = null!;
+    private CaseBoardRTController _caseBoardRT = null!;
     private readonly PostFXOverlayCompositor _overlay = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
@@ -135,12 +136,10 @@ public class VRCamera : MonoBehaviour
     // Relative offsets (position + rotation) from primary CaseCanvas to other CaseBoard canvases.
     // Preserved across opens so the user's layout is maintained.
     private readonly Dictionary<int, (Vector3 pos, Quaternion rot)> _caseBoardOffsets = new();
-    // Grip-drag offset stored relative to ActionPanelCanvas (the case board selection UI).
-    // ActionPanelCanvas recentres each time the case board opens, so offsets stay consistent.
+    // Grip-drag offset stored relative to the case-board anchor, which is re-placed each time the
+    // case board opens, so offsets stay consistent.
     private readonly Dictionary<int, (Vector3 offset, Quaternion rot)> _gripDragAnchorOffsets = new();
     private readonly Dictionary<int, (Vector3 pos, Quaternion rot)> _gripDragEnforce = new(); // absolute world positions enforced every LateUpdate
-    private Canvas? _actionPanelCanvas;       // ActionPanelCanvas reference — anchor for grip-drag offsets
-    private int     _actionPanelId = -1;
     // ── B-button minimap: body-locked offset relative to VROrigin yaw ────────
     private bool       _minimapBBtnHasOffset;      // true after first B-button minimap placement or grip-drag
     private Vector3    _minimapBBtnLocalOffset;     // position offset in VROrigin-local space (yaw-aligned)
@@ -254,6 +253,7 @@ public class VRCamera : MonoBehaviour
         OpenXRManager.StopFrameThread();
         _menuRTPanel = new MenuRTPanel(UILayer, _rtPanelInput, OnSaveLoadButtonClicked);
         _tooltipRTPanel = new TooltipRTPanel(UILayer, _rtPanelInput, OnSaveLoadButtonClicked);
+        _caseBoardRT = new CaseBoardRTController(UILayer, _rtPanelInput);
         Log.LogInfo("[VRCamera] Awake — polling for SYNCHRONIZED state before swapchain setup.");
     }
 
@@ -362,7 +362,7 @@ public class VRCamera : MonoBehaviour
                     ref _casePanelCanvas, ref _casePanelId,
                     _frameCount, _lastRescanFrame,
                     _managedFades, _gameCamRef, _leftCam,
-                    ref _actionPanelCanvas, ref _actionPanelId, ref _minimapCanvasRef,
+                    ref _minimapCanvasRef,
                     ref _popupMessageGO, ref _popupMessageCanvas,
                     ref _tutorialMessageGO, ref _tutorialMessageCanvas,
                     _windowNestedList, _noGroupInteractable, _tooltipRTPanel.IsOwned);
@@ -382,6 +382,9 @@ public class VRCamera : MonoBehaviour
             // active and hands it back the instant the dialog closes.
             try { _tooltipRTPanel.Tick(_leftCam, _managedCanvases, _popupMessageCanvas, _tutorialMessageCanvas); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] TooltipRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
+
+            try { _caseBoardRT.Tick(_leftCam); }
+            catch (Exception ex) { Log.LogWarning($"[VRCamera] CaseBoardRTController.Tick: {ex.GetType().Name}: {ex.Message}"); }
         }
 
         // F8: re-centre all canvases in front of the current head pose.
@@ -390,6 +393,7 @@ public class VRCamera : MonoBehaviour
         {
             _positionedCanvases.Clear();
             _canvasVRPose.Clear();
+            _caseBoardRT.Recenter(_leftCam);
             Log.LogInfo("[VRCamera] Recenter: canvases will be re-placed on next LateUpdate.");
         }
 
@@ -582,7 +586,7 @@ public class VRCamera : MonoBehaviour
                 // ── Vent state ───────────────────────────────────────────
                 _locomotion.UpdateVentState();
 
-                bool caseBoardOpenForInput = _actionPanelCanvas != null && _actionPanelCanvas.gameObject.activeSelf;
+                bool caseBoardOpenForInput = _caseBoardRT.IsOpen;
                 bool isPausedForLocomotion = caseBoardOpenForInput || _menuRTPanel.IsShowing;
                 bool vrSettingsOpenForInput = VRSettingsPanel.RootGO?.activeSelf == true;
 
@@ -659,8 +663,7 @@ public class VRCamera : MonoBehaviour
                 if (!shouldDiscover && !_locomotion.HasPlayerController)
                 {
                     // Post-save/load path: wait for menu to close before discovering.
-                    bool menuGone = !_menuRTPanel.IsShowing
-                                 && (_actionPanelCanvas == null || !_actionPanelCanvas.gameObject.activeSelf);
+                    bool menuGone = !_menuRTPanel.IsShowing && !_caseBoardRT.IsOpen;
                     if (menuGone) shouldDiscover = true;
                 }
                 if (shouldDiscover)
@@ -1107,7 +1110,7 @@ public class VRCamera : MonoBehaviour
                 _gripDragAnchorOffsets,
                 _gripDragEnforce,
                 _nestedDragTransforms,
-                _actionPanelCanvas, _actionPanelId,
+                _caseBoardRT.IsOpen, _caseBoardRT.JustOpened, _caseBoardRT.Anchor, _caseBoardRT.AnchorPlaced,
                 _popupMessageGO, _tutorialMessageGO,
                 ref _contextMenuFreezePos, ref _contextMenuFreezeRot,
                 _locomotion,
@@ -1157,7 +1160,7 @@ public class VRCamera : MonoBehaviour
                 // which overrides our LateUpdate position writes on LagPivot.
                 ForceItemPositionPreRender();
 
-                // Force CaseCanvas to follow ActionPanelCanvas every frame.
+                // Force CaseCanvas to follow the case-board anchor every frame.
                 // The game continuously repositions CaseCanvas to Camera.main-relative coords,
                 // so we must override it every frame to keep it near the VR player.
                 EnforceCaseCanvasPosition();
@@ -1205,6 +1208,8 @@ public class VRCamera : MonoBehaviour
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.Render: {ex.Message}"); }
                 try { _tooltipRTPanel.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] TooltipRTPanel.Render: {ex.Message}"); }
+                try { _caseBoardRT.Render(); }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] CaseBoardRTController.Render: {ex.Message}"); }
 
                 // No GL.invertCulling — HDRP flipYMode handles both Y-flip and culling.
                 _rightCam.Render();
@@ -1215,6 +1220,7 @@ public class VRCamera : MonoBehaviour
                     _overlay.BeginFrame();
                     _menuRTPanel.AppendOverlay(_overlay);
                     _tooltipRTPanel.AppendOverlay(_overlay);
+                    _caseBoardRT.AppendOverlay(_overlay);
                     _rtPanelInput.AppendOverlay(_overlay);
                     _overlay.Composite(_rightCam, _rightRT);
                     _overlay.Composite(_leftCam, _leftRT);
@@ -1277,7 +1283,7 @@ public class VRCamera : MonoBehaviour
             _lastRescanFrame, () => _forceScanFrames = 30, OnSaveLoadButtonClicked,
             _menuRTPanel.SettingsBtnId, _menuRTPanel.Canvas,
             _leftCam, _gameCamRef, _rightControllerGO, _leftControllerGO,
-            _actionPanelCanvas, _casePanelCanvas, _minimapCanvasRef,
+            _caseBoardRT.IsOpen, _caseBoardRT.Anchor, _casePanelCanvas, _minimapCanvasRef,
             _popupMessageGO, _tutorialMessageGO,
             _popupMessageCanvas, _tutorialMessageCanvas, _tooltipRTPanel.IsOwned,
             _nestedDragTransforms, _nestedDragRelative,
@@ -1347,20 +1353,18 @@ public class VRCamera : MonoBehaviour
 
     private void UpdateHeldItemTracking() => _heldItem.Tick(_interactionController, _rightControllerGO, _leftControllerGO);
 
-    /// <summary>Force CaseCanvas to follow ActionPanelCanvas. Called every frame because the game
-    /// continuously repositions CaseCanvas to Camera.main-relative world coords.</summary>
+    /// <summary>Force CaseCanvas to follow the case-board anchor. Called every frame because the
+    /// game continuously repositions CaseCanvas to Camera.main-relative world coords.</summary>
     private void EnforceCaseCanvasPosition()
     {
-        if (_casePanelCanvas == null || _actionPanelCanvas == null) return;
+        if (_casePanelCanvas == null || !_caseBoardRT.IsOpen) return;
         try
         {
-            if (!_actionPanelCanvas.gameObject.activeSelf) return;
-            // Place CaseCanvas 0.15m BEHIND ActionPanelCanvas (further from player)
-            // so the corkboard doesn't block action panel button clicks.
-            // "forward" points toward the player, so +forward moves it behind (further away).
-            var apT = _actionPanelCanvas.transform;
-            _casePanelCanvas.transform.position = apT.position + apT.forward * 0.15f;
-            _casePanelCanvas.transform.rotation = apT.rotation;
+            // 0.15m behind the navbar (further from the player, along the anchor's forward) so
+            // the corkboard doesn't block navbar button clicks.
+            var anchor = _caseBoardRT.Anchor;
+            _casePanelCanvas.transform.position = anchor.position + anchor.forward * 0.15f;
+            _casePanelCanvas.transform.rotation = anchor.rotation;
         }
         catch { }
     }

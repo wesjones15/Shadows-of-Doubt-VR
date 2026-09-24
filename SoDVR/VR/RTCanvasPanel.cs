@@ -46,10 +46,11 @@ internal sealed class RTCanvasPanel
 
     public IReadOnlyList<RTPanelView> Views => _views;
 
-    /// <param name="metersPerPixel">World size of one canvas pixel.</param>
+    /// <param name="authoredWorldWidth">World width the canvas's authored size maps to; sets the
+    /// metres-per-pixel every view is sized with.</param>
     /// <param name="rtSize">Texture (and so canvas) size; defaults to the canvas's authored
     /// sizeDelta. Larger when the owner lays extra content out on the canvas.</param>
-    public void Attach(Canvas canvas, float metersPerPixel, Vector2Int? rtSize = null)
+    public void Attach(Canvas canvas, float authoredWorldWidth, Vector2Int? rtSize = null)
     {
         Detach();
 
@@ -59,7 +60,9 @@ internal sealed class RTCanvasPanel
         if (scaler != null) { try { scaler.enabled = false; } catch { } }
         if (Math.Abs(canvas.scaleFactor - 1f) > 0.001f) canvas.scaleFactor = 1f;
 
-        var size = rtSize ?? AuthoredSize(canvas);
+        var authored = AuthoredSize(canvas);
+        float metersPerPixel = authoredWorldWidth / authored.x;
+        var size = rtSize ?? authored;
         Texture = CameraRig.CreateRTPanelTexture(size.x, size.y, $"SoDVR_{_logTag}_RT");
         ProjectorCamera = CameraRig.SetupRTPanelProjectorCamera(_logTag, canvas.gameObject.layer);
         ProjectorCamera.targetTexture = Texture;
@@ -125,6 +128,47 @@ internal sealed class RTCanvasPanel
         float yMin = Mathf.Clamp(Mathf.Min(a.y, b.y), 0f, Texture.height);
         float yMax = Mathf.Clamp(Mathf.Max(a.y, b.y), 0f, Texture.height);
         return Rect.MinMaxRect(xMin, yMin, xMax, yMax);
+    }
+
+    /// <summary>Union of <see cref="PixelRectOf"/> over <paramref name="parent"/>'s active
+    /// children, grown by <paramref name="marginPixels"/> — the rect a view needs to show whatever
+    /// content is currently up, including content the game spawns as a new child (a dropdown
+    /// list, say). Rect.zero when nothing with a size is active.</summary>
+    public Rect PixelRectOfActiveChildren(Transform parent, float marginPixels)
+    {
+        if (Texture == null) return Rect.zero;
+        bool any = false;
+        Rect union = default;
+        for (int i = 0; i < parent.childCount; i++)
+        {
+            var child = parent.GetChild(i);
+            if (child == null || !child.gameObject.activeSelf) continue;
+            var rt = child.GetComponent<RectTransform>();
+            if (rt == null) continue;
+            var r = PixelRectOf(rt);
+            if (r.width < 1f || r.height < 1f) continue;
+            union = any ? Rect.MinMaxRect(Mathf.Min(union.xMin, r.xMin), Mathf.Min(union.yMin, r.yMin),
+                                          Mathf.Max(union.xMax, r.xMax), Mathf.Max(union.yMax, r.yMax))
+                        : r;
+            any = true;
+        }
+        if (!any) return Rect.zero;
+        return Rect.MinMaxRect(
+            Mathf.Max(0f, union.xMin - marginPixels), Mathf.Max(0f, union.yMin - marginPixels),
+            Mathf.Min(Texture.width, union.xMax + marginPixels), Mathf.Min(Texture.height, union.yMax + marginPixels));
+    }
+
+    /// <summary>The canvas is up and not faded out: active, enabled, and no CanvasGroup on it or
+    /// above it below 0.1 alpha (the game fades some canvases rather than deactivating them).</summary>
+    public static bool IsShowing(Canvas canvas)
+    {
+        if (canvas == null || !canvas.gameObject.activeInHierarchy || !canvas.enabled) return false;
+        for (var t = canvas.transform; t != null; t = t.parent)
+        {
+            var cg = t.GetComponent<CanvasGroup>();
+            if (cg != null && cg.alpha < 0.1f) return false;
+        }
+        return true;
     }
 
     /// <summary>Destroys every view, the projector camera and the texture. The canvas itself is
@@ -229,6 +273,14 @@ internal sealed class RTPanelView
     {
         _quad.transform.position = position;
         _quad.transform.rotation = rotation;
+    }
+
+    /// <summary>Places the view where its pixel rect sits on the whole canvas, given the pose of
+    /// the canvas's centre — so several views of one canvas keep the canvas's own layout.</summary>
+    public void SetCanvasPose(Vector3 canvasCenter, Quaternion rotation)
+    {
+        Vector2 offset = (PixelRect.center - new Vector2(_texture.width, _texture.height) * 0.5f) * _metersPerPixel;
+        SetPose(canvasCenter + rotation * new Vector3(offset.x, offset.y, 0f), rotation);
     }
 
     public void AppendOverlay(PostFXOverlayCompositor overlay)

@@ -42,7 +42,7 @@ internal sealed class CanvasPlacement
         Dictionary<int, (Vector3 offset, Quaternion rot)> gripDragAnchorOffsets,
         Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
         Dictionary<int, (Vector3 worldPos, Quaternion worldRot)> nestedDragTransforms,
-        Canvas? actionPanelCanvas, int actionPanelId,
+        bool caseBoardOpen, bool caseBoardJustOpened, Transform caseBoardAnchor, bool caseBoardAnchorPlaced,
         GameObject? popupMessageGO, GameObject? tutorialMessageGO,
         ref Vector3 contextMenuFreezePos, ref Quaternion contextMenuFreezeRot,
         LocomotionController locomotion,
@@ -98,10 +98,7 @@ internal sealed class CanvasPlacement
         }
 
         // ── HUD auto-hide: hide when pause menu or case board is open ─────
-        // Use _casePanelCanvas (CaseCanvas) — only active when pin board is open.
-        // _actionPanelCanvas is always active during gameplay so cannot be used here.
         bool menuOpen      = menuCanvasRef != null && menuCanvasRef.isActiveAndEnabled;
-        bool caseBoardOpen = casePanelCanvas != null && CanvasCategoryInfo.IsCanvasVisible(casePanelCanvas);
         bool hudShouldShow = !menuOpen && !caseBoardOpen;
         if (hudAnchor.gameObject.activeSelf != hudShouldShow)
             hudAnchor.gameObject.SetActive(hudShouldShow);
@@ -127,51 +124,49 @@ internal sealed class CanvasPlacement
                 // Clear rescan cooldown so material drift is fixed immediately
                 // when a dialog becomes visible (game sets text content on show).
                 lastRescanFrame.Remove(tid);
-
-                // When ActionPanelCanvas becomes visible (case board opens),
-                // force-recentre ALL CaseBoard canvases + WindowCanvas so everything
-                // moves to the player's current position.  Notes/notebook are children
-                // of WindowCanvas (InterfaceController.windowCanvas), not CaseCanvas.
-                string tn = kvp.Value.gameObject.name ?? "";
-                if (tn.Equals("ActionPanelCanvas", StringComparison.OrdinalIgnoreCase))
-                {
-                    caseBoard.CaseBoardPrimaryId = -1; // reset primary so it's re-elected
-                    foreach (var cb in managedCanvases)
-                    {
-                        if (cb.Value == null) continue;
-                        string cbName = cb.Value.gameObject.name ?? "";
-                        var cbCat = CanvasCategoryInfo.GetCanvasCategory(cbName);
-                        if (cbCat == CanvasCategory.CaseBoard
-                            || cbName.Equals("WindowCanvas", StringComparison.OrdinalIgnoreCase))
-                        {
-                            positionedCanvases.Remove(cb.Key);
-                            lastRescanFrame.Remove(cb.Key);
-                        }
-                        // MinimapCanvas: always remove from positioned so it can be re-placed.
-                        // If grip-dragged, PositionCanvases will restore from anchor offsets.
-                        // If not, it gets default head+forward placement.
-                        if (cbName.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase))
-                        {
-                            positionedCanvases.Remove(cb.Key);
-                            gripDragEnforce.Remove(cb.Key);
-                            lastRescanFrame.Remove(cb.Key);
-                        }
-                        // Any canvas with anchor offsets: remove from positioned + enforce
-                        // so PositionCanvases recomputes from new ActionPanelCanvas position.
-                        if (gripDragAnchorOffsets.ContainsKey(cb.Key))
-                        {
-                            positionedCanvases.Remove(cb.Key);
-                            gripDragEnforce.Remove(cb.Key);
-                        }
-                    }
-                    // Clear absolute nested transforms — they'll be restored from
-                    // _nestedDragRelative once WindowCanvas gets its new position.
-                    nestedDragTransforms.Clear();
-                    Log.LogInfo("[CanvasPlacement] ActionPanelCanvas activated — recentring CaseBoard + WindowCanvas (Minimap preserved if grip-dragged)");
-                }
             }
 
             canvasWasActive[tid] = nowActive;
+        }
+
+        // When the case board opens, force-recentre every legacy CaseBoard canvas + WindowCanvas
+        // around the freshly placed board anchor. Notes/notebook are children of WindowCanvas
+        // (InterfaceController.windowCanvas), not CaseCanvas.
+        if (caseBoardJustOpened)
+        {
+            caseBoard.CaseBoardPrimaryId = -1; // reset primary so it's re-elected
+            foreach (var cb in managedCanvases)
+            {
+                if (cb.Value == null) continue;
+                string cbName = cb.Value.gameObject.name ?? "";
+                var cbCat = CanvasCategoryInfo.GetCanvasCategory(cbName);
+                if (cbCat == CanvasCategory.CaseBoard
+                    || cbName.Equals("WindowCanvas", StringComparison.OrdinalIgnoreCase))
+                {
+                    positionedCanvases.Remove(cb.Key);
+                    lastRescanFrame.Remove(cb.Key);
+                }
+                // MinimapCanvas: always remove from positioned so it can be re-placed.
+                // If grip-dragged, PositionCanvases will restore from anchor offsets.
+                // If not, it gets default head+forward placement.
+                if (cbName.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase))
+                {
+                    positionedCanvases.Remove(cb.Key);
+                    gripDragEnforce.Remove(cb.Key);
+                    lastRescanFrame.Remove(cb.Key);
+                }
+                // Any canvas with anchor offsets: remove from positioned + enforce
+                // so PositionCanvases recomputes from the new anchor.
+                if (gripDragAnchorOffsets.ContainsKey(cb.Key))
+                {
+                    positionedCanvases.Remove(cb.Key);
+                    gripDragEnforce.Remove(cb.Key);
+                }
+            }
+            // Clear absolute nested transforms — they'll be restored from
+            // _nestedDragRelative once WindowCanvas gets its new position.
+            nestedDragTransforms.Clear();
+            Log.LogInfo("[CanvasPlacement] Case board opened — recentring CaseBoard + WindowCanvas (Minimap preserved if grip-dragged)");
         }
 
         _placementIndex = 0;
@@ -235,7 +230,6 @@ internal sealed class CanvasPlacement
                 // Context menu freeze: when ContextMenus has active children (a right-click
                 // context menu is showing), world-lock TooltipCanvas so the menu stays put.
                 // Orient to match the pin board so the menu is coplanar with the board.
-                bool cbIsOpen = actionPanelCanvas != null && actionPanelCanvas.gameObject.activeSelf;
                 bool contextMenuFrozen = false;
                 try
                 {
@@ -423,9 +417,6 @@ internal sealed class CanvasPlacement
 
             // PopupMessage/TutorialMessage: now nested under TooltipCanvas, handled in dialog mode above.
             string cname = canvas.gameObject.name ?? "";
-            // ActionPanelCanvas: 0.15m closer than CaseBoard so action buttons are in front
-            if (cname.Equals("ActionPanelCanvas", StringComparison.OrdinalIgnoreCase))
-                dist = CanvasCategoryInfo.GetCategoryDefaults(CanvasCategory.CaseBoard).Distance - 0.15f;
 
             // CaseBoard: first canvas becomes primary anchor, others maintain relative offset
             if (cat == CanvasCategory.CaseBoard)
@@ -460,34 +451,20 @@ internal sealed class CanvasPlacement
                 }
             }
 
-            // If user previously grip-dragged this canvas, restore relative to
-            // ActionPanelCanvas (case board selection UI).  Offset is in anchor-local
-            // space so it rotates with the anchor when the case board reopens.
-            // Exception: ActionPanelCanvas IS the anchor — restoring it from its own
-            // offset would cause a deadlock (waits for itself to be positioned).
-            // Let it fall through to default head+forward placement instead.
-            bool isActionPanelAnchor = (id == actionPanelId);
-            if (!isActionPanelAnchor &&
-                gripDragAnchorOffsets.TryGetValue(id, out var anchorOff) &&
-                actionPanelCanvas != null && positionedCanvases.Contains(actionPanelId))
+            // If user previously grip-dragged this canvas, restore relative to the case-board
+            // anchor. Offset is in anchor-local space so it rotates with the anchor when the case
+            // board reopens.
+            if (gripDragAnchorOffsets.TryGetValue(id, out var anchorOff) && caseBoardAnchorPlaced)
             {
-                Quaternion anchorRot = actionPanelCanvas.transform.rotation;
-                Vector3 restoredPos = actionPanelCanvas.transform.position + anchorRot * anchorOff.offset;
+                Quaternion anchorRot = caseBoardAnchor.rotation;
+                Vector3 restoredPos = caseBoardAnchor.position + anchorRot * anchorOff.offset;
                 Quaternion restoredRot = anchorRot * anchorOff.rot;
                 canvas.transform.position = restoredPos;
                 canvas.transform.rotation = restoredRot;
                 positionedCanvases.Add(id);
                 // Update absolute enforcement so LateUpdate keeps this position
                 gripDragEnforce[id] = (restoredPos, restoredRot);
-                Log.LogInfo($"[CanvasPlacement] Restored '{cname}' [{cat}] from ActionPanel-relative offset");
-            }
-            else if (!isActionPanelAnchor &&
-                     gripDragAnchorOffsets.TryGetValue(id, out _) &&
-                     actionPanelCanvas != null && !positionedCanvases.Contains(actionPanelId))
-            {
-                // ActionPanelCanvas not positioned yet this cycle — defer to next frame
-                // so we don't fall through to default placement and lose the offset.
-                continue;
+                Log.LogInfo($"[CanvasPlacement] Restored '{cname}' [{cat}] from case-board-anchor offset");
             }
             else
             {

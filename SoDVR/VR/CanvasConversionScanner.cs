@@ -35,7 +35,7 @@ internal static class CanvasConversionScanner
         ref Canvas? casePanelCanvas, ref int casePanelId,
         int frameCount, Dictionary<int, int> lastRescanFrame,
         Dictionary<int, Graphic> managedFades, Camera? gameCamRef, Camera? leftCam,
-        ref Canvas? actionPanelCanvas, ref int actionPanelId, ref Canvas? minimapCanvasRef,
+        ref Canvas? minimapCanvasRef,
         ref GameObject? popupMessageGO, ref Canvas? popupMessageCanvas,
         ref GameObject? tutorialMessageGO, ref Canvas? tutorialMessageCanvas,
         List<Canvas> windowNestedList, HashSet<int> noGroupInteractable,
@@ -71,9 +71,9 @@ internal static class CanvasConversionScanner
 
             string cname = canvas.gameObject.name ?? "";
 
-            // MenuCanvas is owned outright by MenuRTPanel (RT-projected quad, immune to
-            // post-processing) — not WorldSpace-converted here, never added to managedCanvases.
-            if (cname == "MenuCanvas") continue;
+            // Owned outright by an RT panel (MenuRTPanel, CaseBoardRTController) — never
+            // WorldSpace-converted here, never added to managedCanvases.
+            if (cname == "MenuCanvas" || cname == "ActionPanelCanvas") continue;
 
             // TooltipCanvas is time-shared with TooltipRTPanel (see its own doc comment): while a
             // dialog is active, it's removed from managedCanvases and its renderMode flipped to
@@ -125,13 +125,7 @@ internal static class CanvasConversionScanner
             ConvertCanvasToWorldSpace(canvas, materialPatcher, managedFades, gameCamRef, leftCam);
             managedCanvases[id] = canvas;
 
-            // Cache ActionPanelCanvas — used as anchor for grip-drag offset persistence.
-            if (string.Equals(cname, "ActionPanelCanvas", StringComparison.OrdinalIgnoreCase))
-            {
-                actionPanelCanvas = canvas;
-                actionPanelId = id;
-            }
-            // Cache CaseCanvas — enforced to follow ActionPanelCanvas every frame.
+            // Cache CaseCanvas — enforced to follow the case-board anchor every frame.
             if (string.Equals(cname, "CaseCanvas", StringComparison.OrdinalIgnoreCase))
             {
                 casePanelCanvas = canvas;
