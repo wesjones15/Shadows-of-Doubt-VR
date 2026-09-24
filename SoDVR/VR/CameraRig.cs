@@ -311,6 +311,27 @@ internal static class CameraRig
                 return;
             }
 
+            // The backing-field write is confirmed to persist (CustomPass reads true via the
+            // backing field both before and after — it stuck from the previous run), and the read
+            // mechanism isn't broadly broken (Postprocess agrees across both paths). So
+            // GetDefaultFrameSettings() reporting CustomPass=false despite that must be re-gating
+            // it against something else at call time — most likely RenderPipelineSettings
+            // .supportCustomPass, HDRP's known pattern for masking fields the pipeline doesn't
+            // currently "support" regardless of the stored bit. SetupPostFXExemptPass already
+            // claims to have forced that true — confirm it's actually live on the asset
+            // GetDefaultFrameSettings() would consult, rather than trusting that log line.
+            var asset = HDRenderPipeline.currentAsset;
+            if (asset != null)
+            {
+                Log.LogInfo($"[CameraRig] Diagnostic: supportCustomPass via currentPlatformRenderPipelineSettings=" +
+                            $"{asset.currentPlatformRenderPipelineSettings.supportCustomPass}, via m_RenderPipelineSettings backing field=" +
+                            $"{asset.m_RenderPipelineSettings.supportCustomPass}");
+            }
+            else
+            {
+                Log.LogWarning("[CameraRig] Diagnostic: HDRenderPipeline.currentAsset is null");
+            }
+
             // Sanity baseline: Postprocess is definitely enabled somewhere (DoF visibly blurs the
             // eye cameras' output), so if IsEnabled(Postprocess) reads false via either path here,
             // that path's READ is unreliable, independent of whatever WRITE we try below — this
