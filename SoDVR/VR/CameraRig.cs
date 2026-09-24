@@ -311,17 +311,28 @@ internal static class CameraRig
                 return;
             }
 
-            var before = globalSettings.GetDefaultFrameSettings(FrameSettingsRenderType.Camera);
-            Log.LogInfo($"[CameraRig] Diagnostic: default Camera FrameSettings.CustomPass BEFORE write = " +
-                        $"{before.IsEnabled(FrameSettingsField.CustomPass)}");
+            // Sanity baseline: Postprocess is definitely enabled somewhere (DoF visibly blurs the
+            // eye cameras' output), so if IsEnabled(Postprocess) reads false via either path here,
+            // that path's READ is unreliable, independent of whatever WRITE we try below — this
+            // disambiguates "the write didn't land" from "this read path never worked".
+            var beforeByMethod = globalSettings.GetDefaultFrameSettings(FrameSettingsRenderType.Camera);
+            var beforeByField  = globalSettings.m_RenderingPathDefaultCameraFrameSettings;
+            Log.LogInfo($"[CameraRig] Diagnostic: sanity check — Postprocess via GetDefaultFrameSettings()=" +
+                        $"{beforeByMethod.IsEnabled(FrameSettingsField.Postprocess)}, via backing field=" +
+                        $"{beforeByField.IsEnabled(FrameSettingsField.Postprocess)}");
+            Log.LogInfo($"[CameraRig] Diagnostic: CustomPass BEFORE write — via GetDefaultFrameSettings()=" +
+                        $"{beforeByMethod.IsEnabled(FrameSettingsField.CustomPass)}, via backing field=" +
+                        $"{beforeByField.IsEnabled(FrameSettingsField.CustomPass)}");
 
             var fs = globalSettings.m_RenderingPathDefaultCameraFrameSettings;
             fs.SetEnabled(FrameSettingsField.CustomPass, true);
             globalSettings.m_RenderingPathDefaultCameraFrameSettings = fs;
 
-            var after = globalSettings.GetDefaultFrameSettings(FrameSettingsRenderType.Camera);
-            Log.LogInfo($"[CameraRig] Diagnostic: default Camera FrameSettings.CustomPass AFTER backing-field write = " +
-                        $"{after.IsEnabled(FrameSettingsField.CustomPass)}");
+            var afterByMethod = globalSettings.GetDefaultFrameSettings(FrameSettingsRenderType.Camera);
+            var afterByField  = globalSettings.m_RenderingPathDefaultCameraFrameSettings;
+            Log.LogInfo($"[CameraRig] Diagnostic: CustomPass AFTER write — via GetDefaultFrameSettings()=" +
+                        $"{afterByMethod.IsEnabled(FrameSettingsField.CustomPass)}, via backing field=" +
+                        $"{afterByField.IsEnabled(FrameSettingsField.CustomPass)}");
         }
         catch (Exception ex) { Log.LogWarning($"[CameraRig] DiagnoseDefaultFrameSettingsCustomPass failed: {ex.Message}"); }
     }
