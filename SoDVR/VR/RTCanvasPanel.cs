@@ -13,9 +13,11 @@ namespace SoDVR.VR;
 /// content instead of a full-size opaque quad, and several windows laid out on one canvas are each
 /// a view drawn from a single projector render.
 ///
-/// The canvas is owned permanently once attached: switched to ScreenSpaceCamera against the
-/// projector, which makes RT pixels equal the canvas's own screen pixels, so pointer events built
-/// from a view hit carry the coordinates the game's own UI code expects.
+/// The canvas is owned permanently once attached: switched to ScreenSpaceCamera against a
+/// projector whose texture is the size of the game's own screen, with the game's CanvasScaler left
+/// in charge. The canvas is then laid out exactly as the flat game lays it out — nothing the game
+/// keeps on screen ends up outside the texture — and RT pixels are the screen pixels the game's
+/// own UI code and pointer events expect.
 /// </summary>
 internal sealed class RTCanvasPanel
 {
@@ -46,11 +48,11 @@ internal sealed class RTCanvasPanel
 
     public IReadOnlyList<RTPanelView> Views => _views;
 
-    /// <param name="authoredWorldWidth">World width the canvas's authored size maps to; sets the
+    /// <param name="screenWorldWidth">World width the full screen width maps to; sets the
     /// metres-per-pixel every view is sized with.</param>
-    /// <param name="rtSize">Texture (and so canvas) size; defaults to the canvas's authored
-    /// sizeDelta. Larger when the owner lays extra content out on the canvas.</param>
-    public void Attach(Canvas canvas, float authoredWorldWidth, Vector2Int? rtSize = null)
+    /// <param name="rtSize">Texture (and so canvas) size; defaults to the game's screen size.
+    /// Larger when the owner lays extra content out on the canvas.</param>
+    public void Attach(Canvas canvas, float screenWorldWidth, Vector2Int? rtSize = null)
     {
         Detach();
 
@@ -63,15 +65,11 @@ internal sealed class RTCanvasPanel
             canvas.transform.SetParent(null, false);
         }
 
-        // CanvasScaler must be off BEFORE sizeDelta is read — it inflates sizeDelta from a
-        // reference resolution until disabled (same order MenuRTPanel.Setup uses).
-        var scaler = canvas.GetComponent<CanvasScaler>();
-        if (scaler != null) { try { scaler.enabled = false; } catch { } }
-        if (Math.Abs(canvas.scaleFactor - 1f) > 0.001f) canvas.scaleFactor = 1f;
-
-        var authored = AuthoredSize(canvas);
-        float metersPerPixel = authoredWorldWidth / authored.x;
-        var size = rtSize ?? authored;
+        // The CanvasScaler is deliberately left alone: in ScreenSpaceCamera it scales against the
+        // projector's pixel size, which is the screen size, so the game's layout is untouched.
+        // (Legacy disabled it only because WorldSpace canvases are sized by transform instead.)
+        var size = rtSize ?? ScreenSize();
+        float metersPerPixel = screenWorldWidth / ScreenSize().x;
         Texture = CameraRig.CreateRTPanelTexture(size.x, size.y, $"SoDVR_{_logTag}_RT");
         ProjectorCamera = CameraRig.SetupRTPanelProjectorCamera(_logTag, canvas.gameObject.layer);
         ProjectorCamera.targetTexture = Texture;
@@ -86,7 +84,9 @@ internal sealed class RTCanvasPanel
 
         Canvas = canvas;
         MetersPerPixel = metersPerPixel;
-        Log.LogInfo($"[{_logTag}] Attached '{canvas.gameObject.name}': rt={size.x}x{size.y} m/px={metersPerPixel:F6} layer={canvas.gameObject.layer}");
+        var scaler = canvas.GetComponent<CanvasScaler>();
+        Log.LogInfo($"[{_logTag}] Attached '{canvas.gameObject.name}': rt={size.x}x{size.y} m/px={metersPerPixel:F6} " +
+                    $"scaler={(scaler == null ? "none" : $"{scaler.uiScaleMode} enabled={scaler.enabled}")} layer={canvas.gameObject.layer}");
     }
 
     public RTPanelView CreateView(string name, Func<GameObject, bool>? onBeforeClick = null)
@@ -233,13 +233,44 @@ internal sealed class RTCanvasPanel
         return false;
     }
 
-    private static Vector2Int AuthoredSize(Canvas canvas)
+    private static Vector2Int ScreenSize() => new(
+        Mathf.Clamp(Screen.width > 0 ? Screen.width : 1920, 64, 4096),
+        Mathf.Clamp(Screen.height > 0 ? Screen.height : 1080, 64, 4096));
+
+    /// <summary>
+    /// Diagnostic: visibly drawn graphics that reach past the texture's edges, so are cut off in
+    /// every view. Returns how many, plus a few examples (buttons first — a missing close button is
+    /// what this exists to explain).
+    /// </summary>
+    public int CountContentOutsideTexture(out string examples)
     {
-        var rectT = canvas.GetComponent<RectTransform>();
-        var sd = rectT != null ? rectT.sizeDelta : new Vector2(1920f, 1080f);
-        return new Vector2Int(
-            Mathf.Clamp(Mathf.RoundToInt(sd.x > 0f ? sd.x : 1920f), 64, 4096),
-            Mathf.Clamp(Mathf.RoundToInt(sd.y > 0f ? sd.y : 1080f), 64, 4096));
+        examples = "";
+        if (Canvas == null || Texture == null || ProjectorCamera == null) return 0;
+        int count = 0;
+        var names = new List<string>();
+        foreach (var g in Canvas.GetComponentsInChildren<Graphic>(false))
+        {
+            if (g == null || !g.enabled || !IsVisiblyDrawn(g)) continue;
+            var r = g.rectTransform.rect;
+            Vector3 a = ProjectorCamera.WorldToScreenPoint(g.rectTransform.TransformPoint(new Vector3(r.xMin, r.yMin, 0f)));
+            Vector3 b = ProjectorCamera.WorldToScreenPoint(g.rectTransform.TransformPoint(new Vector3(r.xMax, r.yMax, 0f)));
+            bool outside = Mathf.Min(a.x, b.x) < -0.5f || Mathf.Min(a.y, b.y) < -0.5f
+                        || Mathf.Max(a.x, b.x) > Texture.width + 0.5f || Mathf.Max(a.y, b.y) > Texture.height + 0.5f;
+            if (!outside) continue;
+            count++;
+            string entry = $"'{g.gameObject.name}'({Mathf.Min(a.x, b.x):F0},{Mathf.Min(a.y, b.y):F0}..{Mathf.Max(a.x, b.x):F0},{Mathf.Max(a.y, b.y):F0})";
+            if (HasSelectableAncestor(g.transform)) names.Insert(0, entry); else names.Add(entry);
+        }
+        examples = string.Join(" ", names.GetRange(0, Math.Min(6, names.Count)));
+        return count;
+    }
+
+    // GetComponentInParent is unreliable across the IL2CPP interop — walk parents by hand.
+    private static bool HasSelectableAncestor(Transform t)
+    {
+        for (var tr = t; tr != null; tr = tr.parent)
+            if (tr.GetComponent<Selectable>() != null) return true;
+        return false;
     }
 }
 

@@ -26,7 +26,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     private const float GripMargin = 1.3f;
 
     private readonly string _canvasName;
-    private readonly float _authoredWorldWidth;
+    private readonly float _screenWorldWidth;
     private readonly float _distanceInFrontOfAnchor;
     private readonly bool _draggable;
     private readonly RTPanelGrip _grip;
@@ -43,14 +43,14 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     private Quaternion _poseRotation = Quaternion.identity;
     private (Vector3 offset, Quaternion rotation)? _anchorLocalLayout;
 
-    /// <param name="authoredWorldWidth">World width of the canvas's authored 1920 px — the legacy
-    /// category width, so the panel reads at the size it always has.</param>
+    /// <param name="screenWorldWidth">World width of the full screen width — the legacy category
+    /// width, so the panel reads at the size it always has.</param>
     /// <param name="distanceInFrontOfAnchor">Default placement, towards the player from the anchor.</param>
-    public CaseBoardPanel(string canvasName, float authoredWorldWidth, float distanceInFrontOfAnchor,
+    public CaseBoardPanel(string canvasName, float screenWorldWidth, float distanceInFrontOfAnchor,
         bool draggable, int quadLayer, RTPanelInput input, RTPanelGrip grip)
     {
         _canvasName = canvasName;
-        _authoredWorldWidth = authoredWorldWidth;
+        _screenWorldWidth = screenWorldWidth;
         _distanceInFrontOfAnchor = distanceInFrontOfAnchor;
         _draggable = draggable;
         _grip = grip;
@@ -81,8 +81,10 @@ internal sealed class CaseBoardPanel : IRTGripTarget
         {
             _refreshCountdown = ContentRefreshFrames;
             var rect = _panel.ContentPixelRect(ContentMarginPixels, out int graphicCount);
+            bool hadContent = _hasContent;
             _hasContent = graphicCount >= MinContentGraphics;
             if (_hasContent) _view!.SetPixelRect(rect);
+            if (_hasContent && (!hadContent || !_wasShowing)) LogContentCutOff();
         }
         _wasShowing = showing;
 
@@ -132,6 +134,13 @@ internal sealed class CaseBoardPanel : IRTGripTarget
 
     // ──────────────────────────────────────────────────────────────────────────────────────
 
+    private void LogContentCutOff()
+    {
+        int outside = _panel.CountContentOutsideTexture(out string examples);
+        if (outside > 0)
+            Log.LogWarning($"[CaseBoardPanel] {_canvasName}: {outside} visible graphic(s) reach past the texture edge and are cut off: {examples}");
+    }
+
     private void PlaceFromLayout(Transform anchor)
     {
         if (_anchorLocalLayout is { } layout)
@@ -157,7 +166,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
             if (canvas == null || canvas.gameObject.name != _canvasName) continue;
             try
             {
-                _panel.Attach(canvas, _authoredWorldWidth);
+                _panel.Attach(canvas, _screenWorldWidth);
                 _view = _panel.CreateView("Content");
                 _wasShowing = false;
                 _hasContent = false;

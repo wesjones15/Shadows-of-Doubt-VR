@@ -20,7 +20,7 @@ internal sealed class CaseBoardRTController
     // ahead (CaseBoard distance 2.3 m minus 0.15 m).
     private const float NavbarDistance = 2.15f;
 
-    // Legacy category widths for a 1920 px canvas, so each panel reads at the size it always has.
+    // Legacy category widths for the full screen width, so each panel reads at the size it always has.
     private const float PanelWorldWidth = 2.0f;
     private const float CaseBoardWorldWidth = 2.5f;
 
