@@ -399,6 +399,12 @@ public class VRCamera : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.End))
             TextGraphicDump.DumpAll(_managedCanvases);
 
+        // F9: diagnostic dump — logs every Canvas in the scene (not just managed ones), so an
+        // unfamiliar canvas (e.g. Inventory, or whichever WindowCanvas-nested Note/Notebook is
+        // currently open) can be identified by name/category/nesting instead of guessed at.
+        if (Input.GetKeyDown(KeyCode.F9))
+            CanvasDump.DumpAll();
+
         if (!_stereoReady)
         {
             // Waiting for session to reach SYNCHRONIZED (state ≥ 3).
