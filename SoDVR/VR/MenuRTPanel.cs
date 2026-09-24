@@ -164,8 +164,12 @@ internal sealed class MenuRTPanel
     /// panel texture is current before anything samples it this frame.</summary>
     public void Render()
     {
-        if (_projectorCam == null || !IsShowing) return;
-        try { _projectorCam.Render(); }
+        if (_projectorCam == null || _rt == null || !IsShowing) return;
+        try
+        {
+            _projectorCam.Render();
+            _rt.GenerateMips();
+        }
         catch (Exception ex) { Log.LogWarning($"[MenuRTPanel] Render: {ex.Message}"); }
     }
 
@@ -260,8 +264,7 @@ internal sealed class MenuRTPanel
         int rtW = Mathf.Clamp(Mathf.RoundToInt(sd.x > 0f ? sd.x : 1920f), 64, 4096);
         int rtH = Mathf.Clamp(Mathf.RoundToInt(sd.y > 0f ? sd.y : 1080f), 64, 4096);
 
-        _rt = new RenderTexture(rtW, rtH, 0, RenderTextureFormat.ARGB32) { name = "SoDVR_MenuRTPanel_RT" };
-        _rt.Create();
+        _rt = CameraRig.CreateRTPanelTexture(rtW, rtH, "SoDVR_MenuRTPanel_RT");
 
         int canvasLayer = canvas.gameObject.layer;
         _projectorCam = CameraRig.SetupRTPanelProjectorCamera("MenuRTPanel", canvasLayer);

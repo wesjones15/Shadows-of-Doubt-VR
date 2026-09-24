@@ -185,8 +185,12 @@ internal sealed class TooltipRTPanel
 
     public void Render()
     {
-        if (_projectorCam == null || !_owned) return;
-        try { _projectorCam.Render(); }
+        if (_projectorCam == null || _rt == null || !_owned) return;
+        try
+        {
+            _projectorCam.Render();
+            _rt.GenerateMips();
+        }
         catch (Exception ex) { Log.LogWarning($"[TooltipRTPanel] Render: {ex.Message}"); }
     }
 
@@ -297,8 +301,7 @@ internal sealed class TooltipRTPanel
         if (_rt == null || _rt.width != rtW || _rt.height != rtH)
         {
             var oldRt = _rt;
-            _rt = new RenderTexture(rtW, rtH, 0, RenderTextureFormat.ARGB32) { name = "SoDVR_TooltipRTPanel_RT" };
-            _rt.Create();
+            _rt = CameraRig.CreateRTPanelTexture(rtW, rtH, "SoDVR_TooltipRTPanel_RT");
             if (_projectorCam != null) _projectorCam.targetTexture = _rt;
 
             if (_quadGO == null)
