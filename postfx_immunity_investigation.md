@@ -23,6 +23,70 @@ history and need to stay separate:
    quad displaying a texture), does *that displayed object* also escape the *main* camera's post
    stack? This is the hard, still-unsolved part, and is what this whole document is about.
 
+## Why this is hard here specifically
+
+Post-FX-exempt UI is a solved problem in plenty of HDRP projects. It's been unusually hard in *this*
+project for reasons specific to this codebase's situation, not because the underlying idea is exotic:
+
+- **HDRP itself is a large, version-specific, interlocking system**, and this mod targets whatever
+  HDRP package version this game happens to ship with — not a version this project chose or can
+  upgrade. General HDRP knowledge (tutorials, forum answers, even this document's author's own
+  starting assumptions) has repeatedly turned out to be *wrong for this specific version*: the
+  assumption that `HDRenderPipelineAsset` holds default `FrameSettings` (true in many HDRP versions,
+  documented in plenty of places) is simply false here — this game's version moved that onto a
+  separate `HDRenderPipelineGlobalSettings` object instead, discovered only by inspecting the actual
+  shipped interop DLL. Nothing about HDRP internals in this project can be trusted from memory or
+  general docs without checking it against this specific build.
+
+- **No source, no debugger, no Editor.** This is a compiled BepInEx/IL2CPP mod reflecting into
+  another compiled, interop-generated game assembly — there's no HDRP source to read, no breakpoint
+  to set inside its render pipeline, no Inspector checkbox to flip. Every question this document
+  answers ("does this bit exist," "what does this method actually return," "what type does this
+  property expect") had to be answered by decompiling the shipped interop DLL's metadata (the
+  `.pecheck` tool built for exactly this) and cross-checking against in-headset behavior — there's no
+  faster or more direct way to know.
+
+- **IL2CPP interop has its own failure modes layered on top of HDRP's own complexity.**
+  Ref-returning getters/methods silently drop writes made through them (confirmed at least twice,
+  different APIs, same shape) — and this session found that *reads* through the same shape can be
+  unreliable too, not just writes. Any HDRP API discovered to be `ref`-returning has to be treated as
+  suspect on both sides, not just when writing to it.
+
+- **This is a shipped game's baked HDRP asset, not a project this mod controls from scratch.**
+  Features like `CustomPassVolume` support (`supportCustomPass`) and the native after-post-process
+  queue (`FrameSettingsField.AfterPostprocess`) ship *off* by default, because the base game never
+  uses them — the mod has to discover that they're off, discover where the actual toggle lives (not
+  always where documentation says), and flip it at runtime on an asset instance it didn't create.
+
+- **No compiled-shader authoring pipeline exists in this repo.** Unity doesn't support compiling new
+  shaders from source text at runtime in a built player — shaders have to be authored in a Unity
+  Editor project and shipped as an AssetBundle. This repo has never needed one before (confirmed —
+  no `.shader` files, no `Assets/` folder, no AssetBundle anywhere in the tree) — so anything that
+  needs its own purpose-built shader (a `LightMode`-tagged shader for `AfterPostProcess` filtering,
+  say) means standing up an entire new build artifact, not a small code change. This pushed 4b's
+  investigation toward guessing at a *stock* shader's undocumented property/tag expectations instead
+  — which is what caused the one crash in this document (§4b.6): fiddling with an unfamiliar
+  compiled shader's keyword/property state from outside, with no way to inspect what it actually
+  expects beyond runtime reflection.
+
+- **The VR eye cameras don't render the normal way.** Rather than being enabled and left to Unity's
+  own per-frame SRP scheduling, they're `cam.enabled = false` and manually `Camera.Render()`-called
+  each frame to feed the OpenXR swapchain. This is confirmed to rule out camera stacking entirely
+  (Era 2e — undefined behavior, not a configuration bug), and raises a standing, only partially
+  resolved question for everything else in this document: does every HDRP render-pipeline stage
+  execute identically for a manually-invoked camera as it would for a normally-scheduled one? The
+  magenta test (§4b.4) shows *some* `AfterPostProcess` content draws correctly through this manual
+  invocation, so it's not a blanket "manual cameras skip this stage" problem — but it means every
+  finding in this document is scoped to *this mod's specific camera-invocation pattern* and may not
+  transfer to how HDRP behaves in a conventionally-driven project, including ones this document's
+  author might otherwise generalize from.
+
+- **No spare Unity layer.** A common trick for isolating UI from the main render pass (put it on its
+  own layer, exclude that layer from the main camera, draw it separately) is unavailable — all 32
+  layers (0–31) are already named and claimed by the base game, confirmed via a full audit. Anything
+  that would normally lean on layer separation has to use shader-tag or render-queue-based filtering
+  instead, both of which are harder to reverse-engineer without source.
+
 ---
 
 ## Era 0 — the original problem (base mod, pre-project)
