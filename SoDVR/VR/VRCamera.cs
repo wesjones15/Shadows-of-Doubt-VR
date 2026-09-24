@@ -61,6 +61,7 @@ public class VRCamera : MonoBehaviour
     private readonly CanvasMaterialPatcher _materialPatcher = new();
     private readonly CanvasPlacement _canvasPlacement = new();
     private readonly RTPanelInput _rtPanelInput = new();
+    private readonly RTPanelGrip _rtPanelGrip = new();
     private MenuRTPanel _menuRTPanel = null!;
     private TooltipRTPanel _tooltipRTPanel = null!;
     private CaseBoardRTController _caseBoardRT = null!;
@@ -1294,7 +1295,10 @@ public class VRCamera : MonoBehaviour
             _locomotion.MinimapInBBtnContext, _minimapBBtnLocalOffset, _minimapBBtnLocalRot, _minimapBBtnHasOffset);
 
         // Grip-drag: move CaseBoard canvases with the grip button.
-        _caseBoard.UpdateGripDrag();
+        bool rtOwnsGrip = false;
+        try { rtOwnsGrip = _rtPanelGrip.Update(_rightControllerGO); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] RTPanelGrip.Update: {ex.Message}"); }
+        _caseBoard.UpdateGripDrag(rtOwnsGrip);
         (_minimapBBtnLocalOffset, _minimapBBtnLocalRot, _minimapBBtnHasOffset) = _caseBoard.MinimapBBtnResult;
 
         _controllerInteraction.UpdateLeftInteractMarker(_leftControllerGO, _menuRTPanel.Canvas, _gameCamRef,

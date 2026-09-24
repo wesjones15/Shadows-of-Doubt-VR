@@ -268,7 +268,9 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     }
 
     // ── Grip-drag (whole canvas + nested note relocate) ─────────────────────────────────────
-    public void UpdateGripDrag()
+    /// <param name="gripOwnedByRTPanel">RTPanelGrip grabbed an RT panel with this press (or is
+    /// mid-drag) — don't start a legacy grab on the same press.</param>
+    public void UpdateGripDrag(bool gripOwnedByRTPanel)
     {
         bool gripNow = false;
         try { OpenXRManager.GetGripState(true, out gripNow); } catch { }
@@ -334,7 +336,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             }
         }
         bool gripDragAllowed = caseBoardOpen || dialogNowActive || contextMenuNowActive || anyInteractiveVisible;
-        if (gripPressed && _gripDragCanvas == null && !_gripDragIsNested && _ctxRightControllerGO != null && gripDragAllowed)
+        if (gripPressed && !gripOwnedByRTPanel && _gripDragCanvas == null && !_gripDragIsNested && _ctxRightControllerGO != null && gripDragAllowed)
         {
             Vector3 ctrlPos = _ctxRightControllerGO.transform.position;
             Vector3 ctrlFwd = _ctxRightControllerGO.transform.forward;
