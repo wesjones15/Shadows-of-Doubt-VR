@@ -272,6 +272,8 @@ public class VRCamera : MonoBehaviour
         PostProcessingOverride.Tick();
         _voidRoom.UpdatePressAnyKeyClick(_gameCam == null);
 
+        CameraRig.PeriodicCheckFrameSettingsBits(_frameCount);
+
         // Detect scene changes and apply a grace period during which we skip
         // ScanAndConvertCanvases.  This prevents us from touching canvas/camera
         // components while SaveStateController is reconstructing the physics hierarchy.

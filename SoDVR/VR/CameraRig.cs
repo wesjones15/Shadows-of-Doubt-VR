@@ -368,6 +368,12 @@ internal static class CameraRig
 
             var fs = globalSettings.m_RenderingPathDefaultCameraFrameSettings;
             fs.SetEnabled(FrameSettingsField.CustomPass, true);
+            // Discovered via interop DLL inspection: HDRP's native queue-based "AfterPostProcess"
+            // rendering (HDRenderQueue.k_RenderQueue_AfterPostProcessOpaque/Transparent — a totally
+            // separate mechanism from CustomPassVolume) is gated by its OWN distinct FrameSettings
+            // bit, not CustomPass. Force both while we have the backing field open — cheap, and
+            // needed either way depending on which mechanism ends up being the real fix.
+            fs.SetEnabled(FrameSettingsField.AfterPostprocess, true);
             globalSettings.m_RenderingPathDefaultCameraFrameSettings = fs;
 
             var afterByMethod = globalSettings.GetDefaultFrameSettings(FrameSettingsRenderType.Camera);
@@ -375,9 +381,45 @@ internal static class CameraRig
             Log.LogInfo($"[CameraRig] Diagnostic: CustomPass AFTER write — via GetDefaultFrameSettings()=" +
                         $"{afterByMethod.IsEnabled(FrameSettingsField.CustomPass)}, via backing field=" +
                         $"{afterByField.IsEnabled(FrameSettingsField.CustomPass)}");
+            Log.LogInfo($"[CameraRig] Diagnostic: AfterPostprocess AFTER write — via GetDefaultFrameSettings()=" +
+                        $"{afterByMethod.IsEnabled(FrameSettingsField.AfterPostprocess)}, via backing field=" +
+                        $"{afterByField.IsEnabled(FrameSettingsField.AfterPostprocess)}");
         }
         catch (Exception ex) { Log.LogWarning($"[CameraRig] DiagnoseDefaultFrameSettingsCustomPass failed: {ex.Message}"); }
     }
+
+    /// <summary>
+    /// Periodic (not one-time) check of the same two bits, read only via the confirmed-reliable
+    /// backing-field path — logs whenever either differs from the last call. Exists to answer a
+    /// specific question raised by the PressAnyKey-vs-main-menu magenta smoke test result: does
+    /// something reset these bits across the scene transition between those two screens (both
+    /// still inside the void room, _gameCam == null the whole time), independent of anything about
+    /// a specific quad's shader/material? Correlate the frame number this logs against against
+    /// VRCamera's own "Scene changed (handle X→Y)" log line to see if they coincide.
+    /// </summary>
+    public static void PeriodicCheckFrameSettingsBits(int frameCount)
+    {
+        try
+        {
+            var globalSettings = HDRenderPipelineGlobalSettings.instance;
+            if (globalSettings == null) return;
+
+            var fs = globalSettings.m_RenderingPathDefaultCameraFrameSettings;
+            bool customPass = fs.IsEnabled(FrameSettingsField.CustomPass);
+            bool afterPost  = fs.IsEnabled(FrameSettingsField.AfterPostprocess);
+
+            if (customPass != s_lastLoggedCustomPass || afterPost != s_lastLoggedAfterPostprocess)
+            {
+                Log.LogInfo($"[CameraRig] Periodic: frame {frameCount} — CustomPass={customPass} (was {s_lastLoggedCustomPass}), " +
+                            $"AfterPostprocess={afterPost} (was {s_lastLoggedAfterPostprocess})");
+                s_lastLoggedCustomPass = customPass;
+                s_lastLoggedAfterPostprocess = afterPost;
+            }
+        }
+        catch (Exception ex) { Log.LogWarning($"[CameraRig] PeriodicCheckFrameSettingsBits failed: {ex.Message}"); }
+    }
+    private static bool s_lastLoggedCustomPass;
+    private static bool s_lastLoggedAfterPostprocess;
 
     /// <summary>
     /// Builds a manually-rendered, fully independent camera for an RT panel (MenuRTPanel,
