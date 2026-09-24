@@ -75,7 +75,7 @@ internal sealed class TooltipRTPanel
     public TooltipRTPanel(int quadLayer)
     {
         _quadLayer = quadLayer;
-        _pointer = new RTPanelPointer(quadLayer, "TooltipRTPanel");
+        _pointer = new RTPanelPointer("TooltipRTPanel");
     }
 
     public Canvas? Canvas => _canvas;
@@ -194,6 +194,7 @@ internal sealed class TooltipRTPanel
     {
         if (!IsInteractable || _quadMesh == null || _quadMaterial == null) return;
         overlay.AddPanel(_quadMesh, _quadGO!.transform.localToWorldMatrix, _quadMaterial);
+        _pointer.AppendOverlay(overlay);
     }
 
     public void UpdateInteraction(GameObject? rightControllerGO, GameObject? leftControllerGO,

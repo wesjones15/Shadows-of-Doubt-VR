@@ -56,7 +56,7 @@ internal sealed class MenuRTPanel
     public MenuRTPanel(int quadLayer)
     {
         _quadLayer = quadLayer;
-        _pointer = new RTPanelPointer(quadLayer, "MenuRTPanel");
+        _pointer = new RTPanelPointer("MenuRTPanel");
     }
 
     public Canvas? Canvas => _canvas;
@@ -173,6 +173,7 @@ internal sealed class MenuRTPanel
     {
         if (!IsInteractable || _quadMesh == null || _quadMaterial == null) return;
         overlay.AddPanel(_quadMesh, _quadGO!.transform.localToWorldMatrix, _quadMaterial);
+        _pointer.AppendOverlay(overlay);
     }
 
     /// <summary>

@@ -4,7 +4,6 @@ using BepInEx.Logging;
 using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
-using UnityEngine.Rendering;
 using UnityEngine.UI;
 
 namespace SoDVR.VR;
@@ -12,7 +11,8 @@ namespace SoDVR.VR;
 /// <summary>
 /// Reusable controller-ray interaction for an RT panel quad: a thin laser that only shows while
 /// actually aiming at the panel (its endpoint is the cursor — a separate on-panel cursor dot was
-/// tried and dropped; the laser's own tip is enough), hover-driven Button highlighting, and
+/// tried and dropped; the laser's own tip is enough; PostFXOverlayCompositor draws it, not a
+/// scene renderer, so it's immune to post-processing like the panel), hover-driven Button highlighting, and
 /// trigger-as-click. One instance is meant to be owned per RT panel (MenuRTPanel today; future RT
 /// panels — case board, popups — construct their own instance and Bind it to their own
 /// canvas/collider/RT once set up) rather than duplicating this logic per panel.
@@ -28,7 +28,6 @@ internal sealed class RTPanelPointer
     // at, not silently reset. Right by default each session.
     private static bool s_useRightController = true;
 
-    private readonly int _quadLayer;
     private readonly string _logTag;
 
     private Canvas? _canvas;
@@ -42,12 +41,14 @@ internal sealed class RTPanelPointer
     // specific), falling back to the root canvas bound via Bind().
     private readonly List<Canvas> _overlayCanvases = new();
 
-    private LineRenderer? _laserLine;
+    private bool _laserVisible;
+    private Vector3 _laserOrigin;
+    private Vector3 _laserEnd;
     private Selectable? _hoveredSelectable;
     private bool _prevRightTrigger;
     private bool _prevLeftTrigger;
 
-    public RTPanelPointer(int quadLayer, string logTag) { _quadLayer = quadLayer; _logTag = logTag; }
+    public RTPanelPointer(string logTag) { _logTag = logTag; }
 
     /// <summary>(Re)binds the panel this pointer aims at. Call whenever the panel's canvas,
     /// collider or RenderTexture change (normally once, right after the panel's own setup).</summary>
@@ -74,7 +75,7 @@ internal sealed class RTPanelPointer
     /// interactable (closed, or the owner otherwise wants interaction paused).</summary>
     public void Clear()
     {
-        if (_laserLine != null && _laserLine.enabled) _laserLine.enabled = false;
+        HideLaser();
         UpdateHover(null, null);
     }
 
@@ -239,58 +240,19 @@ internal sealed class RTPanelPointer
             ExecuteEvents.Execute(_hoveredSelectable.gameObject, ped, ExecuteEvents.pointerEnterHandler);
     }
 
-    private void EnsureLaser()
+    /// <summary>Hands this frame's laser (if showing) to the compositor, which draws it after HDRP's
+    /// post stack and on top of the panel it hits.</summary>
+    public void AppendOverlay(PostFXOverlayCompositor overlay)
     {
-        if (_laserLine != null) return;
-        var laserGO = new GameObject($"SoDVR_{_logTag}_Laser");
-        laserGO.layer = _quadLayer;
-        UnityEngine.Object.DontDestroyOnLoad(laserGO);
-        _laserLine = laserGO.AddComponent<LineRenderer>();
-        _laserLine.useWorldSpace = true;
-        _laserLine.positionCount = 2;
-        // Absolute thin-laser-pointer widths, not sized relative to the mod's original beam —
-        // ~2.5mm tapering to ~0.8mm, comparable to a real laser pointer's apparent width.
-        _laserLine.startWidth = 0.0025f;
-        _laserLine.endWidth = 0.0008f;
-        _laserLine.numCapVertices = 0;
-        _laserLine.numCornerVertices = 0;
-        _laserLine.shadowCastingMode = ShadowCastingMode.Off;
-        _laserLine.receiveShadows = false;
-        var shader = Shader.Find("HDRP/Unlit") ?? Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default");
-        if (shader != null)
-        {
-            var mat = new Material(shader) { name = $"SoDVR_{_logTag}_LaserMat" };
-            // NOT the mod's original laser's (0,4096,4096) — that value only exists to survive the
-            // main eye camera's auto-exposure at EV8-12 (dark scenes), but this camera's post stack
-            // still applies bloom on top, and at low EV (bright scenes, e.g. the void room the menu
-            // sits in) that same value blows out into a huge glowing halo instead of a thin line.
-            // There's no way to exempt this object from the eye camera's post-FX (that's the whole
-            // reason UI moved to RT panels; a laser can't — it has to exist in real 3D space, so it
-            // has to be drawn by the same camera as everything else). This is a tradeoff, not a fix:
-            // modest enough to stay a thin line under bloom, at the cost of being dimmer than the
-            // original in unusually dark rooms.
-            var color = new Color(0f, 4f, 4f, 1f);
-            mat.color = color;
-            try { mat.SetColor("_UnlitColor", color); } catch { }
-            try { mat.SetColor("_BaseColor", color); } catch { }
-            mat.renderQueue = 5000;
-            _laserLine.material = mat;
-        }
-        _laserLine.enabled = false;
+        if (_laserVisible) overlay.AddLaser(_laserOrigin, _laserEnd);
     }
 
     private void ShowLaser(Vector3 origin, Vector3 hitPoint)
     {
-        EnsureLaser();
-        if (_laserLine == null) return;
-        _laserLine.SetPosition(0, origin);
-        _laserLine.SetPosition(1, hitPoint);
-        if (!_laserLine.enabled) _laserLine.enabled = true;
+        _laserOrigin = origin;
+        _laserEnd = hitPoint;
+        _laserVisible = true;
     }
 
-    private void HideLaser()
-    {
-        if (_laserLine != null && _laserLine.enabled) _laserLine.enabled = false;
-    }
-
+    private void HideLaser() => _laserVisible = false;
 }
