@@ -290,12 +290,13 @@ internal static class CameraRig
     }
 
     /// <summary>
-    /// A plain world-space quad displaying an RT panel's RenderTexture — the same
-    /// CreatePrimitive(Quad) + UI/Default-shader pattern this codebase's aim-dot pool already uses.
-    /// Returns the quad, its own MeshCollider (for RTPanelPointer's ray-vs-quad hit test), and the
-    /// material (rarely needed by the caller, returned for completeness/future retexturing).
+    /// A world-space quad for an RT panel: its transform places the panel, its MeshCollider is
+    /// RTPanelPointer's ray-vs-quad hit test, and its mesh + UI/Default material are what
+    /// PostFXOverlayCompositor draws after HDRP. The MeshRenderer is disabled so the eye cameras
+    /// never draw it themselves (that's what put it under their post stack). The GameObject's
+    /// active state remains the panel's visibility flag.
     /// </summary>
-    public static (GameObject quad, Collider collider, Material material) CreateRTPanelQuad(
+    public static (GameObject quad, Collider collider, Material material, Mesh mesh) CreateRTPanelQuad(
         string logTag, int layer, RenderTexture rt)
     {
         var quadGO = GameObject.CreatePrimitive(PrimitiveType.Quad);
@@ -304,14 +305,16 @@ internal static class CameraRig
         UnityEngine.Object.DontDestroyOnLoad(quadGO);
 
         var collider = quadGO.GetComponent<Collider>();
+        var mesh = quadGO.GetComponent<MeshFilter>().sharedMesh;
 
         var mr = quadGO.GetComponent<MeshRenderer>();
         var shader = Shader.Find("UI/Default");
         var material = shader != null ? new Material(shader) : mr.material;
         material.mainTexture = rt;
         mr.material = material;
+        mr.enabled = false;
 
         quadGO.SetActive(false); // hidden until the owner places and shows it
-        return (quadGO, collider, material);
+        return (quadGO, collider, material, mesh);
     }
 }

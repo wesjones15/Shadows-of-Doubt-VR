@@ -64,6 +64,7 @@ internal sealed class TooltipRTPanel
     private GameObject? _quadGO;
     private Collider? _quadCollider;
     private Material? _quadMaterial;
+    private Mesh? _quadMesh;
 
     private bool _quadPlaced;
     private bool _owned;             // true while this panel has pulled TooltipCanvas out of the legacy pipeline
@@ -189,6 +190,12 @@ internal sealed class TooltipRTPanel
         catch (Exception ex) { Log.LogWarning($"[TooltipRTPanel] Render: {ex.Message}"); }
     }
 
+    public void AppendOverlay(PostFXOverlayCompositor overlay)
+    {
+        if (!IsInteractable || _quadMesh == null || _quadMaterial == null) return;
+        overlay.AddPanel(_quadMesh, _quadGO!.transform.localToWorldMatrix, _quadMaterial);
+    }
+
     public void UpdateInteraction(GameObject? rightControllerGO, GameObject? leftControllerGO,
         Dictionary<int, Canvas> managedCanvases, Dictionary<int, int> lastRescanFrame,
         Action requestForceScan, Action onSaveLoadButtonClicked)
@@ -294,7 +301,7 @@ internal sealed class TooltipRTPanel
             if (_projectorCam != null) _projectorCam.targetTexture = _rt;
 
             if (_quadGO == null)
-                (_quadGO, _quadCollider, _quadMaterial) = CameraRig.CreateRTPanelQuad("TooltipRTPanel", _quadLayer, _rt);
+                (_quadGO, _quadCollider, _quadMaterial, _quadMesh) = CameraRig.CreateRTPanelQuad("TooltipRTPanel", _quadLayer, _rt);
             else if (_quadMaterial != null)
                 _quadMaterial.mainTexture = _rt;
 

@@ -17,7 +17,7 @@ namespace SoDVR.VR;
 ///
 /// Frame sequence (per Unity frame):
 ///   Update():     xrPollEvent → [if stereo ready] xrWaitFrame → xrBeginFrame → xrLocateViews → apply poses
-///   LateUpdate(): _leftCam.Render() → _rightCam.Render() → D3D11 copy → xrEndFrame
+///   LateUpdate(): _leftCam.Render() → _rightCam.Render() → post-FX overlay → D3D11 copy → xrEndFrame
 ///
 /// Before stereo is ready, Update() submits empty frames and waits for the session
 /// to reach XR_SESSION_STATE_SYNCHRONIZED (state ≥ 3).  That state transition signals
@@ -62,6 +62,7 @@ public class VRCamera : MonoBehaviour
     private readonly CanvasPlacement _canvasPlacement = new();
     private readonly MenuRTPanel _menuRTPanel = new(UILayer);
     private readonly TooltipRTPanel _tooltipRTPanel = new(UILayer);
+    private readonly PostFXOverlayCompositor _overlay = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
     // The swapchain copy still runs every frame, so head tracking stays smooth via ATW.
@@ -1189,8 +1190,6 @@ public class VRCamera : MonoBehaviour
                 // Viewport at minimum zoom (applied once after MapController is ready).
                 _canvasPlacement.UpdateMinimapZoom(_materialPatcher);
 
-                // RT panels render first so their textures are current before the eye cameras
-                // render the quads sampling them this frame.
                 try { _menuRTPanel.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.Render: {ex.Message}"); }
                 try { _tooltipRTPanel.Render(); }
@@ -1199,6 +1198,16 @@ public class VRCamera : MonoBehaviour
                 // No GL.invertCulling — HDRP flipYMode handles both Y-flip and culling.
                 _rightCam.Render();
                 _leftCam.Render();
+
+                try
+                {
+                    _overlay.BeginFrame();
+                    _menuRTPanel.AppendOverlay(_overlay);
+                    _tooltipRTPanel.AppendOverlay(_overlay);
+                    _overlay.Composite(_rightCam, _rightRT);
+                    _overlay.Composite(_leftCam, _leftRT);
+                }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] PostFXOverlay: {ex.Message}"); }
             }
 
             bool leftOk = CameraRig.CopyEye("L", OpenXRManager.LeftSwapchain, OpenXRManager.LeftSwapchainImages, _leftRT, _frameCount, out uint leftIdx);

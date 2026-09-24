@@ -8,9 +8,9 @@ namespace SoDVR.VR;
 
 /// <summary>
 /// Owns MenuCanvas end to end: renders it via an independent, non-stacked projector camera into
-/// its own RenderTexture, and displays that texture on a plain world-space quad. The texture's
-/// content is free of scene post-processing (the projector camera has none); the quad itself is
-/// still drawn by the eye cameras and inherits their post stack.
+/// its own RenderTexture, and displays that texture on a world-space quad that
+/// PostFXOverlayCompositor draws after HDRP's post stack — immune to scene post-processing both in
+/// the texture's content (the projector camera has none) and in how it's displayed.
 ///
 /// MenuCanvas is the pause menu too — the game reuses one Canvas for both (see v1_findings.md §2),
 /// so this class owns both states; there is no separate "PauseCanvas" to migrate later.
@@ -45,6 +45,7 @@ internal sealed class MenuRTPanel
     private GameObject? _quadGO;
     private Collider? _quadCollider;
     private Material? _quadMaterial;
+    private Mesh? _quadMesh;
 
     private int _settingsBtnId;
     private bool _quadPlaced;
@@ -168,6 +169,12 @@ internal sealed class MenuRTPanel
         catch (Exception ex) { Log.LogWarning($"[MenuRTPanel] Render: {ex.Message}"); }
     }
 
+    public void AppendOverlay(PostFXOverlayCompositor overlay)
+    {
+        if (!IsInteractable || _quadMesh == null || _quadMaterial == null) return;
+        overlay.AddPanel(_quadMesh, _quadGO!.transform.localToWorldMatrix, _quadMaterial);
+    }
+
     /// <summary>
     /// Delegates laser/cursor/hover/click to RTPanelPointer, injecting the two pieces of behavior
     /// that are specific to MenuCanvas rather than generic to any RT panel: intercepting the
@@ -271,7 +278,7 @@ internal sealed class MenuRTPanel
         }
         catch (Exception ex) { Log.LogWarning($"[MenuRTPanel] GraphicRaycaster setup: {ex.Message}"); }
 
-        (_quadGO, _quadCollider, _quadMaterial) = CameraRig.CreateRTPanelQuad("MenuRTPanel", _quadLayer, _rt);
+        (_quadGO, _quadCollider, _quadMaterial, _quadMesh) = CameraRig.CreateRTPanelQuad("MenuRTPanel", _quadLayer, _rt);
 
         float worldH = PanelWorldWidth * ((float)rtH / rtW);
         _quadGO.transform.localScale = new Vector3(PanelWorldWidth, worldH, 1f);
