@@ -347,4 +347,31 @@ internal static class CameraRig
         quadGO.SetActive(false); // hidden until the owner places and shows it
         return (quadGO, collider, material, mesh);
     }
+
+    /// <summary>
+    /// Like <see cref="CreateRTPanelQuad"/>, but the quad draws only a sub-rectangle of the panel's
+    /// texture: it gets its own mesh copy whose UVs <see cref="SetRTPanelViewUVs"/> rewrites. The
+    /// collider keeps the primitive's geometry, so hit-testing is unchanged.
+    /// </summary>
+    public static (GameObject quad, Collider collider, Material material, Mesh mesh) CreateRTPanelViewQuad(
+        string logTag, int layer, RenderTexture rt)
+    {
+        var (quadGO, collider, material, primitiveMesh) = CreateRTPanelQuad(logTag, layer, rt);
+        var viewMesh = UnityEngine.Object.Instantiate(primitiveMesh);
+        viewMesh.name = $"SoDVR_{logTag}_ViewMesh";
+        quadGO.GetComponent<MeshFilter>().sharedMesh = viewMesh;
+        return (quadGO, collider, material, viewMesh);
+    }
+
+    /// <summary>Maps the quad's full 0..1 UV range onto <paramref name="uvRect"/>, derived from the
+    /// mesh's own vertices (a Unity Quad spans -0.5..0.5) rather than assuming their order.</summary>
+    public static void SetRTPanelViewUVs(Mesh mesh, Rect uvRect)
+    {
+        var verts = mesh.vertices;
+        var uv = new Vector2[verts.Length];
+        for (int i = 0; i < verts.Length; i++)
+            uv[i] = new Vector2(uvRect.xMin + (verts[i].x + 0.5f) * uvRect.width,
+                                uvRect.yMin + (verts[i].y + 0.5f) * uvRect.height);
+        mesh.uv = uv;
+    }
 }

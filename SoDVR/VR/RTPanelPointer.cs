@@ -62,6 +62,7 @@ internal sealed class RTPanelPointer
     private Canvas? _canvas;
     private Collider? _quadCollider;
     private RenderTexture? _rt;
+    private Rect _pixelRect;
 
     // Nested content canvases (e.g. a dialog box nested inside a bigger panel canvas) that also
     // need hit-testing — Unity's GraphicRaycaster only resolves Graphics belonging to its OWN
@@ -99,8 +100,13 @@ internal sealed class RTPanelPointer
         _canvas = canvas;
         _quadCollider = quadCollider;
         _rt = rt;
+        _pixelRect = new Rect(0f, 0f, rt.width, rt.height);
         _overlayCanvases.Clear();
     }
+
+    /// <summary>The part of the RT (in RT pixels, bottom-left origin) the quad shows — for a
+    /// view that draws only a sub-rectangle of its panel's texture.</summary>
+    public void SetPixelRect(Rect pixelRect) => _pixelRect = pixelRect;
 
     /// <summary>Registers a nested content canvas as also hit-testable. Safe to call repeatedly.</summary>
     public void AddOverlayCanvas(Canvas canvas)
@@ -386,13 +392,13 @@ internal sealed class RTPanelPointer
         return true;
     }
 
-    /// <summary>World point on the quad → RT pixel. A Unity Quad spans -0.5..0.5 locally with UV
-    /// 0..1, so this matches <c>RaycastHit.textureCoord</c> and also works for off-quad plane
-    /// points during a drag.</summary>
+    /// <summary>World point on the quad → RT pixel. A Unity Quad spans -0.5..0.5 locally, mapped
+    /// onto the pixel rect the quad shows; also works for off-quad plane points during a drag.</summary>
     private Vector2 PixelAt(Vector3 worldPoint)
     {
         var local = _quadCollider!.transform.InverseTransformPoint(worldPoint);
-        return new Vector2((local.x + 0.5f) * _rt!.width, (local.y + 0.5f) * _rt.height);
+        return new Vector2(_pixelRect.xMin + (local.x + 0.5f) * _pixelRect.width,
+                           _pixelRect.yMin + (local.y + 0.5f) * _pixelRect.height);
     }
 
     private void ResetPress()
