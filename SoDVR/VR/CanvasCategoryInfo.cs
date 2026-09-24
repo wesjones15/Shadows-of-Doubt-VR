@@ -71,8 +71,6 @@ internal static class CanvasCategoryInfo
         // CaseBoard — recentres on open, remembers relative layout, grip-relocatable
         ["CaseCanvas"]                = CanvasCategory.CaseBoard,
         ["caseCanvas"]                = CanvasCategory.CaseBoard,
-        ["BioDisplayCanvas"]          = CanvasCategory.CaseBoard,
-        ["LocationDetailsCanvas"]     = CanvasCategory.CaseBoard,
 
         // Panel — recentres on activate, interactable, behind Menu
         ["contentCanvas"]             = CanvasCategory.Panel,
@@ -82,7 +80,6 @@ internal static class CanvasCategoryInfo
         ["mapLayerCanvas"]            = CanvasCategory.Panel,
         ["PrototypeBuilderCanvas"]    = CanvasCategory.Panel,
         ["ControlsDisplayCanvas"]     = CanvasCategory.Ignored,  // VR has own controls; keyboard hints block aim dot
-        ["UpgradesDisplayCanvas"]     = CanvasCategory.Panel,
 
         // Tooltip — tracks cursor depth, repositions every frame
         ["TooltipCanvas"]             = CanvasCategory.Tooltip,

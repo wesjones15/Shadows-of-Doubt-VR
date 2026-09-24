@@ -254,7 +254,7 @@ public class VRCamera : MonoBehaviour
         OpenXRManager.StopFrameThread();
         _menuRTPanel = new MenuRTPanel(UILayer, _rtPanelInput, OnSaveLoadButtonClicked);
         _tooltipRTPanel = new TooltipRTPanel(UILayer, _rtPanelInput, OnSaveLoadButtonClicked);
-        _caseBoardRT = new CaseBoardRTController(UILayer, _rtPanelInput);
+        _caseBoardRT = new CaseBoardRTController(UILayer, _rtPanelInput, _rtPanelGrip);
         Log.LogInfo("[VRCamera] Awake — polling for SYNCHRONIZED state before swapchain setup.");
     }
 

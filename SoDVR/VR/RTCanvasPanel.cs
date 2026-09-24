@@ -139,32 +139,56 @@ internal sealed class RTCanvasPanel
         return Rect.MinMaxRect(xMin, yMin, xMax, yMax);
     }
 
-    /// <summary>Union of <see cref="PixelRectOf"/> over <paramref name="parent"/>'s active
-    /// children, grown by <paramref name="marginPixels"/> — the rect a view needs to show whatever
-    /// content is currently up, including content the game spawns as a new child (a dropdown
-    /// list, say). Rect.zero when nothing with a size is active.</summary>
-    public Rect PixelRectOfActiveChildren(Transform parent, float marginPixels)
+    /// <summary>
+    /// The rect (RT pixels) covering every graphic that is actually visible on the canvas right
+    /// now, grown by <paramref name="marginPixels"/>, plus how many graphics contributed. Visible
+    /// means active, enabled and not faded out by its own colour or any CanvasGroup; each graphic's
+    /// rect is clipped by its Mask/RectMask2D ancestors so scrolled-away list content doesn't grow
+    /// the rect into empty (black) texture. Content the game spawns later (a dropdown list, say)
+    /// is picked up automatically.
+    /// </summary>
+    public Rect ContentPixelRect(float marginPixels, out int graphicCount)
     {
-        if (Texture == null) return Rect.zero;
-        bool any = false;
+        graphicCount = 0;
+        if (Canvas == null || Texture == null) return Rect.zero;
+
         Rect union = default;
-        for (int i = 0; i < parent.childCount; i++)
+        var root = Canvas.transform;
+        foreach (var g in Canvas.GetComponentsInChildren<Graphic>(false))
         {
-            var child = parent.GetChild(i);
-            if (child == null || !child.gameObject.activeSelf) continue;
-            var rt = child.GetComponent<RectTransform>();
-            if (rt == null) continue;
-            var r = PixelRectOf(rt);
+            if (g == null || !g.enabled || !IsVisiblyDrawn(g)) continue;
+            var r = PixelRectOf(g.rectTransform);
+            for (var t = g.transform.parent; t != null && t != root && r.width >= 1f && r.height >= 1f; t = t.parent)
+            {
+                if (!ClipsChildren(t)) continue;
+                var clip = PixelRectOf(t.GetComponent<RectTransform>());
+                r = Rect.MinMaxRect(Mathf.Max(r.xMin, clip.xMin), Mathf.Max(r.yMin, clip.yMin),
+                                    Mathf.Min(r.xMax, clip.xMax), Mathf.Min(r.yMax, clip.yMax));
+            }
             if (r.width < 1f || r.height < 1f) continue;
-            union = any ? Rect.MinMaxRect(Mathf.Min(union.xMin, r.xMin), Mathf.Min(union.yMin, r.yMin),
-                                          Mathf.Max(union.xMax, r.xMax), Mathf.Max(union.yMax, r.yMax))
-                        : r;
-            any = true;
+            union = graphicCount == 0 ? r
+                : Rect.MinMaxRect(Mathf.Min(union.xMin, r.xMin), Mathf.Min(union.yMin, r.yMin),
+                                  Mathf.Max(union.xMax, r.xMax), Mathf.Max(union.yMax, r.yMax));
+            graphicCount++;
         }
-        if (!any) return Rect.zero;
+        if (graphicCount == 0) return Rect.zero;
         return Rect.MinMaxRect(
             Mathf.Max(0f, union.xMin - marginPixels), Mathf.Max(0f, union.yMin - marginPixels),
             Mathf.Min(Texture.width, union.xMax + marginPixels), Mathf.Min(Texture.height, union.yMax + marginPixels));
+    }
+
+    private static bool IsVisiblyDrawn(Graphic g)
+    {
+        try { return g.color.a * g.canvasRenderer.GetInheritedAlpha() > 0.01f; }
+        catch { return g.color.a > 0.01f; }
+    }
+
+    private static bool ClipsChildren(Transform t)
+    {
+        var mask = t.GetComponent<Mask>();
+        if (mask != null && mask.enabled) return true;
+        var rectMask = t.GetComponent<RectMask2D>();
+        return rectMask != null && rectMask.enabled;
     }
 
     /// <summary>The canvas is up and not faded out: active, enabled, and no CanvasGroup on it or

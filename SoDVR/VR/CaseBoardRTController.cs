@@ -1,4 +1,3 @@
-using System;
 using BepInEx.Logging;
 using UnityEngine;
 
@@ -17,64 +16,66 @@ internal sealed class CaseBoardRTController
 {
     private static ManualLogSource Log => Plugin.Log;
 
-    private const string ActionPanelCanvasName = "ActionPanelCanvas";
-    private const int DiscoveryRetryFrames = 90;
-
-    // Legacy layout, kept so the board opens where and how big it always has: the navbar canvas
-    // centre 2.15 m ahead (CaseBoard distance 2.3 m minus 0.15 m), at the Panel category's 2.0 m
-    // width for a 1920 px canvas.
+    // Legacy layout, kept so the board opens where it always has: the navbar canvas centre 2.15 m
+    // ahead (CaseBoard distance 2.3 m minus 0.15 m).
     private const float NavbarDistance = 2.15f;
+
+    // Legacy category widths for a 1920 px canvas, so each panel reads at the size it always has.
     private const float PanelWorldWidth = 2.0f;
+    private const float CaseBoardWorldWidth = 2.5f;
 
-    // Keeps the navbar view from clipping anti-aliased edges and drop shadows at its content bounds.
-    private const float NavbarMarginPixels = 8f;
+    // Content panels sit in front of the navbar (and the corkboard 0.15 m behind it), matching
+    // the legacy front-to-back order.
+    private const float ContentPanelDistanceInFront = 0.15f;
 
-    private readonly RTCanvasPanel _actionPanel;
+    private readonly CaseBoardPanel _navbar;
+    private readonly CaseBoardPanel[] _panels;
     private readonly Transform _anchor;
-    private RTPanelView? _navbarView;
-    private Canvas? _actionPanelCanvas;
-    private int _discoveryCooldown;
     private bool _wasOpen;
     private bool _anchorPlaced;
+    private int _openedFrame = -1;
+    // Set whenever the anchor moves (open, F8); consumed by the next Tick, since F8 is handled
+    // after this frame's Tick has already run.
+    private bool _relayoutPending;
 
-    public CaseBoardRTController(int quadLayer, RTPanelInput input)
+    public CaseBoardRTController(int quadLayer, RTPanelInput input, RTPanelGrip grip)
     {
-        _actionPanel = new RTCanvasPanel("CaseBoardNavbar", quadLayer, input);
+        _navbar = new CaseBoardPanel("ActionPanelCanvas", PanelWorldWidth, 0f, draggable: false, quadLayer, input, grip);
+        _panels = new[]
+        {
+            _navbar,
+            new CaseBoardPanel("BioDisplayCanvas", CaseBoardWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip),
+            new CaseBoardPanel("LocationDetailsCanvas", CaseBoardWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip),
+            new CaseBoardPanel("UpgradesDisplayCanvas", PanelWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip),
+        };
+
         var anchorGO = new GameObject("SoDVR_CaseBoardAnchor");
-        UnityEngine.Object.DontDestroyOnLoad(anchorGO);
+        Object.DontDestroyOnLoad(anchorGO);
         _anchor = anchorGO.transform;
     }
 
     /// <summary>True while the case board is open.</summary>
-    public bool IsOpen => _actionPanelCanvas != null && _actionPanelCanvas.gameObject.activeInHierarchy;
+    public bool IsOpen => _navbar.Canvas != null && _navbar.Canvas.gameObject.activeInHierarchy;
 
     /// <summary>True only during the frame the board opened (after the anchor was re-placed).</summary>
     public bool JustOpened => _openedFrame == Time.frameCount;
-    private int _openedFrame = -1;
 
     /// <summary>Where the board is laid out: ActionPanelCanvas's centre and facing. Valid once the
     /// board has opened at least once.</summary>
     public Transform Anchor => _anchor;
     public bool AnchorPlaced => _anchorPlaced;
 
-    /// <summary>Per-Update: discovery/rediscovery, board-open edge, anchor capture, navbar view.
-    /// Skipped by the caller during the post-scene-load grace period.</summary>
+    /// <summary>Per-Update: board-open edge, anchor capture, every panel's discovery/visibility/
+    /// layout. Skipped by the caller during the post-scene-load grace period.</summary>
     public void Tick(Camera? leftCam)
     {
-        if (!_actionPanel.IsAttached)
-        {
-            if (_actionPanelCanvas != null || _navbarView != null) Teardown();
-            if (--_discoveryCooldown > 0) return;
-            _discoveryCooldown = DiscoveryRetryFrames;
-            TryDiscover();
-            return;
-        }
-
         bool open = IsOpen;
         if (open && !_wasOpen && leftCam != null) PlaceAnchor(leftCam);
         _wasOpen = open;
 
-        UpdateNavbarView();
+        bool relayout = _relayoutPending;
+        _relayoutPending = false;
+        foreach (var panel in _panels) panel.Tick(open, relayout, _anchor);
     }
 
     /// <summary>F8: re-place the board in front of the current head pose.</summary>
@@ -83,26 +84,14 @@ internal sealed class CaseBoardRTController
         if (IsOpen && leftCam != null) PlaceAnchor(leftCam);
     }
 
-    public void Render() => _actionPanel.Render();
-
-    public void AppendOverlay(PostFXOverlayCompositor overlay) => _actionPanel.AppendOverlay(overlay);
-
-    private void UpdateNavbarView()
+    public void Render()
     {
-        if (_navbarView == null || _actionPanelCanvas == null) return;
+        foreach (var panel in _panels) panel.Render();
+    }
 
-        bool showing = IsOpen && RTCanvasPanel.IsShowing(_actionPanelCanvas);
-        if (showing)
-        {
-            var rect = _actionPanel.PixelRectOfActiveChildren(_actionPanelCanvas.transform, NavbarMarginPixels);
-            if (rect.width < 1f || rect.height < 1f) showing = false;
-            else
-            {
-                _navbarView.SetPixelRect(rect);
-                _navbarView.SetCanvasPose(_anchor.position, _anchor.rotation);
-            }
-        }
-        _navbarView.Visible = showing && _anchorPlaced;
+    public void AppendOverlay(PostFXOverlayCompositor overlay)
+    {
+        foreach (var panel in _panels) panel.AppendOverlay(overlay);
     }
 
     private void PlaceAnchor(Camera leftCam)
@@ -112,41 +101,7 @@ internal sealed class CaseBoardRTController
         _anchor.rotation = yawOnly;
         _anchorPlaced = true;
         _openedFrame = Time.frameCount;
+        _relayoutPending = true;
         Log.LogInfo($"[CaseBoardRT] Board anchor placed at dist={NavbarDistance:F2}m yaw={yawOnly.eulerAngles.y:F1}°");
-    }
-
-    private void TryDiscover()
-    {
-        Canvas[] all;
-        try { all = Resources.FindObjectsOfTypeAll<Canvas>(); }
-        catch (Exception ex) { Log.LogWarning($"[CaseBoardRT] Discovery scan threw: {ex.Message}"); return; }
-
-        foreach (var canvas in all)
-        {
-            if (canvas == null || canvas.gameObject.name != ActionPanelCanvasName) continue;
-            try
-            {
-                _actionPanel.Attach(canvas, PanelWorldWidth);
-                _navbarView = _actionPanel.CreateView("Navbar");
-                _actionPanelCanvas = canvas;
-                _wasOpen = false;
-                Log.LogInfo("[CaseBoardRT] ActionPanelCanvas discovered and converted to an RT panel.");
-            }
-            catch (Exception ex)
-            {
-                Log.LogWarning($"[CaseBoardRT] ActionPanelCanvas setup failed: {ex.Message}");
-                Teardown();
-            }
-            return;
-        }
-    }
-
-    private void Teardown()
-    {
-        _actionPanel.Detach();
-        _navbarView = null;
-        _actionPanelCanvas = null;
-        _wasOpen = false;
-        Log.LogInfo("[CaseBoardRT] ActionPanelCanvas gone (scene reload?) — RT panel torn down, will rediscover.");
     }
 }
