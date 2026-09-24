@@ -170,8 +170,9 @@ No structural "parent" to start at (see §0) — sequenced by isolation and comp
 1. **`ActionPanelCanvas`** — simplest, proves out grip-drag retargeted onto an RT quad's transform
    on the lowest-risk surface (it's the anchor, not itself draggable).
 2. **`BioDisplayCanvas`, `LocationDetailsCanvas`, `UpgradesDisplayCanvas`** — zero special-casing,
-   same template as `MenuRTPanel`, low risk. Also covers Inventory content (§4) — it lives inside
-   `BioDisplayCanvas`, not a separate canvas.
+   same template as `MenuRTPanel`, low risk. (Inventory is a real, separate interactive panel per
+   §4 — not covered here; its actual canvas name is still unidentified, so it isn't placed in this
+   sequence yet.)
 3. **`WindowCanvas`'s nested windows (`Note` + Notebook)** — bigger lift: needs the new
    per-instance dynamic-RT-panel pattern (§1.3), plus verified close-button routing. Can ship
    *before* `CaseCanvas` itself converts, since the legacy corkboard can just be hooked to spawn an
@@ -195,21 +196,21 @@ failure mode.
 Six F9 captures were taken across different case-board states (933-939 `Canvas` components each).
 Findings:
 
-- **Does `Inventory` have any VR-canvas presence at all? Resolved — there's no separate canvas
-  because there's no separate screen.** No name matching `Inventory`/`Backpack` ever appears in any
-  of the six F9 captures, but a `CanvasMaterialPatcher` graphic-queue log from earlier in the same
-  session (`LogOutput.log:402`, `QueueMap 'BioDisplayCanvas' (50)`) lists `BioDisplayCanvas`'s own
-  children and includes `InventoryText` and `CashText` right alongside `LevelBar`,
-  `ConsumableSlotArea`, `Glow`, `Border`, etc. **Inventory content already lives inside
-  `BioDisplayCanvas`** as a text/count readout, not as its own canvas. This also explains §1's
-  `BioDisplayCanvas` puzzle: it isn't opened/closed per tab, it's an always-present player-status
-  strip (bio + inventory count + cash + consumables) whose *internal* elements toggle visibility —
-  which is why the whole canvas read `active=True` for the entire session while `activeGraphics`
-  fluctuated. Practical effect: **there's nothing separate to migrate for Inventory** — it's already
-  covered whenever `BioDisplayCanvas` converts (§3, step 2). Worth a quick in-headset confirmation
-  (watch whether `InventoryText`/`ConsumableSlotArea` visibly change when pressing the Inventory tab
-  vs. others) before fully closing this out, since the evidence is one log line from a general scan,
-  not a capture taken specifically while the Inventory tab was selected.
+- **Does `Inventory` have any VR-canvas presence at all? Still open — the "resolved" conclusion
+  from the first pass at this doc was wrong, or at least incomplete.** That conclusion (Inventory is
+  just a readout inside `BioDisplayCanvas`, no separate screen) was based on one
+  `CanvasMaterialPatcher` graphic-queue log listing `InventoryText`/`CashText` among
+  `BioDisplayCanvas`'s children. But direct in-headset testing (2026-09-24) contradicts it: clicking
+  `ActionPanelCanvas`'s Inventory tab (button 3, per the stated Notebook/Minimap/Inventory/Upgrades
+  order) opens **a genuine WorldSpace panel with the legacy laser active, and items on it can be
+  trigger-clicked to equip** — clearly a real, separate interactive canvas, not a passive text
+  field. None of the six F9 captures show a matching canvas (the one unfamiliar name across all of
+  them, `InfoWindow`, is `active=False` in every capture), so either the panel wasn't open at the
+  exact instant any F9 was pressed, or it's gated in a way F9 keeps missing. `BioDisplayCanvas`
+  having `InventoryText`/`CashText` children is still true and probably real (a HUD-style summary),
+  but it's evidently not the same thing as this equip panel. **Needs a clean, deliberate capture**:
+  open the Inventory panel, confirm it's visible with the laser active, press F9 immediately, then
+  check `LogOutput.log` for the `[CanvasDump]` block — don't infer a name without that.
 - **Is `ActionPanelCanvas`'s Notebook tab button the same action as the Right-B/gesture path?
   Still open.** The dump confirms the canvas itself — `Detective's Notebook`, nested under
   `WindowCanvas` — but can't distinguish which input path opened it in a given capture. Not
