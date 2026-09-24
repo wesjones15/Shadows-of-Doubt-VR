@@ -592,7 +592,7 @@ public class VRCamera : MonoBehaviour
                 _locomotion.UpdateLocomotion(_leftCam, _voidRoom.InVoidMode, isPausedForLocomotion, _sceneLoadGrace);
                 if (_locomotion.UpdateMenuButton()) _canvasTick = UICanvasScanRate;
                 _locomotion.UpdateJump(caseBoardOpenForInput, pointerOnUI, _movementDiscoveryDone, _sceneLoadGrace);
-                _locomotion.UpdateInteract();
+                _locomotion.UpdateInteract(pointerOnUI || isPausedForLocomotion);
                 _locomotion.UpdateCrouch();
                 _locomotion.UpdateYButton();
                 _locomotion.UpdateSprint();

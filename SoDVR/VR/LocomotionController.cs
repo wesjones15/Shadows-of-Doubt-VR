@@ -477,8 +477,11 @@ internal sealed class LocomotionController
     /// On press edge: simulates left mouse button click.
     /// Camera.main rotation toward the left controller is handled elsewhere
     /// (UpdateLeftInteractMarker), keyed off this same trigger state.
+    /// Suppressed while the pointer is on UI or a menu/case board is up: the simulated click lands
+    /// on whatever flat-screen UI sits under the OS cursor (it opened the exit dialog from the
+    /// pause menu).
     /// </summary>
-    public void UpdateInteract()
+    public void UpdateInteract(bool suppress)
     {
         if (VRSettingsPanel.RootGO?.activeSelf == true) return;
         OpenXRManager.GetTriggerState(false, out bool pressed);
@@ -488,7 +491,7 @@ internal sealed class LocomotionController
 
         bool edge = pressed && !_interactBtnPrev;
         _interactBtnPrev = pressed;
-        if (!edge) return;
+        if (!edge || suppress) return;
         try
         {
             // Primary: left mouse button (game uses LMB for pick up, interact, attack)
