@@ -142,20 +142,11 @@ public class VRCamera : MonoBehaviour
     private bool       _minimapBBtnHasOffset;      // true after first B-button minimap placement or grip-drag
     private Vector3    _minimapBBtnLocalOffset;     // position offset in VROrigin-local space (yaw-aligned)
     private Quaternion _minimapBBtnLocalRot = Quaternion.identity; // rotation in VROrigin-local space
-    // Persisted per-session nested canvas world transforms (game resets layout each frame).
-    private readonly Dictionary<int, (Vector3 worldPos, Quaternion worldRot)> _nestedDragTransforms = new();
-    // WindowCanvas-relative offsets for grip-dragged nested canvases (survive reopen/recentre).
-    private readonly Dictionary<int, (Vector3 localOffset, Quaternion localRot)> _nestedDragRelative = new();
 
     // Canvases without CanvasGroup that have enough active Graphics to be considered
     // "actually showing content".  Updated every scan cycle.  Used by depth scan / click
     // system to skip MenuCanvas when the pause menu is hidden (game hides it without CG).
     private readonly HashSet<int> _noGroupInteractable = new();
-
-    // WindowCanvas nested canvases (notes, notebook) cached during scan for per-frame Z-separation.
-    // Game layout resets localPosition.z every frame → must re-apply Z offsets in LateUpdate.
-    private readonly List<Canvas> _windowNestedList = new();
-
 
     // Canvas instance IDs that belong to VRMod itself (settings panel, cursor, etc.).
     // Every mutation pass (RescanCanvasAlpha, etc.) must skip canvases in this set —
@@ -363,7 +354,7 @@ public class VRCamera : MonoBehaviour
                     ref _minimapCanvasRef,
                     ref _popupMessageGO, ref _popupMessageCanvas,
                     ref _tutorialMessageGO, ref _tutorialMessageCanvas,
-                    _windowNestedList, _noGroupInteractable, _tooltipRTPanel.IsOwned);
+                    _noGroupInteractable, _tooltipRTPanel.IsOwned);
             }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] ScanAndConvertCanvases outer: {ex.GetType().Name}: {ex.Message}"); }
         }
@@ -617,8 +608,7 @@ public class VRCamera : MonoBehaviour
                         {
                             if (kvp.Value == null) continue;
                             string cn = kvp.Value.gameObject.name ?? "";
-                            if (cn.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase)
-                                || cn.Equals("WindowCanvas", StringComparison.OrdinalIgnoreCase))
+                            if (cn.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase))
                             {
                                 _positionedCanvases.Remove(kvp.Key);
                                 _gripDragEnforce.Remove(kvp.Key);
@@ -1106,7 +1096,6 @@ public class VRCamera : MonoBehaviour
                 _caseBoard,
                 _gripDragAnchorOffsets,
                 _gripDragEnforce,
-                _nestedDragTransforms,
                 _caseBoardRT.IsOpen, _caseBoardRT.JustOpened, _caseBoardRT.Anchor, _caseBoardRT.AnchorPlaced,
                 _popupMessageGO, _tutorialMessageGO,
                 ref _contextMenuFreezePos, ref _contextMenuFreezeRot,
@@ -1162,7 +1151,6 @@ public class VRCamera : MonoBehaviour
                 // so we must override it every frame to keep it near the VR player.
                 EnforceCaseCanvasPosition();
                 FixStringRotations();
-                EnforceWindowNestedZSeparation();
 
                 // Re-apply grip-drag position for top-level canvas.
                 // Game scripts / Canvas layout may reset position between Update and LateUpdate.
@@ -1283,8 +1271,6 @@ public class VRCamera : MonoBehaviour
             _caseBoardRT.IsOpen, _caseBoardRT.Anchor, _casePanelCanvas, _minimapCanvasRef,
             _popupMessageGO, _tutorialMessageGO,
             _popupMessageCanvas, _tutorialMessageCanvas, _tooltipRTPanel.IsOwned,
-            _nestedDragTransforms, _nestedDragRelative,
-            _windowNestedList,
             _gripDragEnforce, _gripDragAnchorOffsets,
             _canvasVRPose, _nestedCanvasIds,
             transform, _cursorHasTarget, _cursorTargetCanvas,
@@ -1311,7 +1297,7 @@ public class VRCamera : MonoBehaviour
             ? default
             : _controllerInteraction.ScanAndRenderAimDots(_rightControllerGO, _leftCam,
                 _managedCanvases, _cursorCanvas, _caseBoard.ContextMenuActive, _popupMessageGO, _tutorialMessageGO,
-                _nestedCanvasIds, _nestedDragTransforms, _noGroupInteractable);
+                _nestedCanvasIds, _noGroupInteractable);
 
         float legacyHitDistance = _caseBoard.HasActiveGesture ? 0f
                                 : aim.HasTarget ? _controllerInteraction.NearestLegacyUIHitDistance(_rightControllerGO.transform.position)
@@ -1400,71 +1386,6 @@ public class VRCamera : MonoBehaviour
         catch { }
     }
 
-    /// <summary>Per-frame Z-separation and user-dragged transform enforcement for WindowCanvas
-    /// nested canvases (notes, notebook). Game layout resets transforms every frame, so we
-    /// must re-apply here (after the game's layout pass, before render).</summary>
-    private void EnforceWindowNestedZSeparation()
-    {
-        if (_windowNestedList.Count < 2 && _nestedDragTransforms.Count == 0 && _nestedDragRelative.Count == 0) return;
-        try
-        {
-            for (int i = 0; i < _windowNestedList.Count; i++)
-            {
-                var nc = _windowNestedList[i];
-                if (nc == null) continue;
-                int noteId = nc.gameObject.GetInstanceID();
-
-                // User-dragged world transform: override position and rotation.
-                // During drag, the desired transform is updated each frame in Update.
-                // Game layout resets it before LateUpdate, so we always re-apply here.
-                if (_nestedDragTransforms.TryGetValue(noteId, out var stored))
-                {
-                    nc.transform.position = stored.worldPos;
-                    nc.transform.rotation = stored.worldRot;
-                    continue; // world transform set — skip Z-separation (it uses localPosition)
-                }
-
-                // Restore from WindowCanvas-relative offset (LateUpdate runs AFTER PositionCanvases,
-                // so WindowCanvas is already at its new position after reopen/recentre).
-                if (_nestedDragRelative.TryGetValue(noteId, out var rel))
-                {
-                    try
-                    {
-                        var parentTr = nc.transform.parent;
-                        while (parentTr != null)
-                        {
-                            if ((parentTr.gameObject.name ?? "").IndexOf("Window", StringComparison.OrdinalIgnoreCase) >= 0)
-                            {
-                                Vector3    absPos = parentTr.position + parentTr.rotation * rel.localOffset;
-                                Quaternion absRot = parentTr.rotation * rel.localRot;
-                                nc.transform.position = absPos;
-                                nc.transform.rotation = absRot;
-                                _nestedDragTransforms[noteId] = (absPos, absRot);
-                                Log.LogInfo($"[VRCamera] Relative restore: '{nc.gameObject.name}' → ({absPos.x:F1},{absPos.y:F1},{absPos.z:F1}) from '{parentTr.gameObject.name}'");
-                                break;
-                            }
-                            parentTr = parentTr.parent;
-                        }
-                    }
-                    catch { }
-                    continue;
-                }
-
-                // Z-separation for non-dragged notes
-                if (_windowNestedList.Count >= 2)
-                {
-                    var nrt = nc.GetComponent<RectTransform>();
-                    if (nrt == null) continue;
-                    var lp = nrt.localPosition;
-                    float zOff = (_windowNestedList.Count - 1 - i) * -30f;
-                    lp.z = zOff;
-                    nrt.localPosition = lp;
-                }
-            }
-        }
-        catch { }
-    }
-
     /// <summary>Called right before each VR eye camera renders — last chance to position items + arms.</summary>
     private void ForceItemPositionPreRender()
     {
@@ -1507,9 +1428,6 @@ public class VRCamera : MonoBehaviour
         // Override carried world object position AND final arm positioning right before render
         // (Animator/game scripts may have overwritten what Update() set earlier this frame).
         _heldItem.ReapplyBeforeRender(_interactionController, _rightControllerGO, _leftControllerGO);
-
-        // (Note centering removed — we now shift WindowCanvas world position in Update
-        // for aim dot alignment, not the Note child localPosition which RectTransform blocks.)
 
         // Snapshot all managed canvas poses RIGHT BEFORE rendering.
         // These are re-enforced in Update (before aim-dot scan) to counteract

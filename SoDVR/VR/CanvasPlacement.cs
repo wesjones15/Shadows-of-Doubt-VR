@@ -40,7 +40,6 @@ internal sealed class CanvasPlacement
         CaseBoardInteraction caseBoard,
         Dictionary<int, (Vector3 offset, Quaternion rot)> gripDragAnchorOffsets,
         Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
-        Dictionary<int, (Vector3 worldPos, Quaternion worldRot)> nestedDragTransforms,
         bool caseBoardOpen, bool caseBoardJustOpened, Transform caseBoardAnchor, bool caseBoardAnchorPlaced,
         GameObject? popupMessageGO, GameObject? tutorialMessageGO,
         ref Vector3 contextMenuFreezePos, ref Quaternion contextMenuFreezeRot,
@@ -128,9 +127,8 @@ internal sealed class CanvasPlacement
             canvasWasActive[tid] = nowActive;
         }
 
-        // When the case board opens, force-recentre every legacy CaseBoard canvas + WindowCanvas
-        // around the freshly placed board anchor. Notes/notebook are children of WindowCanvas
-        // (InterfaceController.windowCanvas), not CaseCanvas.
+        // When the case board opens, force-recentre every legacy CaseBoard canvas around the
+        // freshly placed board anchor.
         if (caseBoardJustOpened)
         {
             foreach (var cb in managedCanvases)
@@ -138,8 +136,7 @@ internal sealed class CanvasPlacement
                 if (cb.Value == null) continue;
                 string cbName = cb.Value.gameObject.name ?? "";
                 var cbCat = CanvasCategoryInfo.GetCanvasCategory(cbName);
-                if (cbCat == CanvasCategory.CaseBoard
-                    || cbName.Equals("WindowCanvas", StringComparison.OrdinalIgnoreCase))
+                if (cbCat == CanvasCategory.CaseBoard)
                 {
                     positionedCanvases.Remove(cb.Key);
                     lastRescanFrame.Remove(cb.Key);
@@ -161,10 +158,7 @@ internal sealed class CanvasPlacement
                     gripDragEnforce.Remove(cb.Key);
                 }
             }
-            // Clear absolute nested transforms — they'll be restored from
-            // _nestedDragRelative once WindowCanvas gets its new position.
-            nestedDragTransforms.Clear();
-            Log.LogInfo("[CanvasPlacement] Case board opened — recentring CaseBoard + WindowCanvas (Minimap preserved if grip-dragged)");
+            Log.LogInfo("[CanvasPlacement] Case board opened — recentring CaseBoard (Minimap preserved if grip-dragged)");
         }
 
         _placementIndex = 0;

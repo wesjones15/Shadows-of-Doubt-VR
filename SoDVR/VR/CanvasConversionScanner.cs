@@ -38,7 +38,7 @@ internal static class CanvasConversionScanner
         ref Canvas? minimapCanvasRef,
         ref GameObject? popupMessageGO, ref Canvas? popupMessageCanvas,
         ref GameObject? tutorialMessageGO, ref Canvas? tutorialMessageCanvas,
-        List<Canvas> windowNestedList, HashSet<int> noGroupInteractable,
+        HashSet<int> noGroupInteractable,
         bool tooltipRTPanelOwnsDialog)
     {
         var dead = new List<int>();
@@ -341,27 +341,6 @@ internal static class CanvasConversionScanner
             foreach (var c in managedCanvases.Values)
                 if (c != null && c.worldCamera == null) c.worldCamera = wcam;
         }
-
-        // Rebuild the WindowCanvas nested canvas list for per-frame Z-separation.
-        // (Actual Z offsets are applied in LateUpdate since game layout resets them every frame.)
-        try
-        {
-            windowNestedList.Clear();
-            foreach (var kvp in managedCanvases)
-            {
-                if (!nestedCanvasIds.Contains(kvp.Key)) continue;
-                var nc = kvp.Value;
-                if (nc == null) continue;
-                Transform walker = nc.transform.parent;
-                for (int w = 0; w < 10 && walker != null; w++)
-                {
-                    if (walker.gameObject.name?.Equals("WindowCanvas", StringComparison.OrdinalIgnoreCase) == true)
-                    { windowNestedList.Add(nc); break; }
-                    walker = walker.parent;
-                }
-            }
-        }
-        catch { }
 
         // Update no-CanvasGroup interactable cache.
         // For canvases without a CanvasGroup, we can't detect visibility via alpha.

@@ -354,7 +354,6 @@ internal sealed class ControllerInteraction
         Dictionary<int, Canvas> managedCanvases, Canvas? cursorCanvas,
         bool prevContextMenuActive, GameObject? popupMessageGO, GameObject? tutorialMessageGO,
         HashSet<int> nestedCanvasIds,
-        Dictionary<int, (Vector3 worldPos, Quaternion worldRot)> nestedDragTransforms,
         HashSet<int> noGroupInteractable)
     {
         _aimDotHits.Clear();
@@ -393,11 +392,7 @@ internal sealed class ControllerInteraction
                 }
                 var aimCat = CanvasCategoryInfo.GetCanvasCategory(c.gameObject.name);
                 if (aimCat == CanvasCategory.HUD) continue;
-                // Allow grip-dragged notes through — they have independent world transforms
-                if (nestedCanvasIds.Contains(kvp.Key))
-                {
-                    if (!nestedDragTransforms.ContainsKey(c.gameObject.GetInstanceID())) continue;
-                }
+                if (nestedCanvasIds.Contains(kvp.Key)) continue;
 
                 var pl = new Plane(-c.transform.forward, c.transform.position);
                 if (!pl.Raycast(new Ray(dCtrlPos, dCtrlFwd), out float hitDist) || hitDist <= 0f) continue;

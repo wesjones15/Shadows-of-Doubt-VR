@@ -105,16 +105,9 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private float _minimapLastLoad;
 
     // ── Visual-shift scratch state (working state for one Tick(), not persisted) ──
-    private Vector3 _windowNoteWorldOffset;
     private Vector3 _contextMenuWorldOffset;
     private bool _prevContextMenuActive;
 
-    // ── Nested-note grip-drag ───────────────────────────────────────────────
-    private bool _gripDragIsNested;
-    private RectTransform? _gripDragNestedRT;
-    private Vector3 _gripNoteOffset;
-    private Vector3 _gripNoteHitLocalOff;
-    private Quaternion _gripNoteRotOffset;
 
     // ── Regular canvas grip-drag ─────────────────────────────────────────────
     private bool _gripWasPressed;
@@ -154,7 +147,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     /// until it ends, or the gesture would never see its release.</summary>
     public bool HasActiveGesture =>
         _cbDragActive || _stringDragActive || _cbMidDragActive || _minimapPanActive
-        || _gripDragCanvas != null || _gripDragIsNested;
+        || _gripDragCanvas != null;
     public Canvas? GripDragCanvas => _gripDragCanvas;
     public Vector3 GripDragDesiredPos => _gripDragDesiredPos;
     public Quaternion GripDragDesiredRot => _gripDragDesiredRot;
@@ -187,9 +180,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private Canvas? _ctxPopupMessageCanvas;
     private Canvas? _ctxTutorialMessageCanvas;
     private bool _ctxTooltipRTPanelOwnsDialog;
-    private Dictionary<int, (Vector3 worldPos, Quaternion worldRot)> _ctxNestedDragTransforms = null!;
-    private Dictionary<int, (Vector3 localOffset, Quaternion localRot)> _ctxNestedDragRelative = null!;
-    private List<Canvas> _ctxWindowNestedList = null!;
     private Dictionary<int, (Vector3 pos, Quaternion rot)> _ctxGripDragEnforce = null!;
     private Dictionary<int, (Vector3 offset, Quaternion rot)> _ctxGripDragAnchorOffsets = null!;
     private Dictionary<int, (Vector3 pos, Quaternion rot, Vector3 scale)> _ctxCanvasVRPose = null!;
@@ -217,9 +207,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         bool caseBoardOpen, Transform caseBoardAnchor, Canvas? casePanelCanvas, Canvas? minimapCanvasRef,
         GameObject? popupMessageGO, GameObject? tutorialMessageGO,
         Canvas? popupMessageCanvas, Canvas? tutorialMessageCanvas, bool tooltipRTPanelOwnsDialog,
-        Dictionary<int, (Vector3 worldPos, Quaternion worldRot)> nestedDragTransforms,
-        Dictionary<int, (Vector3 localOffset, Quaternion localRot)> nestedDragRelative,
-        List<Canvas> windowNestedList,
         Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
         Dictionary<int, (Vector3 offset, Quaternion rot)> gripDragAnchorOffsets,
         Dictionary<int, (Vector3 pos, Quaternion rot, Vector3 scale)> canvasVRPose,
@@ -247,9 +234,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         _ctxPopupMessageCanvas = popupMessageCanvas;
         _ctxTutorialMessageCanvas = tutorialMessageCanvas;
         _ctxTooltipRTPanelOwnsDialog = tooltipRTPanelOwnsDialog;
-        _ctxNestedDragTransforms = nestedDragTransforms;
-        _ctxNestedDragRelative = nestedDragRelative;
-        _ctxWindowNestedList = windowNestedList;
         _ctxGripDragEnforce = gripDragEnforce;
         _ctxGripDragAnchorOffsets = gripDragAnchorOffsets;
         _ctxCanvasVRPose = canvasVRPose;
@@ -332,147 +316,66 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             }
         }
         bool gripDragAllowed = caseBoardOpen || dialogNowActive || contextMenuNowActive || anyInteractiveVisible;
-        if (gripPressed && !gripOwnedByRTPanel && _gripDragCanvas == null && !_gripDragIsNested && _ctxRightControllerGO != null && gripDragAllowed)
+        if (gripPressed && !gripOwnedByRTPanel && _gripDragCanvas == null && _ctxRightControllerGO != null && gripDragAllowed)
         {
             Vector3 ctrlPos = _ctxRightControllerGO.transform.position;
             Vector3 ctrlFwd = _ctxRightControllerGO.transform.forward;
             var ray = new Ray(ctrlPos, ctrlFwd);
 
-            // ── Pre-pass: check nested canvases for individual drag ──
-            // Nested canvases inside WindowCanvas can be grip-dragged individually.
-            // Skip "container" canvases that are ancestors of other nested canvases —
-            // moving a container would move all its children (e.g. detective notebook
-            // containing evidence windows). Only "leaf" nested canvases are draggable.
-            float   bestNestedDist = float.MaxValue;
-            Canvas? bestNestedCanvas = null;
-            try
-            {
-                foreach (var nc in _ctxWindowNestedList)
-                {
-                    if (nc == null) continue;
-                    if (!nc.gameObject.activeSelf) continue;
-                    // Skip if this canvas is a CHILD of another nested canvas (e.g. Scroll View
-                    // inside a Note). The parent is the logical draggable unit — children are
-                    // implementation details that should move with their parent.
-                    bool isSubChild = false;
-                    foreach (var other in _ctxWindowNestedList)
-                    {
-                        if (other == null || other == nc) continue;
-                        if (nc.transform.IsChildOf(other.transform))
-                        { isSubChild = true; break; }
-                    }
-                    if (isSubChild) continue;
+            // Collect all eligible canvas hits and pick the NEAREST one.
+            float   bestGripDist = float.MaxValue;
+            Canvas? bestGripCanvas = null;
 
-                    var nrt = nc.GetComponent<RectTransform>();
-                    if (nrt == null) continue;
-                    var npl = new Plane(-nc.transform.forward, nc.transform.position);
-                    if (!npl.Raycast(ray, out float nd) || nd <= 0f) continue;
-                    Vector3 nlp = nc.transform.InverseTransformPoint(ctrlPos + ctrlFwd * nd);
-                    // 30% margin beyond half-size — forgiving enough to not miss near-edge grabs,
-                    // tight enough to not grab adjacent notes
-                    Vector2 nhs = nrt.sizeDelta * 0.65f;
-                    if (Mathf.Abs(nlp.x) > nhs.x || Mathf.Abs(nlp.y) > nhs.y)
-                    {
-                        continue;
-                    }
-                    if (nd < bestNestedDist)
-                    {
-                        bestNestedDist = nd;
-                        bestNestedCanvas = nc;
-                    }
+            foreach (var kvp in _ctxManagedCanvases)
+            {
+                var c = kvp.Value;
+                if (c == null || !CanvasCategoryInfo.IsCanvasVisible(c)) continue;
+                var dragCat = CanvasCategoryInfo.GetCanvasCategory(c.gameObject.name);
+                // Allow grip-drag on CaseBoard, Panel, and Menu canvases.
+                // Also allow Tooltip canvas when a popup dialog or context menu is active.
+                bool isGrabbableTooltip = dragCat == CanvasCategory.Tooltip && (dialogNowActive || contextMenuNowActive);
+                if (!isGrabbableTooltip && dragCat != CanvasCategory.CaseBoard && dragCat != CanvasCategory.Panel && dragCat != CanvasCategory.Menu) continue;
+                string cName = c.gameObject.name ?? "";
+                if (cName.Equals("CaseCanvas",            StringComparison.OrdinalIgnoreCase)) continue;
+                if (cName.Equals("MenuCanvas",             StringComparison.OrdinalIgnoreCase)) continue;  // ESC menu: not draggable
+
+                var pl = new Plane(-c.transform.forward, c.transform.position);
+                if (!pl.Raycast(ray, out float dist) || dist <= 0f) continue;
+                Vector3 lp = c.transform.InverseTransformPoint(ctrlPos + ctrlFwd * dist);
+                var rt = c.GetComponent<RectTransform>();
+                if (rt != null)
+                {
+                    // Generous 2x margin for grip-drag — user just needs to be
+                    // roughly near the canvas, not precisely inside its rect.
+                    Vector2 hs = rt.sizeDelta;  // full size, not half
+                    if (Mathf.Abs(lp.x) > hs.x || Mathf.Abs(lp.y) > hs.y) continue;
                 }
+
+                if (dist < bestGripDist) { bestGripDist = dist; bestGripCanvas = c; }
             }
-            catch { }
 
-            if (bestNestedCanvas != null)
+            if (bestGripCanvas != null)
             {
-                // Enter nested note drag — full 6DOF, same math as regular grip-drag
-                var nrt = bestNestedCanvas.GetComponent<RectTransform>();
-                Quaternion grabCtrlRot  = _ctxRightControllerGO.transform.rotation;
-                Quaternion grabNoteRot  = bestNestedCanvas.transform.rotation;
-                Vector3 hitPoint = ctrlPos + ctrlFwd * bestNestedDist;
+                Quaternion grabCtrlRot   = _ctxRightControllerGO.transform.rotation;
+                Quaternion grabCanvasRot = bestGripCanvas.transform.rotation;
+                // The exact world point the controller ray intersects the canvas surface.
+                Vector3 hitPoint = ctrlPos + ctrlFwd * bestGripDist;
 
-                _gripDragIsNested = true;
-                _gripDragNestedRT = nrt;
-                _gripNoteOffset      = Quaternion.Inverse(grabCtrlRot) * (hitPoint - ctrlPos);
-                _gripNoteHitLocalOff = Quaternion.Inverse(grabNoteRot) * (hitPoint - bestNestedCanvas.transform.position);
-                _gripNoteRotOffset   = Quaternion.Inverse(grabCtrlRot) * grabNoteRot;
-                Log.LogInfo($"[CaseBoard] GripDrag nested start: '{bestNestedCanvas.gameObject.name}' dist={bestNestedDist:F2}");
-            }
-            else
-            {
-                // ── Regular canvas grip-drag ──
-                // Collect all eligible canvas hits and pick the NEAREST one.
-                float   bestGripDist = float.MaxValue;
-                Canvas? bestGripCanvas = null;
-
-                foreach (var kvp in _ctxManagedCanvases)
-                {
-                    var c = kvp.Value;
-                    if (c == null || !CanvasCategoryInfo.IsCanvasVisible(c)) continue;
-                    var dragCat = CanvasCategoryInfo.GetCanvasCategory(c.gameObject.name);
-                    // Allow grip-drag on CaseBoard, Panel, and Menu canvases.
-                    // Also allow Tooltip canvas when a popup dialog or context menu is active.
-                    bool isGrabbableTooltip = dragCat == CanvasCategory.Tooltip && (dialogNowActive || contextMenuNowActive);
-                    if (!isGrabbableTooltip && dragCat != CanvasCategory.CaseBoard && dragCat != CanvasCategory.Panel && dragCat != CanvasCategory.Menu) continue;
-                    string cName = c.gameObject.name ?? "";
-                    if (cName.Equals("CaseCanvas",            StringComparison.OrdinalIgnoreCase)) continue;
-                    if (cName.Equals("WindowCanvas",           StringComparison.OrdinalIgnoreCase)) continue;  // container for notes — drag individual children via nested pre-pass
-                    if (cName.Equals("MenuCanvas",             StringComparison.OrdinalIgnoreCase)) continue;  // ESC menu: not draggable
-
-                    var pl = new Plane(-c.transform.forward, c.transform.position);
-                    if (!pl.Raycast(ray, out float dist) || dist <= 0f) continue;
-                    Vector3 lp = c.transform.InverseTransformPoint(ctrlPos + ctrlFwd * dist);
-                    var rt = c.GetComponent<RectTransform>();
-                    if (rt != null)
-                    {
-                        // Generous 2x margin for grip-drag — user just needs to be
-                        // roughly near the canvas, not precisely inside its rect.
-                        Vector2 hs = rt.sizeDelta;  // full size, not half
-                        if (Mathf.Abs(lp.x) > hs.x || Mathf.Abs(lp.y) > hs.y) continue;
-                    }
-
-                    if (dist < bestGripDist) { bestGripDist = dist; bestGripCanvas = c; }
-                }
-
-                if (bestGripCanvas != null)
-                {
-                    Quaternion grabCtrlRot   = _ctxRightControllerGO.transform.rotation;
-                    Quaternion grabCanvasRot = bestGripCanvas.transform.rotation;
-                    // The exact world point the controller ray intersects the canvas surface.
-                    Vector3 hitPoint = ctrlPos + ctrlFwd * bestGripDist;
-
-                    _gripDragCanvas = bestGripCanvas;
-                    // Controller → hit-point in controller local space.
-                    // During drag: newHitPoint = ctrlPos + ctrlRot * _gripDragOffset
-                    _gripDragOffset = Quaternion.Inverse(grabCtrlRot) * (hitPoint - ctrlPos);
-                    // Hit-point → canvas pivot in canvas local space (rotation only, no scale).
-                    // During drag: canvasPivot = newHitPoint - newCanvasRot * _gripDragHitLocalOffset
-                    _gripDragHitLocalOffset = Quaternion.Inverse(grabCanvasRot) * (hitPoint - bestGripCanvas.transform.position);
-                    // Canvas rotation relative to controller (unchanged from before).
-                    _gripDragRotOffset = Quaternion.Inverse(grabCtrlRot) * grabCanvasRot;
-                    Log.LogInfo($"[CaseBoard] GripDrag start: '{bestGripCanvas.gameObject.name}' dist={bestGripDist:F2}");
-                }
+                _gripDragCanvas = bestGripCanvas;
+                // Controller → hit-point in controller local space.
+                // During drag: newHitPoint = ctrlPos + ctrlRot * _gripDragOffset
+                _gripDragOffset = Quaternion.Inverse(grabCtrlRot) * (hitPoint - ctrlPos);
+                // Hit-point → canvas pivot in canvas local space (rotation only, no scale).
+                // During drag: canvasPivot = newHitPoint - newCanvasRot * _gripDragHitLocalOffset
+                _gripDragHitLocalOffset = Quaternion.Inverse(grabCanvasRot) * (hitPoint - bestGripCanvas.transform.position);
+                // Canvas rotation relative to controller (unchanged from before).
+                _gripDragRotOffset = Quaternion.Inverse(grabCtrlRot) * grabCanvasRot;
+                Log.LogInfo($"[CaseBoard] GripDrag start: '{bestGripCanvas.gameObject.name}' dist={bestGripDist:F2}");
             }
         }
 
         // While dragging: move canvas so the grabbed surface point stays under the controller ray.
-        if (gripNow && _gripDragIsNested && _gripDragNestedRT != null && _ctxRightControllerGO != null)
-        {
-            // Nested note drag — full 6DOF: same math as regular grip-drag
-            Vector3    ctrlPos      = _ctxRightControllerGO.transform.position;
-            Quaternion ctrlRot      = _ctxRightControllerGO.transform.rotation;
-            Quaternion newNoteRot   = ctrlRot * _gripNoteRotOffset;
-            Vector3    newHitPoint  = ctrlPos + ctrlRot * _gripNoteOffset;
-            Vector3    newNotePos   = newHitPoint - newNoteRot * _gripNoteHitLocalOff;
-
-            _gripDragNestedRT.transform.position = newNotePos;
-            _gripDragNestedRT.transform.rotation = newNoteRot;
-            // Store desired transform so LateUpdate enforcement can re-apply after game layout resets it
-            int noteId = _gripDragNestedRT.gameObject.GetInstanceID();
-            _ctxNestedDragTransforms[noteId] = (newNotePos, newNoteRot);
-        }
-        else if (gripNow && _gripDragCanvas != null && _ctxRightControllerGO != null)
+        if (gripNow && _gripDragCanvas != null && _ctxRightControllerGO != null)
         {
             Vector3    ctrlPos      = _ctxRightControllerGO.transform.position;
             Quaternion ctrlRot      = _ctxRightControllerGO.transform.rotation;
@@ -483,38 +386,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             _gripDragCanvas.transform.rotation = newCanvasRot;
             _gripDragDesiredPos = newCanvasPos;
             _gripDragDesiredRot = newCanvasRot;
-        }
-
-        // Release nested drag: persist world transform + WindowCanvas-relative offset
-        if (gripReleased && _gripDragIsNested && _gripDragNestedRT != null)
-        {
-            int noteId = _gripDragNestedRT.gameObject.GetInstanceID();
-            Vector3 wPos = _gripDragNestedRT.transform.position;
-            Quaternion wRot = _gripDragNestedRT.transform.rotation;
-            _ctxNestedDragTransforms[noteId] = (wPos, wRot);
-            // Store WindowCanvas-relative offset so positions survive recentre/reopen
-            try
-            {
-                var parentCanvas = _gripDragNestedRT.transform.parent;
-                while (parentCanvas != null)
-                {
-                    var pc = parentCanvas.GetComponent<Canvas>();
-                    if (pc != null && (parentCanvas.gameObject.name ?? "").IndexOf("Window", StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        Quaternion invParentRot = Quaternion.Inverse(parentCanvas.rotation);
-                        _ctxNestedDragRelative[noteId] = (
-                            invParentRot * (wPos - parentCanvas.position),
-                            invParentRot * wRot
-                        );
-                        break;
-                    }
-                    parentCanvas = parentCanvas.parent;
-                }
-            }
-            catch { }
-            Log.LogInfo($"[CaseBoard] GripDrag nested end: '{_gripDragNestedRT.gameObject.name}' pos=({wPos.x:F2},{wPos.y:F2},{wPos.z:F2})");
-            _gripDragIsNested = false;
-            _gripDragNestedRT = null;
         }
 
         // Release: persist the new position
@@ -575,9 +446,9 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
 
     /// <summary>
     /// Everything that has to run BEFORE ControllerInteraction.ScanAndRenderAimDots(): re-enforce
-    /// snapshotted canvas poses, grip-dragged note positions, the minimap B-button body-lock, and
-    /// the WindowCanvas/Note + TooltipCanvas/ContextMenu visual-center shifts the aim scan needs
-    /// to land correctly. Call PostAimScan() immediately after the aim scan to undo the shifts.
+    /// snapshotted canvas poses, the minimap B-button body-lock, and
+    /// the TooltipCanvas/ContextMenu visual-center shift the aim scan needs
+    /// to land correctly. Call PostAimScan() immediately after the aim scan to undo the shift.
     /// </summary>
     public void PreAimScan()
     {
@@ -630,23 +501,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             }
         }
 
-        // Enforce grip-dragged note world transforms BEFORE the aim dot scan.
-        // The game resets note localPosition every frame; LateUpdate enforcement is too late
-        // for the Update-time aim dot scan and click handling.
-        if (_ctxNestedDragTransforms.Count > 0)
-        {
-            foreach (var nc in _ctxWindowNestedList)
-            {
-                if (nc == null) continue;
-                int nid = nc.gameObject.GetInstanceID();
-                if (_ctxNestedDragTransforms.TryGetValue(nid, out var nt))
-                {
-                    nc.transform.position = nt.worldPos;
-                    nc.transform.rotation = nt.worldRot;
-                }
-            }
-        }
-
         // ── B-button minimap body-lock: update VROrigin-relative position every frame ──
         if (_ctxMinimapInBBtnContext && _ctxMinimapBBtnHasOffset && _ctxMinimapCanvasRef != null
             && _ctxMinimapCanvasRef.gameObject.activeSelf)
@@ -673,71 +527,8 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             }
         }
 
-        // Shift WindowCanvas world position so Note visual center = canvas center.
-        // The game's RectTransform layout puts Note.localPosition far outside the canvas rect
-        // (e.g. center at (-960,540) = canvas top-left corner). We can't override localPosition
-        // (RectTransform layout recalculates it). Instead, shift the canvas world position so
-        // the Note's visual center IS at the canvas plane center. The aim dot bounds check then
-        // naturally passes for the entire Note.
-        _windowNoteWorldOffset = Vector3.zero;
-        if (_ctxCaseBoardOpen)
-        {
-            foreach (var kvpWc in _ctxManagedCanvases)
-            {
-                if (kvpWc.Value == null || !kvpWc.Value.gameObject.activeSelf) continue;
-                if ((kvpWc.Value.gameObject.name ?? "").IndexOf("Window", StringComparison.OrdinalIgnoreCase) < 0) continue;
-                if (CanvasCategoryInfo.GetCanvasCategory(kvpWc.Value.gameObject.name) != CanvasCategory.Menu) continue;
-                try
-                {
-                    var wt = kvpWc.Value.transform;
-                    for (int nci = 0; nci < wt.childCount; nci++)
-                    {
-                        var nch = wt.GetChild(nci);
-                        if (nch == null || !nch.gameObject.activeSelf) continue;
-                        var nrt = nch.GetComponent<RectTransform>();
-                        if (nrt == null) continue;
-                        string cname = nch.gameObject.name ?? "";
-                        if (!cname.Equals("Note", StringComparison.OrdinalIgnoreCase)) continue;
-                        // Skip notes that have been grip-dragged to independent world positions —
-                        // their localPosition is extreme and would create a huge offset.
-                        int noteGOId = nch.gameObject.GetInstanceID();
-                        if (_ctxNestedDragTransforms.ContainsKey(noteGOId)) continue;
-                        // Note center in canvas local space:
-                        //   pivot (0,1) → center offset = (+halfW, -halfH)
-                        //   localPos + (sizeDelta.x * (0.5-pivot.x), sizeDelta.y * (0.5-pivot.y))
-                        float noteCenterLocalX = nch.localPosition.x + nrt.sizeDelta.x * (0.5f - nrt.pivot.x);
-                        float noteCenterLocalY = nch.localPosition.y + nrt.sizeDelta.y * (0.5f - nrt.pivot.y);
-                        // Convert local offset to world offset
-                        Vector3 localOffset = new Vector3(noteCenterLocalX, noteCenterLocalY, 0f);
-                        _windowNoteWorldOffset = wt.TransformVector(localOffset);
-                        wt.position += _windowNoteWorldOffset;
-                        break; // first active Note only
-                    }
-                }
-                catch { }
-                break; // only one WindowCanvas
-            }
-        }
-
-        // Re-enforce grip-dragged nested transforms AFTER the WindowCanvas shift.
-        // Moving the parent shifts children, which displaces our earlier enforcement.
-        // Without this, the aim dot scan sees dragged canvases at wrong positions.
-        if (_windowNoteWorldOffset != Vector3.zero && _ctxNestedDragTransforms.Count > 0)
-        {
-            foreach (var nc in _ctxWindowNestedList)
-            {
-                if (nc == null) continue;
-                int nid = nc.gameObject.GetInstanceID();
-                if (_ctxNestedDragTransforms.TryGetValue(nid, out var nt))
-                {
-                    nc.transform.position = nt.worldPos;
-                    nc.transform.rotation = nt.worldRot;
-                }
-            }
-        }
-
         // Shift TooltipCanvas so ContextMenu(Clone) visual center = ContextMenus canvas center
-        // (same pattern as WindowCanvas/Note shift above).  At Update() time the game has already
+        // At Update() time the game has already
         // set ContextMenu(Clone).localPosition to screen coordinates (e.g. -960, 540).  Our
         // LateUpdate zeroing hasn't run yet, so we read the game's value, compute its world offset
         // from ContextMenus center, and shift TooltipCanvas to compensate — aim dot scan then
@@ -786,36 +577,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     /// </summary>
     public void PostAimScan()
     {
-        // Undo the WindowCanvas world-position shift applied before the aim dot scan.
-        // The shift was needed so the aim dot scan+placement aligns with the Note visual.
-        // Now restore the original position so rendering and click handling see the game's layout.
-        if (_windowNoteWorldOffset != Vector3.zero)
-        {
-            foreach (var kvpWc in _ctxManagedCanvases)
-            {
-                if (kvpWc.Value == null || !kvpWc.Value.gameObject.activeSelf) continue;
-                if ((kvpWc.Value.gameObject.name ?? "").IndexOf("Window", StringComparison.OrdinalIgnoreCase) < 0) continue;
-                if (CanvasCategoryInfo.GetCanvasCategory(kvpWc.Value.gameObject.name) != CanvasCategory.Menu) continue;
-                try { kvpWc.Value.transform.position -= _windowNoteWorldOffset; } catch { }
-                break;
-            }
-            // Re-enforce grip-dragged nested transforms after undo (parent shift moved children)
-            if (_ctxNestedDragTransforms.Count > 0)
-            {
-                foreach (var nc in _ctxWindowNestedList)
-                {
-                    if (nc == null) continue;
-                    int nid = nc.gameObject.GetInstanceID();
-                    if (_ctxNestedDragTransforms.TryGetValue(nid, out var nt))
-                    {
-                        nc.transform.position = nt.worldPos;
-                        nc.transform.rotation = nt.worldRot;
-                    }
-                }
-            }
-            _windowNoteWorldOffset = Vector3.zero;
-        }
-
         // Undo TooltipCanvas shift applied for context menu aim dot alignment.
         if (_contextMenuWorldOffset != Vector3.zero)
         {
@@ -1399,47 +1160,16 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 // Only use mouse-only drag when CaseCanvas is the CLOSEST canvas hit.
                 // If ActionPanelCanvas or other interactive canvases are closer, the router handles them.
                 bool hitsCaseCanvas = false;
-                float caseDist = float.MaxValue;
                 if (_ctxCasePanelCanvas != null && _ctxCasePanelCanvas.gameObject.activeSelf)
                 {
                     Vector3 cbpo = (_cbContentContainerRT != null) ? _cbContentContainerRT.transform.position : _ctxCasePanelCanvas.transform.position;
                     var casePlane = new Plane(-(_cbContentContainerRT != null ? _cbContentContainerRT.transform.forward : _ctxCasePanelCanvas.transform.forward), cbpo);
                     if (casePlane.Raycast(new Ray(rPos, rFwd), out float cd) && cd > 0f && cd < 5f)
                     {
-                        caseDist = cd;
                         hitsCaseCanvas = true;
                     }
                 }
-                // Check if a Note canvas is closer than CaseCanvas — if so, the user is
-                // aiming at a note (e.g. NewStickNoteButton), not at case board pins.
-                // Skip pin proximity scan and let the router handle the Note.
-                bool nestedBlocksCaseCanvas = false;
                 if (hitsCaseCanvas)
-                {
-                    try
-                    {
-                        foreach (var nc in _ctxWindowNestedList)
-                        {
-                            if (nc == null || !nc.gameObject.activeSelf) continue;
-                            var npl = new Plane(-nc.transform.forward, nc.transform.position);
-                            if (npl.Raycast(new Ray(rPos, rFwd), out float nd) && nd > 0f && nd < caseDist)
-                            {
-                                // Bounds check
-                                var nrt = nc.GetComponent<RectTransform>();
-                                if (nrt != null)
-                                {
-                                    Vector3 nlp = nc.transform.InverseTransformPoint(rPos + rFwd * nd);
-                                    Vector2 nhs = nrt.sizeDelta * 0.5f;
-                                    if (Mathf.Abs(nlp.x) <= nhs.x && Mathf.Abs(nlp.y) <= nhs.y)
-                                    { nestedBlocksCaseCanvas = true; break; }
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                }
-
-                if (hitsCaseCanvas && !nestedBlocksCaseCanvas)
                 {
                     // Path-2: find nearest pin by ray→plane→ITP→CC local space proximity.
                     bool foundPin = false;
@@ -2224,38 +1954,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 catch { }
             }
         }
-
-        // Grip-dragged notes: add as independent hit candidates. Their transforms were enforced
-        // at the start of Update (PreAimScan), so plane intersection works.
-        if (_ctxNestedDragTransforms.Count > 0)
-        {
-            foreach (var nc in _ctxWindowNestedList)
-            {
-                if (nc == null || !nc.gameObject.activeSelf) continue;
-                int noteId = nc.gameObject.GetInstanceID();
-                if (!_ctxNestedDragTransforms.ContainsKey(noteId)) continue;
-                try
-                {
-                    var noteCanvas = nc.GetComponent<Canvas>();
-                    if (noteCanvas == null) continue;
-                    if (noteCanvas.worldCamera == null) noteCanvas.worldCamera = leftCam;
-                    var notePlane = new Plane(-nc.transform.forward, nc.transform.position);
-                    if (!notePlane.Raycast(ray, out float noteDist)) continue;
-                    if (noteDist <= 0f) continue;
-                    Vector3 noteWp = ray.origin + ray.direction * noteDist;
-                    var noteRt = nc.GetComponent<RectTransform>();
-                    if (noteRt != null)
-                    {
-                        Vector3 nlp = nc.transform.InverseTransformPoint(noteWp);
-                        Vector2 nhs = noteRt.sizeDelta * 0.5f;
-                        if (Mathf.Abs(nlp.x) > nhs.x || Mathf.Abs(nlp.y) > nhs.y) continue;
-                    }
-                    if (leftCam.WorldToScreenPoint(noteWp).z < 0f) continue;
-                    hits.Add((noteDist, noteCanvas, noteWp));
-                }
-                catch { }
-            }
-        }
     }
 
     public void PreRaycastFixup(Canvas hitCanvas)
@@ -2684,11 +2382,8 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     ///
     /// Deliberately NOT unified with <see cref="CanvasClickRouter.InvokeButtonClick"/> despite the
     /// visible similarity: this skips the hidden/interactable check (case-board pins don't need
-    /// it) and clears the rescan cooldown for a hardcoded "WindowCanvas" lookup instead of the
-    /// actually-clicked canvas (case-board clicks open notes IN WindowCanvas, not on the clicked
-    /// canvas itself) — real behavioral differences caught when both were finally visible
-    /// side by side, not cosmetic duplication. See this file's header on why disposable code
-    /// isn't worth redesigning to remove the duplication.
+    /// it). See this file's header on why disposable code isn't worth redesigning to remove the
+    /// duplication.
     /// </summary>
     private void FireCaseBoardClick(GameObject go)
     {
@@ -2709,40 +2404,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                         for (int pi = 0; pi < pCount; pi++)
                             btn.onClick.SetPersistentListenerState(pi, UnityEngine.Events.UnityEventCallState.Off);
                         _ctxRequestForceScan();
-                        // Don't recentre WindowCanvas on button clicks — it destroys
-                        // grip-dragged note positions.  New nested canvases inherit
-                        // WindowCanvas position automatically.
-                        // Clear rescan cooldown for WindowCanvas + nested children so new
-                        // tab content (Detective's Notebook, Scroll View) gets HDR material
-                        // treatment immediately instead of waiting for the 600-frame cooldown.
-                        foreach (var rkvp in _ctxManagedCanvases)
-                        {
-                            if (rkvp.Value == null) continue;
-                            string rn = rkvp.Value.gameObject.name ?? "";
-                            if (rn.Equals("WindowCanvas", StringComparison.OrdinalIgnoreCase))
-                            {
-                                int wcId = rkvp.Key;
-                                _ctxLastRescanFrame.Remove(wcId);
-                                // Also clear nested children
-                                foreach (var nkvp in _ctxManagedCanvases)
-                                {
-                                    if (nkvp.Value == null) continue;
-                                    try
-                                    {
-                                        var np = nkvp.Value.transform.parent;
-                                        while (np != null)
-                                        {
-                                            var npc = np.GetComponent<Canvas>();
-                                            if (npc != null && npc.GetInstanceID() == wcId)
-                                            { _ctxLastRescanFrame.Remove(nkvp.Key); break; }
-                                            np = np.parent;
-                                        }
-                                    }
-                                    catch { }
-                                }
-                                break;
-                            }
-                        }
                         Log.LogInfo($"[CaseBoard] CB persistent click: '{walker.gameObject.name}' persistent={pCount}");
                         return;
                     }
