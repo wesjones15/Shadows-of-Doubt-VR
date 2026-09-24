@@ -170,7 +170,8 @@ No structural "parent" to start at (see §0) — sequenced by isolation and comp
 1. **`ActionPanelCanvas`** — simplest, proves out grip-drag retargeted onto an RT quad's transform
    on the lowest-risk surface (it's the anchor, not itself draggable).
 2. **`BioDisplayCanvas`, `LocationDetailsCanvas`, `UpgradesDisplayCanvas`** — zero special-casing,
-   same template as `MenuRTPanel`, low risk.
+   same template as `MenuRTPanel`, low risk. Also covers Inventory content (§4) — it lives inside
+   `BioDisplayCanvas`, not a separate canvas.
 3. **`WindowCanvas`'s nested windows (`Note` + Notebook)** — bigger lift: needs the new
    per-instance dynamic-RT-panel pattern (§1.3), plus verified close-button routing. Can ship
    *before* `CaseCanvas` itself converts, since the legacy corkboard can just be hooked to spawn an
@@ -194,14 +195,21 @@ failure mode.
 Six F9 captures were taken across different case-board states (933-939 `Canvas` components each).
 Findings:
 
-- **Does `Inventory` have any VR-canvas presence at all? Effectively resolved: no.** Across all six
-  captures — 933 to 939 `Canvas` components each time — nothing matching `Inventory` or `Backpack`
-  appeared anywhere in the scene. `LocomotionController.UpdateInventory`'s synthetic `X` keypress
-  (`LocomotionController.cs:738-762`) doesn't appear to be opening anything the mod's canvas
-  discovery can see. Treat Inventory as **out of scope for this migration pass** — there's currently
-  nothing to convert — unless a later, more targeted test (pressing F9 immediately after the
-  inventory-open gesture, rather than after the fact) turns up something transient this capture
-  missed.
+- **Does `Inventory` have any VR-canvas presence at all? Resolved — there's no separate canvas
+  because there's no separate screen.** No name matching `Inventory`/`Backpack` ever appears in any
+  of the six F9 captures, but a `CanvasMaterialPatcher` graphic-queue log from earlier in the same
+  session (`LogOutput.log:402`, `QueueMap 'BioDisplayCanvas' (50)`) lists `BioDisplayCanvas`'s own
+  children and includes `InventoryText` and `CashText` right alongside `LevelBar`,
+  `ConsumableSlotArea`, `Glow`, `Border`, etc. **Inventory content already lives inside
+  `BioDisplayCanvas`** as a text/count readout, not as its own canvas. This also explains §1's
+  `BioDisplayCanvas` puzzle: it isn't opened/closed per tab, it's an always-present player-status
+  strip (bio + inventory count + cash + consumables) whose *internal* elements toggle visibility —
+  which is why the whole canvas read `active=True` for the entire session while `activeGraphics`
+  fluctuated. Practical effect: **there's nothing separate to migrate for Inventory** — it's already
+  covered whenever `BioDisplayCanvas` converts (§3, step 2). Worth a quick in-headset confirmation
+  (watch whether `InventoryText`/`ConsumableSlotArea` visibly change when pressing the Inventory tab
+  vs. others) before fully closing this out, since the evidence is one log line from a general scan,
+  not a capture taken specifically while the Inventory tab was selected.
 - **Is `ActionPanelCanvas`'s Notebook tab button the same action as the Right-B/gesture path?
   Still open.** The dump confirms the canvas itself — `Detective's Notebook`, nested under
   `WindowCanvas` — but can't distinguish which input path opened it in a given capture. Not
