@@ -134,17 +134,17 @@ Four distinct pieces, not one panel:
 `CanvasCategoryInfo.cs:74-75`) and `UpgradesDisplayCanvas` (`CanvasCategory.Panel`,
 `CanvasCategoryInfo.cs:86`, opened via `ActionPanelCanvas`'s Upgrades tab) have **zero
 special-casing anywhere in `CaseBoardInteraction.cs`** — they're handled purely through the generic
-category-based placement/click machinery. Low risk, but their exact trigger mechanism (what
-specifically shows `BioDisplayCanvas`/`LocationDetailsCanvas` — probably clicking a person/location
-pin, not confirmed) hasn't been verified. One wrinkle from the F9 dump: `UpgradesDisplayCanvas`
-toggled `active=False`/`True` cleanly (plain `SetActive`) across captures as expected, but
-`BioDisplayCanvas`/`LocationDetailsCanvas` read `active=True` in *every single capture* of the
-session regardless of whether their content was visible, with `activeGraphics` mostly 0-2 and one
-capture catching `BioDisplayCanvas` at 118. That pattern — GameObject always active, content count
-spiking briefly — matches something gated by `CanvasGroup.alpha` rather than `SetActive`
-(`CanvasCategoryInfo.IsCanvasEffectivelyHidden` already handles exactly this elsewhere in the
-codebase). **`CanvasDump` doesn't currently report `CanvasGroup` state** — worth adding before
-relying on it further for these two canvases.
+category-based placement/click machinery. Low risk. `UpgradesDisplayCanvas` toggled
+`active=False`/`True` cleanly (plain `SetActive`) across F9 captures as expected.
+
+**`BioDisplayCanvas` is confirmed multi-purpose — it's also the Inventory panel** (§4): a real click
+capture (`LogOutput.log:2528`, `[CaseBoard] CaseBoard target: 'Icon' on 'BioDisplayCanvas'`) shows
+an Inventory item icon resolving as a hit on `BioDisplayCanvas` itself, not a separate canvas. Its
+internal content evidently swaps between Bio info and the Inventory item grid depending on which
+`ActionPanelCanvas` tab is selected, which is why it read `active=True` in every capture of the
+session with a fluctuating `activeGraphics` count (0-2 normally, one capture at 118) — same object,
+different internal content, never actually closed. `LocationDetailsCanvas`'s exact trigger (probably
+a location pin) is still unconfirmed, but is expected to be equally simple.
 
 ---
 
@@ -178,9 +178,8 @@ No structural "parent" to start at (see §0) — sequenced by isolation and comp
 1. **`ActionPanelCanvas`** — simplest, proves out grip-drag retargeted onto an RT quad's transform
    on the lowest-risk surface (it's the anchor, not itself draggable).
 2. **`BioDisplayCanvas`, `LocationDetailsCanvas`, `UpgradesDisplayCanvas`** — zero special-casing,
-   same template as `MenuRTPanel`, low risk. (Inventory is a real, separate interactive panel per
-   §4 — not covered here; its actual canvas name is still unidentified, so it isn't placed in this
-   sequence yet.)
+   same template as `MenuRTPanel`, low risk. Covers Inventory for free — it's `BioDisplayCanvas`'s
+   own internal content (§4), not a separate canvas.
 3. **`WindowCanvas`'s nested windows (`Note` + item-inspect + Notebook)** — bigger lift: needs the new
    per-instance dynamic-RT-panel pattern (§1.3), plus verified close-button routing. Can ship
    *before* `CaseCanvas` itself converts, since the legacy corkboard can just be hooked to spawn an
@@ -204,29 +203,25 @@ failure mode.
 Nine F9 captures total, across two rounds (six, then a follow-up three after a game/log restart),
 covering different case-board and Inventory states. Findings:
 
-- **Does `Inventory` have any VR-canvas presence at all? Still open** — the equip panel itself
-  (button 3 on `ActionPanelCanvas`, per the stated Notebook/Minimap/Inventory/Upgrades order) has
-  never been captured. Two wrong conclusions already got corrected on the way to this one, worth
-  recording so a future pass doesn't repeat them:
-  1. First pass: "Inventory is just a readout inside `BioDisplayCanvas`" — based on one
-     `CanvasMaterialPatcher` log listing `InventoryText`/`CashText` among its children. Wrong:
-     in-headset testing shows button 3 opens **a genuine WorldSpace panel with the legacy laser
-     active and clickable equip items** — a real interactive canvas, not a passive text field.
-     (`BioDisplayCanvas` having those child names is still true, just unrelated to this panel.)
-  2. Second pass: a `'Katana'` canvas caught in a later F9 capture (`parent='WindowCanvas'`,
-     `514x658`, same shape as `Note`) looked like it might be the equip panel itself. Also wrong,
-     per direct correction: selecting the Katana in Inventory and clicking **Inspect actually
-     closes the Inventory panel entirely** and opens the item as a `Note`-style window back on the
-     corkboard (`WindowCanvas`, named after the item) — reusing the exact same mechanism as
-     evidence notes, not a new one. That's a real, useful, *separate* confirmed fact (§1.3 already
-     documents `Note`/`Detective's Notebook`; item-inspect-from-Inventory is a third caller of the
-     same nested-window pattern, dynamically named per item) — but it means the capture happened
-     *after* Inventory had already closed, which is exactly consistent with "the last press
-     happened while I was taken back to corkboard."
-  Net: the Inventory equip panel's own canvas is still unseen in any capture so far. **Needs a
-  capture taken while still looking at the item grid/list, before pressing Inspect** — press F9
-  immediately on opening Inventory, before selecting or inspecting anything, so the panel can't
-  have already closed by the time the dump runs.
+- **Does `Inventory` have any VR-canvas presence at all? Resolved — it's `BioDisplayCanvas`.**
+  Two wrong turns preceded this, worth recording so a future pass doesn't retrace them:
+  1. First guess: "Inventory is just a readout inside `BioDisplayCanvas`" — based on a static
+     `CanvasMaterialPatcher` child-list log (`InventoryText`/`CashText` among its children).
+     Rejected too hastily: in-headset testing showed button 3 opens a real interactive WorldSpace
+     panel with the legacy laser and clickable items, which didn't sound like "just a readout" —
+     but the underlying canvas identification was actually right.
+  2. Second guess: a `'Katana'` canvas caught in a later F9 capture looked like it might be the
+     panel itself. Wrong — that's the *item-inspect* window (§1.3), opened only after Inventory has
+     already closed.
+  3. **Confirmed by a real click capture**, not another static scan: right before the
+     `InspectButton` click in the log, `[CaseBoard] CaseBoard target: 'Icon' on 'BioDisplayCanvas'
+     btn=Left` (`LogOutput.log:2528`) records the item icon you clicked as a hit on `BioDisplayCanvas`
+     itself. So `BioDisplayCanvas` **is** the Inventory panel — a shared, multi-tab canvas whose
+     internal content swaps between Bio info and the Inventory item grid depending on which
+     `ActionPanelCanvas` tab is selected, rather than two separate canvases. That's exactly why it
+     read `active=True` in every F9 capture with a fluctuating `activeGraphics` count: same object,
+     different internal content each time, never actually closed. Migrating `BioDisplayCanvas`
+     (already step 2 in §3) covers Inventory for free — no separate canvas or migration step needed.
 - **Is `ActionPanelCanvas`'s Notebook tab button the same action as the Right-B/gesture path?
   Still open.** The dump confirms the canvas itself — `Detective's Notebook`, nested under
   `WindowCanvas` — but can't distinguish which input path opened it in a given capture. Not
