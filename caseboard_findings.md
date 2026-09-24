@@ -227,11 +227,10 @@ covering different case-board and Inventory states. Findings:
   `WindowCanvas` — but can't distinguish which input path opened it in a given capture. Not
   blocking: the migration only needs to know the canvas exists and what it looks like structurally
   (now confirmed, §1.3), not which of possibly two input paths triggers it.
-- **What actually triggers `BioDisplayCanvas`/`LocationDetailsCanvas`? Still open, and murkier than
-  expected** — see the `CanvasGroup`-alpha note in §1 above. Both were `active=True` for the entire
-  session regardless of visible content, which means "trigger" may not even be the right frame —
-  they might just always exist, gated by alpha/interactable state instead of being spawned on
-  demand. Needs a `CanvasGroup`-aware follow-up capture, not just repeating the same test.
+- **What actually triggers `BioDisplayCanvas`/`LocationDetailsCanvas`? Bio resolved, LocationDetails
+  still open** — see §6. Bio shows its content by activating child areas, not by CanvasGroup.
+  LocationDetails couldn't be triggered during the capture session, so its visible state is still
+  uncaptured.
 
 ---
 
@@ -246,8 +245,56 @@ already in `_managedCanvases` — and logs, per canvas: name, active state, root
 parent name (shows nesting depth), whether it has its own `GraphicRaycaster`, its `worldCamera`,
 and its active-graphics count.
 
-**Known gap, found by using it**: it doesn't report `CanvasGroup.alpha`/`interactable`, which is
-exactly the mechanism `BioDisplayCanvas`/`LocationDetailsCanvas` appear to use instead of
-`SetActive` (§4). Worth adding a `CanvasGroup` line per canvas (mirroring
-`CanvasCategoryInfo.IsCanvasEffectivelyHidden`'s existing walk) before using this tool to chase
-those two further.
+A case-board section (added for the RT migration) also logs, per case-board canvas: the
+`CanvasGroup` chain (canvas and every ancestor), `InterfaceController.desktopMode`, direct children
+with their rect in canvas-local pixels and component types (TooltipCanvas to depth 4), and
+`ContextMenuController`'s members. Results are in §6.
+
+---
+
+## 6. Capture session results (2026-09-24, CanvasGroup-aware F9)
+
+Eight F9 captures in one log: (1) board closed in gameplay, (2) board open, no tab, (3) Notebook
+tab, (4) Minimap tab, (5) Inventory tab, (6) Upgrades tab, (7) one note open, (8) two notes open.
+Not captured: a LocationDetails display, a hover tooltip, the pin quick-menu, a pin context menu.
+The hover states couldn't be produced because **the legacy pointer never delivers hover to the
+game** (it only moves aim dots), and the legacy A-on-pin context menu didn't open either. These get
+verified once the RT pointer sends real pointer enter/exit/right-click events.
+
+**Case-board open signal: `ActionPanelCanvas.activeInHierarchy`.** `False` in (1), `True` in
+(2)-(8); `CaseCanvas` tracks it identically. The old `CanvasPlacement` comment claiming
+ActionPanelCanvas "is always active during gameplay" is wrong. `InterfaceController.desktopMode`
+agrees in all eight captures, but popups and tutorials also set it via `PauseGame` (see
+`HudController`), so it's less specific and isn't used as the board signal.
+
+**How each canvas shows and hides** (only signals seen changing between captures):
+
+| Canvas | Hidden | Shown |
+|---|---|---|
+| ActionPanelCanvas | `activeInHierarchy=False` | active; content strip `TopPanel`+`CaseList`, rect (-928,408,1856,100) = `ControllerSelection` |
+| CaseCanvas | inactive with the board | active, `CorkBoard` fills the canvas; its CanvasGroup goes `interactable=False blocksRaycasts=False` (alpha stays 1) while the Inventory or Upgrades tab is up |
+| BioDisplayCanvas (= Inventory) | always active, no CanvasGroup, children inactive | Inventory tab activates `InventoryDisplayArea` (-610,-395,1220,790) and `SocialCreditArea` (622,-440,300,828) |
+| UpgradesDisplayCanvas | inactive; CanvasGroup alpha drops to 0 after its first close | active, alpha 1; content `UpgradeConnections` (-904,-450,1808,860) |
+| WindowCanvas | never inactive; `Canvas.enabled=False` + non-interactive CanvasGroup while the Inventory/Upgrades tab is up | windows are direct children carrying an `InfoWindow` component |
+| MinimapCanvas (stays legacy) | CanvasGroup alpha 0 | active, alpha 1 |
+| LocationDetailsCanvas | always active; `LocationDetails` child (100x100, 2 graphics) | not captured |
+
+Child rects read `(0,0,0,0)` while the board is closed — layout is only valid once it's open, so RT
+views must read rects live while visible, never cache them from the closed state.
+
+**Windows are placed off-canvas and on top of each other.** In (8): `702 Etheridge Heights` at
+(457,-961), below the canvas's bottom edge, and `Address Book` and `1201 Etheridge Heights` both at
+exactly (960,-118), past the right edge and fully overlapping. Rendering WindowCanvas as-is would clip
+or merge them, so the RT migration lays each window out into its own slot in canvas space. Window
+names are dynamic (`Detective's Notebook`, `Address Book`, addresses, item names); `InfoWindow` is
+the reliable identifier. Sizes seen: Notebook 920x800, notes/address windows 514x658 and 452x510.
+
+**TooltipCanvas** (rect 2560x1440): `ContextMenus` (nested Canvas + GraphicRaycaster), `Tooltips`
+(plain container), `PopupVignette`, `PopupMessage` (268x128), `TutorialMessage` (268x187),
+`CutSceneImage`. Tooltip and quick-menu element names are still unknown (see above).
+
+**`ContextMenuController` API** (on every pin, 40+ instances with the board open): methods
+`OpenMenu`, `ForceClose`, `SetScreenPosition`, `OnPointerClick`, `OnCommand`; fields `useLeftButton`,
+`pos`, `useCursorPos`, `cursorPosOffset`, `menuButtons`, `activeMenu`, `spawnedMenu`, `lastButton`.
+`ForceClose` is the dismiss path when a trigger press lands elsewhere; `OnPointerClick` suggests the
+menu opens natively from a right-button pointer click once the RT pointer sends one.
