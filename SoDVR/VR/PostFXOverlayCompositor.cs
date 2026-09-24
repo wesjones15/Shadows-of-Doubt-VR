@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using BepInEx.Logging;
 using UnityEngine;
@@ -50,7 +49,6 @@ internal sealed class PostFXOverlayCompositor
     private Mesh? _laserMesh;
     private Material? _laserMaterial;
     private Vector3 _sortEyePos;
-    private int _diagnosticsLogged;
 
     public void BeginFrame()
     {
@@ -89,8 +87,6 @@ internal sealed class PostFXOverlayCompositor
                 _cb.DrawMesh(_laserMesh, laser, _laserMaterial, 0, 0);
 
         Graphics.ExecuteCommandBuffer(_cb);
-
-        LogDiagnosticsOnce(eye, target);
     }
 
     /// <summary>A unit-length beam along +Z (scaled to length per draw), built as two crossed
@@ -130,18 +126,4 @@ internal sealed class PostFXOverlayCompositor
 
     private float SqrDistance(OverlayDraw d) =>
         ((Vector3)d.LocalToWorld.GetColumn(3) - _sortEyePos).sqrMagnitude;
-
-    private void LogDiagnosticsOnce(Camera eye, RenderTexture target)
-    {
-        if (_diagnosticsLogged >= 2) return;
-        _diagnosticsLogged++;
-        try
-        {
-            Log.LogInfo($"[PostFXOverlay] First composite on {eye.gameObject.name}: panels={_panels.Count} lasers={_lasers.Count} " +
-                        $"rt={target.width}x{target.height} format={target.graphicsFormat} sRGB={target.sRGB} " +
-                        $"projection==nonJittered: {eye.projectionMatrix == eye.nonJitteredProjectionMatrix}\n" +
-                        $"projection:\n{eye.projectionMatrix}");
-        }
-        catch (Exception ex) { Log.LogWarning($"[PostFXOverlay] Diagnostics: {ex.Message}"); }
-    }
 }
