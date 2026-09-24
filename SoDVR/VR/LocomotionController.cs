@@ -718,14 +718,15 @@ internal sealed class LocomotionController
         _tabHeldDown = false;
     }
 
-    /// <summary>Right thumbstick click → middle mouse button (flashlight toggle).</summary>
-    public void UpdateFlashlight()
+    /// <summary>Right thumbstick click → middle mouse button (flashlight toggle). Suppressed with
+    /// UI up, for the same reason as UpdateInteract: the click lands on flat-screen UI.</summary>
+    public void UpdateFlashlight(bool suppress)
     {
         if (VRSettingsPanel.RootGO?.activeSelf == true) return;
         OpenXRManager.GetThumbClickState(true, out bool pressed);
         bool edge = pressed && !_flashlightBtnPrev;
         _flashlightBtnPrev = pressed;
-        if (!edge) return;
+        if (!edge || suppress) return;
         try
         {
             const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
@@ -737,8 +738,9 @@ internal sealed class LocomotionController
         catch (Exception ex) { Log.LogWarning($"[Locomotion] UpdateFlashlight: {ex.Message}"); }
     }
 
-    /// <summary>Left grip → X (inventory).</summary>
-    public void UpdateInventory()
+    /// <summary>Left grip → right mouse button (secondary interact). Suppressed with UI up, for the
+    /// same reason as UpdateInteract: the click lands on flat-screen UI.</summary>
+    public void UpdateInventory(bool suppress)
     {
         if (VRSettingsPanel.RootGO?.activeSelf == true) return;
         OpenXRManager.GetGripState(false, out bool pressed);
@@ -751,7 +753,7 @@ internal sealed class LocomotionController
 
         bool edge = pressed && !_inventoryBtnPrev;
         _inventoryBtnPrev = pressed;
-        if (!edge) return;
+        if (!edge || suppress) return;
         try
         {
             // Right mouse button (game uses RMB for pick up evidence, secondary interact)

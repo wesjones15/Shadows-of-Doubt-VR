@@ -630,8 +630,8 @@ public class VRCamera : MonoBehaviour
                     catch { }
                 }
 
-                _locomotion.UpdateFlashlight();
-                _locomotion.UpdateInventory();
+                _locomotion.UpdateFlashlight(pointerOnUI || isPausedForLocomotion);
+                _locomotion.UpdateInventory(pointerOnUI || isPausedForLocomotion);
                 UpdateHeldItemTracking();
             }
             catch (Exception ex)
