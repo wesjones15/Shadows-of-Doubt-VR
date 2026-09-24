@@ -273,6 +273,24 @@ internal sealed class MenuRTPanel
         catch (Exception ex) { Log.LogWarning($"[MenuRTPanel] GraphicRaycaster setup: {ex.Message}"); }
 
         (_quadGO, _quadCollider, _quadMaterial) = CameraRig.CreateRTPanelQuad("MenuRTPanel", _quadLayer, _rt);
+
+        // TEMPORARY test: HDRP has a native queue-based AfterPostProcess mechanism, entirely
+        // separate from CustomPassVolume — any material whose renderQueue falls in
+        // HDRenderQueue.k_RenderQueue_AfterPostProcessTransparent's range gets drawn by HDRP's own
+        // internal RenderAfterPostProcessObjects pass, after the whole post stack. Unlike the
+        // reverted HDRP/Unlit test, this doesn't touch the shader or any material property we don't
+        // already understand — the quad keeps its existing, proven-stable UI/Default material; only
+        // its renderQueue int changes. FrameSettingsField.AfterPostprocess is already confirmed
+        // enabled and durable across the whole session (see CameraRig's periodic bit tracker).
+        try
+        {
+            var range = UnityEngine.Rendering.HighDefinition.HDRenderQueue.k_RenderQueue_AfterPostProcessTransparent;
+            _quadMaterial.renderQueue = range.lowerBound;
+            Log.LogInfo($"[MenuRTPanel] TEST: quad renderQueue set to AfterPostProcessTransparent range " +
+                        $"[{range.lowerBound}, {range.upperBound}], using value {range.lowerBound}");
+        }
+        catch (Exception ex) { Log.LogWarning($"[MenuRTPanel] TEST: renderQueue set failed: {ex.Message}"); }
+
         float worldH = PanelWorldWidth * ((float)rtH / rtW);
         _quadGO.transform.localScale = new Vector3(PanelWorldWidth, worldH, 1f);
 
