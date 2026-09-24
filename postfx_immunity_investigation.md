@@ -355,12 +355,9 @@ apply to it.
   not yet on RT panels) are still inside the HDRP frame and get blurred again until they migrate.
   Migrating one is now mostly a matter of an `AppendOverlay`.
 
-**Verification status**: implemented and building. At the time of writing it has **not yet been
-verified in the headset**. The Y orientation is the main reasoned-but-unconfirmed piece: the eye
-RTs hold HDRP `ForceFlipY` output and `SetViewProjectionMatrices` applies Unity's own
-render-into-texture flip, so the compositor counter-flips with one named constant (`FlipY`). If the
-panel shows upside down, remove that flip. The compositor logs the eye RT format and projection
-once on its first composite.
+**Verification status**: **verified in the headset on 2026-09-24.** Panels and laser are immune to
+DoF and TAA, and the `FlipY` counter-flip was correct as written. The working solution is written
+up on its own in `postfx_immune_ui.md`.
 
 **Possible follow-up**: submit panels as OpenXR `XrCompositionLayerQuad` layers through the mod's
 own `xrEndFrame` for sharper text (no resampling through the 0.7-scale eye buffer). The laser
@@ -381,7 +378,7 @@ varied and what didn't:
 | 4b.4 (magenta) | `CustomPassVolume` @ `AfterPostProcess` | `UI/Default` (MenuRTPanel quad) | Yes — both `supportCustomPass` and `CustomPass` bit confirmed | Fires (PressAnyKey content), but not this quad |
 | 4b.6 | `CustomPassVolume` @ `AfterPostProcess` | `HDRP/Unlit` (MenuRTPanel quad) | Yes | Crashed once; didn't work on the run that survived |
 | 4c (`bad627a`) | Native `HDRenderQueue.AfterPostProcess` | `UI/Default` (MenuRTPanel quad) | Yes — `AfterPostprocess` bit confirmed | renderQueue write confirmed; still blurry |
-| 5 | Post-HDRP `CommandBuffer` draw into the eye RT (`PostFXOverlayCompositor`) | `UI/Default` | None needed — outside HDRP | Implemented; headset verification pending |
+| 5 | Post-HDRP `CommandBuffer` draw into the eye RT (`PostFXOverlayCompositor`) | `UI/Default` | None needed — outside HDRP | Works — verified in headset |
 
 **Combinations never tried in Eras 2–4**: the native queue with `HDRP/Unlit`, a `BeforePostProcess`
 depth write, `HDRP/Unlit`'s `Exposure Weight = 0`, and a custom-authored `LightMode`-tagged shader
@@ -393,11 +390,9 @@ HDRP (Era 5) turns out to be unworkable.
 This section used to rank the untried HDRP-side combinations above. Era 5 replaced that approach.
 What's left:
 
-1. Verify Era 5 in the headset: orientation, laser-tip alignment with the hovered button, stereo
-   depth, a sharp panel over a DoF-blurred world, and no TAA smear under head motion.
-2. Migrate the remaining legacy WorldSpace canvases to RT panels. Each one then only needs to hand
+1. Migrate the remaining legacy WorldSpace canvases to RT panels. Each one then only needs to hand
    its quad to `PostFXOverlayCompositor`.
-3. Optional: OpenXR quad layers for text sharpness (see Era 5).
+2. Optional: OpenXR quad layers for text sharpness (see Era 5).
 
 ## Current live code state
 
@@ -409,8 +404,10 @@ What's left:
 - **`CameraRig.SetupRTPanelProjectorCamera`**: `antialiasing = None`. Panel textures come from
   `CameraRig.CreateRTPanelTexture` (mipmapped) and get `GenerateMips()` after each projector render.
 - **Deleted**: `SetupPostFXExemptPass` (magenta smoke test), `DiagnoseDefaultFrameSettingsCustomPass`,
-  `PeriodicCheckFrameSettingsBits`, MenuRTPanel's AfterPostProcess renderQueue test, and
-  `PostProcessingOverride.cs` together with its `Rendering.ForceDisableDepthOfField` config key.
+  `PeriodicCheckFrameSettingsBits`, and MenuRTPanel's AfterPostProcess renderQueue test.
+- **`PostProcessingOverride.cs`** (`Rendering.ForceDisableDepthOfField`, default true): deleted once
+  RT panels became immune, then restored temporarily so legacy WorldSpace canvases (the case
+  board) stay readable while they're investigated. Delete it again once they're on RT panels.
 - **`.pecheck/Program.cs`** is a scratch tool, not a persisted reference. Its contents at any moment
   are whatever was last inspected; the reusable part is the technique (decoding interop DLL metadata
   with `System.Reflection.Metadata`).
