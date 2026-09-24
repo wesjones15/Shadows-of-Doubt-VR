@@ -123,8 +123,7 @@ internal sealed class CaseBoardRTController
 
         foreach (var canvas in all)
         {
-            if (canvas == null || canvas.transform.parent != null) continue;
-            if (canvas.gameObject.name != ActionPanelCanvasName) continue;
+            if (canvas == null || canvas.gameObject.name != ActionPanelCanvasName) continue;
             try
             {
                 _actionPanel.Attach(canvas, PanelWorldWidth);

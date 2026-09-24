@@ -54,6 +54,15 @@ internal sealed class RTCanvasPanel
     {
         Detach();
 
+        // Unity only honours renderMode on a root canvas, and the case-board canvases start out
+        // nested under GameCanvas — which the HUD pipeline also manages (v1_findings.md §1).
+        // Detaching is what frees the canvas from both.
+        if (canvas.transform.parent != null)
+        {
+            Log.LogInfo($"[{_logTag}] Detaching '{canvas.gameObject.name}' from '{canvas.transform.parent.name}' to the scene root");
+            canvas.transform.SetParent(null, false);
+        }
+
         // CanvasScaler must be off BEFORE sizeDelta is read — it inflates sizeDelta from a
         // reference resolution until disabled (same order MenuRTPanel.Setup uses).
         var scaler = canvas.GetComponent<CanvasScaler>();

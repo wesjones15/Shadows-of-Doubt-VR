@@ -71,9 +71,8 @@ internal static class CanvasConversionScanner
 
             string cname = canvas.gameObject.name ?? "";
 
-            // Owned outright by an RT panel (MenuRTPanel, CaseBoardRTController) — never
-            // WorldSpace-converted here, never added to managedCanvases.
-            if (cname == "MenuCanvas" || cname == "ActionPanelCanvas") continue;
+            // Owned outright by an RT panel — never converted, never added to managedCanvases.
+            if (RTOwnedCanvases.IsOwned(cname)) continue;
 
             // TooltipCanvas is time-shared with TooltipRTPanel (see its own doc comment): while a
             // dialog is active, it's removed from managedCanvases and its renderMode flipped to
@@ -234,6 +233,7 @@ internal static class CanvasConversionScanner
                 // Genuine UI sub-panels (WindowCanvas, LocationDetailsCanvas, ActionPanelCanvas)
                 // are all root canvases, not nested, so this filter does not affect them.
                 string ncName = nc.gameObject.name ?? "";
+                if (RTOwnedCanvases.IsOwned(ncName)) continue;
                 if (ncName.IndexOf("(Clone)", StringComparison.OrdinalIgnoreCase) >= 0) continue;
                 // Also skip Loading Icon regardless of clone suffix — it is transient.
                 if (ncName.IndexOf("Loading Icon", StringComparison.OrdinalIgnoreCase) >= 0) continue;

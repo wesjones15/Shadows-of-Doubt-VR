@@ -59,7 +59,7 @@ internal sealed class CanvasMaterialPatcher
                 int layerFixed = 0;
                 foreach (var t in transforms)
                 {
-                    if (t == null) continue;
+                    if (t == null || RTOwnedCanvases.Contains(t)) continue;
                     if (t.gameObject.layer != VRCamera.UILayer)
                     {
                         t.gameObject.layer = VRCamera.UILayer;
@@ -81,7 +81,7 @@ internal sealed class CanvasMaterialPatcher
                     var groups = canvas.GetComponentsInChildren<CanvasGroup>(true);
                     foreach (var cg in groups)
                     {
-                        if (cg == null) continue;
+                        if (cg == null || RTOwnedCanvases.Contains(cg.transform)) continue;
                         // Skip the root CanvasGroup — the game uses this to hide/show the entire
                         // canvas (e.g. ActionPanelCanvas alpha=0 during pause). Overriding it
                         // would fight the game's visibility control.
@@ -107,7 +107,7 @@ internal sealed class CanvasMaterialPatcher
             int newCount = 0;
             foreach (var g in graphics)
             {
-                if (g == null) continue;
+                if (g == null || RTOwnedCanvases.Contains(g.transform)) continue;
 
                 string nm = g.gameObject.name;
                 bool isBg = nm.IndexOf("background", StringComparison.OrdinalIgnoreCase) >= 0
@@ -336,7 +336,7 @@ internal sealed class CanvasMaterialPatcher
                 int washFixed = 0;
                 foreach (var g2 in allG)
                 {
-                    if (g2 == null || TextMaterialPatcher.IsTextGraphic(g2)) continue;
+                    if (g2 == null || TextMaterialPatcher.IsTextGraphic(g2) || RTOwnedCanvases.Contains(g2.transform)) continue;
                     try
                     {
                         var m2 = g2.material;
@@ -396,7 +396,7 @@ internal sealed class CanvasMaterialPatcher
             int layerFixed = 0;
             foreach (var t in transforms)
             {
-                if (t == null) continue;
+                if (t == null || RTOwnedCanvases.Contains(t)) continue;
                 if (t.gameObject.layer != VRCamera.UILayer)
                 {
                     t.gameObject.layer = VRCamera.UILayer;
@@ -415,7 +415,7 @@ internal sealed class CanvasMaterialPatcher
             for (int i = 0; i < graphics.Length; i++)
             {
                 var g = graphics[i];
-                if (g == null) continue;
+                if (g == null || RTOwnedCanvases.Contains(g.transform)) continue;
 
                 Material orig;
                 // Use sharedMaterial to avoid creating orphaned unique material instances.
@@ -707,7 +707,7 @@ internal sealed class CanvasMaterialPatcher
             var masks = canvas.GetComponentsInChildren<Mask>(true);
             foreach (var mask in masks)
             {
-                if (mask == null || !mask.enabled) continue;
+                if (mask == null || !mask.enabled || RTOwnedCanvases.Contains(mask.transform)) continue;
                 // Hide the Mask's graphic — with the Mask disabled its Image
                 // becomes a regular visible element (often a blue hatching/diagonal
                 // pattern that obscures content when HDR-boosted in VR).
@@ -769,7 +769,7 @@ internal sealed class CanvasMaterialPatcher
             var rectMasks = canvas.GetComponentsInChildren<RectMask2D>(true);
             foreach (var rectMask in rectMasks)
             {
-                if (rectMask == null || !rectMask.enabled) continue;
+                if (rectMask == null || !rectMask.enabled || RTOwnedCanvases.Contains(rectMask.transform)) continue;
                 rectMask.enabled = false;
                 disabledRectMasks++;
             }
@@ -786,7 +786,7 @@ internal sealed class CanvasMaterialPatcher
             var groups = canvas.GetComponentsInChildren<CanvasGroup>(true);
             foreach (var group in groups)
             {
-                if (group == null) continue;
+                if (group == null || RTOwnedCanvases.Contains(group.transform)) continue;
                 // Skip the root canvas's own CanvasGroup — the game uses it to
                 // show/hide the entire canvas (e.g. ESC menu fade in/out).
                 // Forcing it to 1.0 makes the canvas permanently "visible" to our
@@ -805,7 +805,7 @@ internal sealed class CanvasMaterialPatcher
             var graphics = canvas.GetComponentsInChildren<Graphic>(true);
             foreach (var g in graphics)
             {
-                if (g == null || !TextMaterialPatcher.IsTextGraphic(g)) continue;
+                if (g == null || !TextMaterialPatcher.IsTextGraphic(g) || RTOwnedCanvases.Contains(g.transform)) continue;
 
                 try
                 {
@@ -862,7 +862,7 @@ internal sealed class CanvasMaterialPatcher
             var graphics = canvas.GetComponentsInChildren<Graphic>(true);
             foreach (var g in graphics)
             {
-                if (g == null || !TextMaterialPatcher.IsTextGraphic(g)) continue;
+                if (g == null || !TextMaterialPatcher.IsTextGraphic(g) || RTOwnedCanvases.Contains(g.transform)) continue;
 
                 // Only neutralize stencil masking here — do NOT call
                 // StrengthenMenuTextMaterial. Text HDR boost is already handled
