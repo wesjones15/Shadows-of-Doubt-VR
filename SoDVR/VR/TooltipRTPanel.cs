@@ -190,13 +190,27 @@ internal sealed class TooltipRTPanel
 
     private bool OnBeforeClick(GameObject go, Action onSaveLoadButtonClicked)
     {
-        // PopupMessage is the save/exit confirm flow — any button clicked inside it may be about
-        // to tear down the physics hierarchy, same as Continue/New Game on the main menu. Not
-        // narrowed to a specific button name (unlike MenuRTPanel's Continue/New Game/New City
-        // match) because the exact confirm-button text isn't confirmed; calling this unnecessarily
-        // just costs a harmless grace-period pause, so err on the side of calling it.
+        // PopupMessage's two buttons are literally named "Left Button"/"Right Button" (a generic,
+        // reused confirm-dialog component — not "Yes"/"No"). Confirmed via BepInEx/LogOutput.log
+        // from an actual exit-confirm session: clicking "Right Button" is what tears the game down
+        // (VRCamera.OnDestroy fired immediately after); "Left Button" (Cancel) just closes the
+        // dialog. An earlier version of this method fired onSaveLoadButtonClicked() for ANY click
+        // in the popup, reasoning a false positive was a harmless pause — it isn't: it sets a
+        // same-scene-reload grace period that freezes rendering for ~180 frames, which is exactly
+        // the multi-second black screen reported when Cancel triggered it too.
         if (_ownedPopupCanvas != null && go.transform.IsChildOf(_ownedPopupCanvas.transform))
-            onSaveLoadButtonClicked();
+        {
+            var tr = go.transform;
+            for (int i = 0; i < 8 && tr != null; i++)
+            {
+                if ((tr.gameObject.name ?? "").Equals("Right Button", StringComparison.OrdinalIgnoreCase))
+                {
+                    onSaveLoadButtonClicked();
+                    break;
+                }
+                tr = tr.parent;
+            }
+        }
         return false; // never fully handled here — always let the generic dispatch run too
     }
 
