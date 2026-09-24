@@ -80,11 +80,11 @@ Four distinct pieces, not one panel:
    rather than need porting.
 
 3. **`WindowCanvas`** — a generic nested-canvas host, `CanvasCategory.Menu`
-   (`CanvasCategoryInfo.cs:65`, comment: "detail/notebook windows"). Hosts two kinds of content as
-   genuinely nested Unity child canvases (confirmed via code, `CaseBoardInteraction.cs:336`,
-   `CanvasClickRouter.cs:109`; **and now via the F9 dump, 2026-09-24** — both literally named
-   exactly as follows, parented directly under `WindowCanvas`, `worldCam=LeftEye`,
-   `category=Default` since neither name is in `CanvasCategoryInfo`'s taxonomy):
+   (`CanvasCategoryInfo.cs:65`, comment: "detail/notebook windows"). Hosts at least three kinds of
+   content as genuinely nested Unity child canvases (confirmed via code, `CaseBoardInteraction.cs:336`,
+   `CanvasClickRouter.cs:109`; **and now via the F9 dump, 2026-09-24** — all parented directly under
+   `WindowCanvas`, `worldCam=LeftEye`, `category=Default` since none of these names are in
+   `CanvasCategoryInfo`'s taxonomy):
    - **`Note`** (evidence windows) — opened by clicking a corkboard pin. **Multiple confirmed open
      simultaneously**: the F9 dump caught two active `Note` canvases at once, both `514x658`,
      36 active graphics each — matches "click on as many as you want, they will open in space and
@@ -92,6 +92,14 @@ Four distinct pieces, not one panel:
      pre-pass individually detects and drags one `Note` at a time rather than the whole
      `WindowCanvas`. Each has a **close button that must be wired up** when migrated — not yet
      verified against the click-dispatch path, flag as a required test case.
+   - **Item-inspect windows, named per item** — confirmed by a third path into this same mechanism:
+     selecting an item in the (still-unidentified, §4) Inventory panel and clicking Inspect *closes
+     Inventory entirely* and opens the item as a `Note`-shaped window on the corkboard, named after
+     the item itself (`'Katana'` in the capture that caught this — `parent='WindowCanvas'`,
+     `514x658`, `39` active graphics, i.e. structurally identical to a `Note`). Whatever discovers
+     `WindowCanvas`'s nested windows can't match on a fixed name list (`"Note"`, `"Detective's
+     Notebook"`) — it needs to treat *any* newly-appeared direct child canvas of `WindowCanvas` as a
+     window to manage, since the name is dynamic per item.
    - **`Detective's Notebook`** — opened via `ActionPanelCanvas`'s Notebook tab, "opens in 3d space
      like the notes" (same nested-canvas mechanism). F9 confirms it as a single `920x800` nested
      canvas with real content (311 active graphics), and reveals it has its **own internal
@@ -173,7 +181,7 @@ No structural "parent" to start at (see §0) — sequenced by isolation and comp
    same template as `MenuRTPanel`, low risk. (Inventory is a real, separate interactive panel per
    §4 — not covered here; its actual canvas name is still unidentified, so it isn't placed in this
    sequence yet.)
-3. **`WindowCanvas`'s nested windows (`Note` + Notebook)** — bigger lift: needs the new
+3. **`WindowCanvas`'s nested windows (`Note` + item-inspect + Notebook)** — bigger lift: needs the new
    per-instance dynamic-RT-panel pattern (§1.3), plus verified close-button routing. Can ship
    *before* `CaseCanvas` itself converts, since the legacy corkboard can just be hooked to spawn an
    RT panel instead of a legacy `Note` on pin click — decoupled from the corkboard's own rewrite
@@ -191,26 +199,34 @@ failure mode.
 
 ---
 
-## 4. Open questions — status after the 2026-09-24 F9 test session
+## 4. Open questions — status after the 2026-09-24 F9 test sessions
 
-Six F9 captures were taken across different case-board states (933-939 `Canvas` components each).
-Findings:
+Nine F9 captures total, across two rounds (six, then a follow-up three after a game/log restart),
+covering different case-board and Inventory states. Findings:
 
-- **Does `Inventory` have any VR-canvas presence at all? Still open — the "resolved" conclusion
-  from the first pass at this doc was wrong, or at least incomplete.** That conclusion (Inventory is
-  just a readout inside `BioDisplayCanvas`, no separate screen) was based on one
-  `CanvasMaterialPatcher` graphic-queue log listing `InventoryText`/`CashText` among
-  `BioDisplayCanvas`'s children. But direct in-headset testing (2026-09-24) contradicts it: clicking
-  `ActionPanelCanvas`'s Inventory tab (button 3, per the stated Notebook/Minimap/Inventory/Upgrades
-  order) opens **a genuine WorldSpace panel with the legacy laser active, and items on it can be
-  trigger-clicked to equip** — clearly a real, separate interactive canvas, not a passive text
-  field. None of the six F9 captures show a matching canvas (the one unfamiliar name across all of
-  them, `InfoWindow`, is `active=False` in every capture), so either the panel wasn't open at the
-  exact instant any F9 was pressed, or it's gated in a way F9 keeps missing. `BioDisplayCanvas`
-  having `InventoryText`/`CashText` children is still true and probably real (a HUD-style summary),
-  but it's evidently not the same thing as this equip panel. **Needs a clean, deliberate capture**:
-  open the Inventory panel, confirm it's visible with the laser active, press F9 immediately, then
-  check `LogOutput.log` for the `[CanvasDump]` block — don't infer a name without that.
+- **Does `Inventory` have any VR-canvas presence at all? Still open** — the equip panel itself
+  (button 3 on `ActionPanelCanvas`, per the stated Notebook/Minimap/Inventory/Upgrades order) has
+  never been captured. Two wrong conclusions already got corrected on the way to this one, worth
+  recording so a future pass doesn't repeat them:
+  1. First pass: "Inventory is just a readout inside `BioDisplayCanvas`" — based on one
+     `CanvasMaterialPatcher` log listing `InventoryText`/`CashText` among its children. Wrong:
+     in-headset testing shows button 3 opens **a genuine WorldSpace panel with the legacy laser
+     active and clickable equip items** — a real interactive canvas, not a passive text field.
+     (`BioDisplayCanvas` having those child names is still true, just unrelated to this panel.)
+  2. Second pass: a `'Katana'` canvas caught in a later F9 capture (`parent='WindowCanvas'`,
+     `514x658`, same shape as `Note`) looked like it might be the equip panel itself. Also wrong,
+     per direct correction: selecting the Katana in Inventory and clicking **Inspect actually
+     closes the Inventory panel entirely** and opens the item as a `Note`-style window back on the
+     corkboard (`WindowCanvas`, named after the item) — reusing the exact same mechanism as
+     evidence notes, not a new one. That's a real, useful, *separate* confirmed fact (§1.3 already
+     documents `Note`/`Detective's Notebook`; item-inspect-from-Inventory is a third caller of the
+     same nested-window pattern, dynamically named per item) — but it means the capture happened
+     *after* Inventory had already closed, which is exactly consistent with "the last press
+     happened while I was taken back to corkboard."
+  Net: the Inventory equip panel's own canvas is still unseen in any capture so far. **Needs a
+  capture taken while still looking at the item grid/list, before pressing Inspect** — press F9
+  immediately on opening Inventory, before selecting or inspecting anything, so the panel can't
+  have already closed by the time the dump runs.
 - **Is `ActionPanelCanvas`'s Notebook tab button the same action as the Right-B/gesture path?
   Still open.** The dump confirms the canvas itself — `Detective's Notebook`, nested under
   `WindowCanvas` — but can't distinguish which input path opened it in a given capture. Not
