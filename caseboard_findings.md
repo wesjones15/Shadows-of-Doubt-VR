@@ -298,3 +298,15 @@ the reliable identifier. Sizes seen: Notebook 920x800, notes/address windows 514
 `pos`, `useCursorPos`, `cursorPosOffset`, `menuButtons`, `activeMenu`, `spawnedMenu`, `lastButton`.
 `ForceClose` is the dismiss path when a trigger press lands elsewhere; `OnPointerClick` suggests the
 menu opens natively from a right-button pointer click once the RT pointer sends one.
+
+**Correction to §0 — the case-board canvases are NOT independent roots in the game.** They start
+out as children of `GameCanvas` (startup log: `Canvas 'CaseCanvas' ... parent='GameCanvas'`, same
+for WindowCanvas, BioDisplayCanvas, LocationDetailsCanvas, UpgradesDisplayCanvas, MinimapCanvas).
+The F9 dumps showed them at the scene root only because the legacy reparent pass had already moved
+them there. Worse, which ones get moved is timing-dependent: the scanner classifies a canvas once,
+on its first scan, and `ActionPanelCanvas` (inactive at that moment) was classified as *nested*,
+so it stayed under GameCanvas as WorldSpace HUD content and never got reparented — which is why
+the first navbar RT build z-fought like a legacy panel. Consequences for every migration step:
+the RT panel must find its canvas by name wherever it lives and detach it itself
+(`RTCanvasPanel.Attach` does this), and the canvas must be in `RTOwnedCanvases` so the scanner's
+nested walk and the material patcher never touch it, even before the panel attaches.
