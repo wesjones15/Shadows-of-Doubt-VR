@@ -38,7 +38,6 @@ internal sealed class CanvasPlacement
         Dictionary<int, bool> canvasWasActive, HashSet<int> positionedCanvases,
         Dictionary<int, int> lastRescanFrame,
         CaseBoardInteraction caseBoard,
-        Dictionary<int, (Vector3 pos, Quaternion rot)> caseBoardOffsets,
         Dictionary<int, (Vector3 offset, Quaternion rot)> gripDragAnchorOffsets,
         Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
         Dictionary<int, (Vector3 worldPos, Quaternion worldRot)> nestedDragTransforms,
@@ -134,7 +133,6 @@ internal sealed class CanvasPlacement
         // (InterfaceController.windowCanvas), not CaseCanvas.
         if (caseBoardJustOpened)
         {
-            caseBoard.CaseBoardPrimaryId = -1; // reset primary so it's re-elected
             foreach (var cb in managedCanvases)
             {
                 if (cb.Value == null) continue;
@@ -417,39 +415,6 @@ internal sealed class CanvasPlacement
 
             // PopupMessage/TutorialMessage: now nested under TooltipCanvas, handled in dialog mode above.
             string cname = canvas.gameObject.name ?? "";
-
-            // CaseBoard: first canvas becomes primary anchor, others maintain relative offset
-            if (cat == CanvasCategory.CaseBoard)
-            {
-                // First CaseBoard canvas to be positioned becomes the primary
-                if (caseBoard.CaseBoardPrimaryId < 0)
-                {
-                    caseBoard.CaseBoardPrimaryId = id;
-                    // Fall through to normal placement below
-                }
-                else if (id != caseBoard.CaseBoardPrimaryId)
-                {
-                    if (managedCanvases.TryGetValue(caseBoard.CaseBoardPrimaryId, out var primary) && primary != null
-                        && positionedCanvases.Contains(caseBoard.CaseBoardPrimaryId))
-                    {
-                        // Apply stored relative offset from primary
-                        if (caseBoardOffsets.TryGetValue(id, out var stored))
-                        {
-                            canvas.transform.position = primary.transform.position + stored.pos;
-                            canvas.transform.rotation = stored.rot;
-                            positionedCanvases.Add(id);
-                            continue;
-                        }
-                        // No stored offset yet — place alongside primary with visible offset
-                        canvas.transform.position = primary.transform.position + primary.transform.right * 0.5f;
-                        canvas.transform.rotation = primary.transform.rotation;
-                        positionedCanvases.Add(id);
-                        continue;
-                    }
-                    // Primary not positioned yet — defer to next frame
-                    continue;
-                }
-            }
 
             // If user previously grip-dragged this canvas, restore relative to the case-board
             // anchor. Offset is in anchor-local space so it rotates with the anchor when the case

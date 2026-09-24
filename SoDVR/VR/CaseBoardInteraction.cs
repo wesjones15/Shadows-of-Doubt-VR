@@ -131,8 +131,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
 
     // ── Exposed to VRCamera: written here, read by the still-deferred canvas-positioning
     // code (PositionCanvases / ForceItemPositionPreRender). Public because those call sites
-    // are outside this pass's scope — see the plan doc's "cross-cutting state" section. ──
-    public int CaseBoardPrimaryId = -1;
+    // are outside this pass's scope. ──
     public bool ContextMenuFreezeApplied;
 
     /// <summary>Whether a case-board context menu is active as of this frame's PreAimScan —
@@ -192,7 +191,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private Dictionary<int, (Vector3 localOffset, Quaternion localRot)> _ctxNestedDragRelative = null!;
     private List<Canvas> _ctxWindowNestedList = null!;
     private Dictionary<int, (Vector3 pos, Quaternion rot)> _ctxGripDragEnforce = null!;
-    private Dictionary<int, (Vector3 pos, Quaternion rot)> _ctxCaseBoardOffsets = null!;
     private Dictionary<int, (Vector3 offset, Quaternion rot)> _ctxGripDragAnchorOffsets = null!;
     private Dictionary<int, (Vector3 pos, Quaternion rot, Vector3 scale)> _ctxCanvasVRPose = null!;
     private HashSet<int> _ctxNestedCanvasIds = null!;
@@ -223,7 +221,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         Dictionary<int, (Vector3 localOffset, Quaternion localRot)> nestedDragRelative,
         List<Canvas> windowNestedList,
         Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
-        Dictionary<int, (Vector3 pos, Quaternion rot)> caseBoardOffsets,
         Dictionary<int, (Vector3 offset, Quaternion rot)> gripDragAnchorOffsets,
         Dictionary<int, (Vector3 pos, Quaternion rot, Vector3 scale)> canvasVRPose,
         HashSet<int> nestedCanvasIds,
@@ -254,7 +251,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         _ctxNestedDragRelative = nestedDragRelative;
         _ctxWindowNestedList = windowNestedList;
         _ctxGripDragEnforce = gripDragEnforce;
-        _ctxCaseBoardOffsets = caseBoardOffsets;
         _ctxGripDragAnchorOffsets = gripDragAnchorOffsets;
         _ctxCanvasVRPose = canvasVRPose;
         _ctxNestedCanvasIds = nestedCanvasIds;
@@ -521,34 +517,9 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             _gripDragNestedRT = null;
         }
 
-        // Release: store relative offsets from primary CaseCanvas
+        // Release: persist the new position
         if (gripReleased && _gripDragCanvas != null)
         {
-            // Find primary if not already known — use first CaseBoard canvas found
-            if (CaseBoardPrimaryId < 0)
-            {
-                foreach (var kvp in _ctxManagedCanvases)
-                {
-                    if (kvp.Value == null) continue;
-                    if (CanvasCategoryInfo.GetCanvasCategory(kvp.Value.gameObject.name) == CanvasCategory.CaseBoard)
-                    {
-                        CaseBoardPrimaryId = kvp.Key;
-                        break;
-                    }
-                }
-            }
-
-            if (CaseBoardPrimaryId >= 0 &&
-                _ctxManagedCanvases.TryGetValue(CaseBoardPrimaryId, out var primary) &&
-                primary != null)
-            {
-                int dragId = _gripDragCanvas.GetInstanceID();
-                _ctxCaseBoardOffsets[dragId] = (
-                    _gripDragCanvas.transform.position - primary.transform.position,
-                    _gripDragCanvas.transform.rotation
-                );
-            }
-
             // B-button minimap: save as VROrigin-relative offset (body-locked context).
             // Skip the anchor-relative save so case board context is unaffected.
             string releasedName = _gripDragCanvas.gameObject.name ?? "";

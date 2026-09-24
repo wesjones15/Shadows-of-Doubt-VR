@@ -134,9 +134,6 @@ public class VRCamera : MonoBehaviour
     private Vector3    _contextMenuFreezePos;    // world position to enforce while context menu is frozen
     private Quaternion _contextMenuFreezeRot;    // world rotation to enforce while context menu is frozen
     private Vector3    _contextMenuChildWorldPos; // actual world pos of context menu child after zeroing (set in pre-render)
-    // Relative offsets (position + rotation) from primary CaseCanvas to other CaseBoard canvases.
-    // Preserved across opens so the user's layout is maintained.
-    private readonly Dictionary<int, (Vector3 pos, Quaternion rot)> _caseBoardOffsets = new();
     // Grip-drag offset stored relative to the case-board anchor, which is re-placed each time the
     // case board opens, so offsets stay consistent.
     private readonly Dictionary<int, (Vector3 offset, Quaternion rot)> _gripDragAnchorOffsets = new();
@@ -1107,7 +1104,6 @@ public class VRCamera : MonoBehaviour
                 _canvasWasActive, _positionedCanvases,
                 _lastRescanFrame,
                 _caseBoard,
-                _caseBoardOffsets,
                 _gripDragAnchorOffsets,
                 _gripDragEnforce,
                 _nestedDragTransforms,
@@ -1289,7 +1285,7 @@ public class VRCamera : MonoBehaviour
             _popupMessageCanvas, _tutorialMessageCanvas, _tooltipRTPanel.IsOwned,
             _nestedDragTransforms, _nestedDragRelative,
             _windowNestedList,
-            _gripDragEnforce, _caseBoardOffsets, _gripDragAnchorOffsets,
+            _gripDragEnforce, _gripDragAnchorOffsets,
             _canvasVRPose, _nestedCanvasIds,
             transform, _cursorHasTarget, _cursorTargetCanvas,
             _locomotion.MinimapInBBtnContext, _minimapBBtnLocalOffset, _minimapBBtnLocalRot, _minimapBBtnHasOffset);
