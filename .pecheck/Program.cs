@@ -14,128 +14,85 @@ class Program
         action(mdReader);
     }
 
-    static void Main()
+    static void DumpType(MetadataReader mdReader, string typeName, bool fieldsToo = true)
     {
-        var asmCsharp = @"E:\SteamLibrary\steamapps\common\Shadows of Doubt\BepInEx\interop\Assembly-CSharp.dll";
-        var fmodDll   = @"E:\SteamLibrary\steamapps\common\Shadows of Doubt\BepInEx\interop\FMODUnity.dll";
-
-        // ==================== TASK 1: Find class with masterVolumeScale ====================
-        Console.WriteLine("=== TASK 1: Class with masterVolumeScale ===");
-        InspectDll(asmCsharp, mdReader =>
+        bool found = false;
+        foreach (var typeHandle in mdReader.TypeDefinitions)
         {
-            string? targetClass = null;
-            string? targetNamespace = null;
-            TypeDefinitionHandle targetHandle = default;
+            var typeDef = mdReader.GetTypeDefinition(typeHandle);
+            if (mdReader.GetString(typeDef.Name) != typeName) continue;
+            found = true;
+            Console.WriteLine($"=== {mdReader.GetString(typeDef.Namespace)}.{typeName} ===");
 
-            foreach (var typeHandle in mdReader.TypeDefinitions)
+            if (fieldsToo)
             {
-                var typeDef = mdReader.GetTypeDefinition(typeHandle);
-                foreach (var methodHandle in typeDef.GetMethods())
+                Console.WriteLine("-- Fields --");
+                foreach (var fieldHandle in typeDef.GetFields())
                 {
-                    var method = mdReader.GetMethodDefinition(methodHandle);
-                    var methodName = mdReader.GetString(method.Name);
-                    if (methodName == "get_masterVolumeScale" || methodName == "set_masterVolumeScale")
-                    {
-                        targetClass = mdReader.GetString(typeDef.Name);
-                        targetNamespace = mdReader.GetString(typeDef.Namespace);
-                        targetHandle = typeHandle;
-                        break;
-                    }
+                    var field = mdReader.GetFieldDefinition(fieldHandle);
+                    Console.WriteLine($"  {field.Attributes} {mdReader.GetString(field.Name)}");
                 }
-                if (targetClass != null) break;
             }
 
-            if (targetClass == null) { Console.WriteLine("NOT FOUND"); return; }
-
-            Console.WriteLine($"Class: {targetNamespace}.{targetClass}");
-            Console.WriteLine("All methods:");
-            var typeDef2 = mdReader.GetTypeDefinition(targetHandle);
-            foreach (var methodHandle in typeDef2.GetMethods())
+            Console.WriteLine("-- Methods --");
+            foreach (var methodHandle in typeDef.GetMethods())
             {
                 var method = mdReader.GetMethodDefinition(methodHandle);
-                Console.WriteLine($"  {mdReader.GetString(method.Name)}");
+                Console.WriteLine($"  [{method.Attributes}] {mdReader.GetString(method.Name)}");
             }
+
+            Console.WriteLine("-- Properties --");
+            foreach (var propHandle in typeDef.GetProperties())
+            {
+                var prop = mdReader.GetPropertyDefinition(propHandle);
+                Console.WriteLine($"  {mdReader.GetString(prop.Name)}");
+            }
+            break;
+        }
+        if (!found) Console.WriteLine($"{typeName} NOT FOUND");
+        Console.WriteLine();
+    }
+
+    static void Main()
+    {
+        var hdrpDll = @"W:\SteamLibrary\steamapps\common\Shadows Of Doubt\BepInEx\interop\Unity.RenderPipelines.HighDefinition.Runtime.dll";
+
+        InspectDll(hdrpDll, mdReader =>
+        {
+            DumpType(mdReader, "HDRenderPipelineGlobalSettings");
+            DumpType(mdReader, "FrameSettingsRenderType", fieldsToo: true);
+            DumpType(mdReader, "FrameSettings");
+            DumpType(mdReader, "FrameSettingsField", fieldsToo: true);
         });
 
-        // ==================== TASK 2: AudioController ====================
-        Console.WriteLine();
-        Console.WriteLine("=== TASK 2: AudioController — all methods ===");
-        InspectDll(asmCsharp, mdReader =>
+        Console.WriteLine("=== Searching ALL types in HDRP runtime for 'DefaultFrameSettings' in field/method/property names ===");
+        InspectDll(hdrpDll, mdReader =>
         {
-            bool found = false;
-            foreach (var typeHandle in mdReader.TypeDefinitions)
-            {
-                var typeDef = mdReader.GetTypeDefinition(typeHandle);
-                if (mdReader.GetString(typeDef.Name) != "AudioController") continue;
-                found = true;
-                Console.WriteLine($"Namespace: {mdReader.GetString(typeDef.Namespace)}");
-
-                var volKws = new[] { "volume", "setmaster", "getmaster", "mastervol", "setlevel", "setbus", "getvolume", "setvolume" };
-                Console.WriteLine("Volume/level/master/bus matches:");
-                foreach (var methodHandle in typeDef.GetMethods())
-                {
-                    var method = mdReader.GetMethodDefinition(methodHandle);
-                    var mn = mdReader.GetString(method.Name);
-                    var mnL = mn.ToLowerInvariant();
-                    foreach (var kw in volKws)
-                        if (mnL.Contains(kw)) { Console.WriteLine($"  [MATCH] {mn}"); break; }
-                }
-
-                Console.WriteLine("All methods:");
-                foreach (var methodHandle in typeDef.GetMethods())
-                {
-                    var method = mdReader.GetMethodDefinition(methodHandle);
-                    Console.WriteLine($"  {mdReader.GetString(method.Name)}");
-                }
-                break;
-            }
-            if (!found) Console.WriteLine("AudioController NOT FOUND");
-        });
-
-        // ==================== TASK 3: FMODUnity RuntimeManager ====================
-        Console.WriteLine();
-        Console.WriteLine("=== TASK 3: FMODUnity.dll — RuntimeManager all methods ===");
-        InspectDll(fmodDll, mdReader =>
-        {
-            bool found = false;
-            foreach (var typeHandle in mdReader.TypeDefinitions)
-            {
-                var typeDef = mdReader.GetTypeDefinition(typeHandle);
-                if (mdReader.GetString(typeDef.Name) != "RuntimeManager") continue;
-                found = true;
-                Console.WriteLine($"Namespace: {mdReader.GetString(typeDef.Namespace)}");
-                Console.WriteLine("All methods:");
-                foreach (var methodHandle in typeDef.GetMethods())
-                {
-                    var method = mdReader.GetMethodDefinition(methodHandle);
-                    Console.WriteLine($"  [{method.Attributes}] {mdReader.GetString(method.Name)}");
-                }
-                break;
-            }
-            if (!found) Console.WriteLine("RuntimeManager NOT FOUND");
-
-            Console.WriteLine();
-            Console.WriteLine("All FMODUnity types/methods matching bus/vca/volume/master/studio/setvol:");
-            var kwds = new[] { "setvolume", "getmaster", "getvca", "getbus", "studiosystem", "bus", "vca", "volume", "master" };
-            var seen = new HashSet<string>();
             foreach (var typeHandle in mdReader.TypeDefinitions)
             {
                 var typeDef = mdReader.GetTypeDefinition(typeHandle);
                 var typeName = mdReader.GetString(typeDef.Name);
+
+                foreach (var fieldHandle in typeDef.GetFields())
+                {
+                    var field = mdReader.GetFieldDefinition(fieldHandle);
+                    var fn = mdReader.GetString(field.Name);
+                    if (fn.IndexOf("DefaultFrameSettings", StringComparison.OrdinalIgnoreCase) >= 0)
+                        Console.WriteLine($"  FIELD {typeName}.{fn}  [{field.Attributes}]");
+                }
                 foreach (var methodHandle in typeDef.GetMethods())
                 {
                     var method = mdReader.GetMethodDefinition(methodHandle);
                     var mn = mdReader.GetString(method.Name);
-                    var mnL = mn.ToLowerInvariant();
-                    foreach (var kw in kwds)
-                    {
-                        if (mnL.Contains(kw))
-                        {
-                            var key = $"{typeName}.{mn}";
-                            if (seen.Add(key)) Console.WriteLine($"  {key}");
-                            break;
-                        }
-                    }
+                    if (mn.IndexOf("DefaultFrameSettings", StringComparison.OrdinalIgnoreCase) >= 0)
+                        Console.WriteLine($"  METHOD {typeName}.{mn}  [{method.Attributes}]");
+                }
+                foreach (var propHandle in typeDef.GetProperties())
+                {
+                    var prop = mdReader.GetPropertyDefinition(propHandle);
+                    var pn = mdReader.GetString(prop.Name);
+                    if (pn.IndexOf("DefaultFrameSettings", StringComparison.OrdinalIgnoreCase) >= 0)
+                        Console.WriteLine($"  PROP {typeName}.{pn}");
                 }
             }
         });

@@ -720,6 +720,7 @@ public class VRCamera : MonoBehaviour
 
         CameraRig.LogLayerAudit();
         CameraRig.SetupPostFXExemptPass(UILayer);
+        CameraRig.DiagnoseDefaultFrameSettingsCustomPass();
 
         // Try to find and disable the game camera now. If it's not available yet
         // (e.g. main menu hasn't spawned one), TryFindGameCamera() will keep retrying in Update().

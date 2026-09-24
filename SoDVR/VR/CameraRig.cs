@@ -286,6 +286,47 @@ internal static class CameraRig
     }
 
     /// <summary>
+    /// One-time diagnostic: confirms whether <c>FrameSettingsField.CustomPass</c> can actually be
+    /// forced on for cameras using the HDRP asset's default Camera profile — i.e. any camera with
+    /// <c>customRenderingSettings=false</c>, which is both eye cameras and (implicitly) whatever
+    /// camera <see cref="SetupPostFXExemptPass"/>'s installed volume was relying on to ever draw
+    /// anything. In this HDRP version, default FrameSettings live on
+    /// <c>HDRenderPipelineGlobalSettings</c> (confirmed via interop DLL inspection — NOT on
+    /// <c>HDRenderPipelineAsset</c> directly; that field was migrated off it in this version), and
+    /// <c>GetDefaultFrameSettings</c> is byref-returning — the same shape as
+    /// <c>HDAdditionalCameraData.renderingPathCustomFrameSettings</c>, which this project already
+    /// proved silently drops writes made through it over the IL2CPP interop boundary. This writes
+    /// through the backing-field property (<c>m_RenderingPathDefaultCameraFrameSettings</c>) instead,
+    /// mirroring that fix, and logs before/after so the fix can be confirmed rather than assumed.
+    /// Diagnostic only — no rendering behavior changes here.
+    /// </summary>
+    public static void DiagnoseDefaultFrameSettingsCustomPass()
+    {
+        try
+        {
+            var globalSettings = HDRenderPipelineGlobalSettings.instance;
+            if (globalSettings == null)
+            {
+                Log.LogWarning("[CameraRig] Diagnostic: HDRenderPipelineGlobalSettings.instance is null");
+                return;
+            }
+
+            var before = globalSettings.GetDefaultFrameSettings(FrameSettingsRenderType.Camera);
+            Log.LogInfo($"[CameraRig] Diagnostic: default Camera FrameSettings.CustomPass BEFORE write = " +
+                        $"{before.IsEnabled(FrameSettingsField.CustomPass)}");
+
+            var fs = globalSettings.m_RenderingPathDefaultCameraFrameSettings;
+            fs.SetEnabled(FrameSettingsField.CustomPass, true);
+            globalSettings.m_RenderingPathDefaultCameraFrameSettings = fs;
+
+            var after = globalSettings.GetDefaultFrameSettings(FrameSettingsRenderType.Camera);
+            Log.LogInfo($"[CameraRig] Diagnostic: default Camera FrameSettings.CustomPass AFTER backing-field write = " +
+                        $"{after.IsEnabled(FrameSettingsField.CustomPass)}");
+        }
+        catch (Exception ex) { Log.LogWarning($"[CameraRig] DiagnoseDefaultFrameSettingsCustomPass failed: {ex.Message}"); }
+    }
+
+    /// <summary>
     /// Builds a manually-rendered, fully independent camera for an RT panel (MenuRTPanel,
     /// TooltipRTPanel, ...): post-processing and exposure disabled, solid-color clear, TAA (this
     /// camera owns its RenderTexture exclusively and renders it every frame on its own, so TAA's
