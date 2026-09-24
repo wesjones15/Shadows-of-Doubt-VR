@@ -340,6 +340,56 @@ varied and what didn't:
   infrastructure (`.pecheck`-style interop inspection only), so this is a real infrastructure cost,
   not a small addition.
 
+## Recommended next step, ranked
+
+If picking this up cold, don't start by re-deriving a plan from the matrix above — start here:
+
+1. **Retry `HDRP/Unlit` eligibility, but on the native queue path (4c), not `CustomPassVolume` (4b).**
+   This is the one untested cell that would most cheaply confirm or kill the "needs a properly
+   HDRP-tagged shader" theory, without repeating 4b.6's crash — the crash happened while testing the
+   `CustomPassVolume` mechanism specifically; whether it repeats on the queue-based path is itself
+   unknown and worth finding out with a save backed up first. If it crashes here too, that's evidence
+   the crash is about the shader/material manipulation itself, not the mechanism — informs whether a
+   custom-authored shader is truly required before touching `HDRP/Unlit` again at all.
+2. **If that's inconclusive or crashes again**: stand up the shader-authoring/AssetBundle pipeline and
+   build a minimal purpose-made shader, rather than continuing to guess at stock shaders' undocumented
+   property/tag expectations from outside. This is the path the evidence has been pointing toward
+   since 4b.6, and removes the guessing-at-a-black-box risk entirely — testable in the Unity Editor
+   before it ever touches this game.
+3. **`BeforePostProcess` depth-write** remains a smaller, lower-effort fallback that only fixes DoF
+   specifically (not TAA/bloom/exposure) — worth doing only if 1–2 stall out completely and a partial
+   fix is judged better than none.
+
+## Current live code state — what's actually in the codebase right now
+
+Not all of the above was cleanly reverted. A fresh session should know exactly what's still sitting in
+production files before assuming the code reflects settled architecture:
+
+- **`SoDVR/VR/CameraRig.cs`**: `SetupPostFXExemptPass` still installs the magenta `overrideMaterial`
+  smoke test from §4b.4 (`Shader.Find("Sprites/Default")`, `Color.magenta`) — still called from
+  `VRCamera.cs`, still live. `DiagnoseDefaultFrameSettingsCustomPass` (§4b.1–4b.3's diagnostic writes
+  and logging) is also still present and still called once at startup. `PeriodicCheckFrameSettingsBits`
+  (§4b.5) is still called **every single frame** from `VRCamera.Update()` — harmless (only logs on
+  change, and hasn't logged since frame 0) but real per-frame overhead sitting in a hot path.
+- **`SoDVR/VR/MenuRTPanel.cs`**: the `renderQueue` test from §4c (`bad627a`) is still live in `Setup()`
+  — the quad's material still has its `renderQueue` forced into
+  `HDRenderQueue.k_RenderQueue_AfterPostProcessTransparent`'s range. This has no visible effect today
+  (confirmed still blurry) but means the quad is *not* currently on its original default render queue.
+- **`SoDVR/VR/PostProcessingOverride.cs`**: unchanged throughout this whole investigation —
+  `ForceDisableDepthOfField` is still the only thing actually suppressing the symptom in the shipped
+  build.
+- **Reverted, not live**: the `HDRP/Unlit` shader-eligibility test (§4b.6) — reverted in `1311e7b`,
+  `MenuRTPanel`'s quad is back on `UI/Default`.
+- **`.pecheck/Program.cs`** is a scratch tool, not a persisted reference — it currently sits pointed at
+  whatever was last inspected (`RenderQueueRange` in `UnityEngine.CoreModule.dll`, from §4c's
+  investigation) and gets overwritten by whatever the next interop question is. Don't treat its current
+  contents as meaningful; treat the *technique* (decode a specific interop DLL's metadata for a
+  specific type/method, via `System.Reflection.Metadata`/`PortableExecutable`) as the reusable part.
+
+None of this diagnostic/test code should be treated as intentional design — it's exactly what CLAUDE.md's
+no-coexistence rule means to flag for cleanup once a real fix lands or this investigation is shelved,
+not evidence of a decision to keep any of it.
+
 ## Standing constraints, confirmed across multiple eras
 
 - **HDRP does not support camera stacking in this game's build** (Era 2e). Any future idea implying
