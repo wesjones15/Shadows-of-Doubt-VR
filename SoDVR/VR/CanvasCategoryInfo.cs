@@ -62,7 +62,6 @@ internal static class CanvasCategoryInfo
         // Menu — recentres in front of head on activate; always in front of Panel canvases
         ["MenuCanvas"]                = CanvasCategory.Menu,
         ["DialogCanvas"]              = CanvasCategory.Menu,
-        ["WindowCanvas"]              = CanvasCategory.Menu,     // detail/notebook windows
         ["PopupMessage"]              = CanvasCategory.Menu,     // exit/confirm dialogs — placed 0.2m closer
         ["controlsCanvas"]            = CanvasCategory.Menu,
         ["upgradesCanvas"]            = CanvasCategory.Menu,

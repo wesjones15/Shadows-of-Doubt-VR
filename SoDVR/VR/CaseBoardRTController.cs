@@ -30,6 +30,7 @@ internal sealed class CaseBoardRTController
 
     private readonly CaseBoardPanel _navbar;
     private readonly CaseBoardPanel[] _panels;
+    private readonly CaseBoardWindows _windows;
     private readonly Transform _anchor;
     private bool _wasOpen;
     private bool _anchorPlaced;
@@ -48,6 +49,7 @@ internal sealed class CaseBoardRTController
             new CaseBoardPanel("LocationDetailsCanvas", CaseBoardWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip),
             new CaseBoardPanel("UpgradesDisplayCanvas", PanelWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip),
         };
+        _windows = new CaseBoardWindows(quadLayer, input, grip);
 
         var anchorGO = new GameObject("SoDVR_CaseBoardAnchor");
         Object.DontDestroyOnLoad(anchorGO);
@@ -76,6 +78,7 @@ internal sealed class CaseBoardRTController
         bool relayout = _relayoutPending;
         _relayoutPending = false;
         foreach (var panel in _panels) panel.Tick(open, relayout, _anchor);
+        _windows.Tick(relayout, _anchor);
     }
 
     /// <summary>F8: re-place the board in front of the current head pose.</summary>
@@ -87,11 +90,13 @@ internal sealed class CaseBoardRTController
     public void Render()
     {
         foreach (var panel in _panels) panel.Render();
+        _windows.Render();
     }
 
     public void AppendOverlay(PostFXOverlayCompositor overlay)
     {
         foreach (var panel in _panels) panel.AppendOverlay(overlay);
+        _windows.AppendOverlay(overlay);
     }
 
     private void PlaceAnchor(Camera leftCam)

@@ -48,11 +48,31 @@ internal sealed class RTCanvasPanel
 
     public IReadOnlyList<RTPanelView> Views => _views;
 
+    /// <summary>Screen layout: the texture is the game's screen and the game's CanvasScaler stays
+    /// in charge, so the canvas is laid out exactly as the flat game lays it out.</summary>
     /// <param name="screenWorldWidth">World width the full screen width maps to; sets the
     /// metres-per-pixel every view is sized with.</param>
-    /// <param name="rtSize">Texture (and so canvas) size; defaults to the game's screen size.
-    /// Larger when the owner lays extra content out on the canvas.</param>
-    public void Attach(Canvas canvas, float screenWorldWidth, Vector2Int? rtSize = null)
+    public void Attach(Canvas canvas, float screenWorldWidth)
+    {
+        // The CanvasScaler is deliberately left alone: in ScreenSpaceCamera it scales against the
+        // projector's pixel size, which is the screen size, so the game's layout is untouched.
+        // (Legacy disabled it only because WorldSpace canvases are sized by transform instead.)
+        var size = ScreenSize();
+        AttachCore(canvas, size, screenWorldWidth / size.x);
+    }
+
+    /// <summary>Sheet layout: the canvas becomes a <paramref name="sheetSize"/> sheet of
+    /// 1-pixel units (CanvasScaler off, scale factor 1) for an owner that positions content on it
+    /// itself — e.g. spreading windows the game stacks on top of each other into separate slots.</summary>
+    public void AttachSheet(Canvas canvas, float metersPerUnit, Vector2Int sheetSize)
+    {
+        var scaler = canvas.GetComponent<CanvasScaler>();
+        if (scaler != null) { try { scaler.enabled = false; } catch { } }
+        if (Math.Abs(canvas.scaleFactor - 1f) > 0.001f) canvas.scaleFactor = 1f;
+        AttachCore(canvas, sheetSize, metersPerUnit);
+    }
+
+    private void AttachCore(Canvas canvas, Vector2Int size, float metersPerPixel)
     {
         Detach();
 
@@ -65,11 +85,6 @@ internal sealed class RTCanvasPanel
             canvas.transform.SetParent(null, false);
         }
 
-        // The CanvasScaler is deliberately left alone: in ScreenSpaceCamera it scales against the
-        // projector's pixel size, which is the screen size, so the game's layout is untouched.
-        // (Legacy disabled it only because WorldSpace canvases are sized by transform instead.)
-        var size = rtSize ?? ScreenSize();
-        float metersPerPixel = screenWorldWidth / ScreenSize().x;
         Texture = CameraRig.CreateRTPanelTexture(size.x, size.y, $"SoDVR_{_logTag}_RT");
         ProjectorCamera = CameraRig.SetupRTPanelProjectorCamera(_logTag, canvas.gameObject.layer);
         ProjectorCamera.targetTexture = Texture;
@@ -103,6 +118,16 @@ internal sealed class RTCanvasPanel
         if (!_views.Remove(view)) return;
         _input.Unregister(view.Pointer);
         view.Destroy();
+    }
+
+    /// <summary>Canvas-local position of a texture pixel (bottom-left origin) — for owners that lay
+    /// content out on a sheet. Goes through the projector so it holds whatever the canvas's pivot.</summary>
+    public Vector3 CanvasLocalOfPixel(Vector2 pixel)
+    {
+        if (Canvas == null || ProjectorCamera == null) return pixel;
+        var world = ProjectorCamera.ScreenToWorldPoint(new Vector3(pixel.x, pixel.y, Canvas.planeDistance));
+        var local = Canvas.transform.InverseTransformPoint(world);
+        return new Vector3(local.x, local.y, 0f);
     }
 
     /// <summary>Renders the canvas into its texture — only while some view is showing it. Called
