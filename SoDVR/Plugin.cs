@@ -19,6 +19,14 @@ public class Plugin : BasePlugin
         Log = base.Log;
         Log.LogInfo($"SoDVR {MyPluginInfo.PLUGIN_VERSION} loading...");
 
+        PostProcessingOverride.ForceDisableDepthOfField = Config.Bind(
+            "Rendering",
+            "ForceDisableDepthOfField",
+            true,
+            "Forces HDRP DepthOfField off on every Volume. Temporary dev workaround: legacy WorldSpace " +
+            "canvases (e.g. the case board) are still blurred by the scene's depth of field until they " +
+            "move to RT panels — set false to restore normal depth of field.");
+
         SoDVR.VR.Rooms.VoidRoomController.Enabled = Config.Bind(
             "VoidRoom",
             "Enabled",

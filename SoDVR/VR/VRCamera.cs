@@ -268,6 +268,7 @@ public class VRCamera : MonoBehaviour
         // Always drain the event queue so VDXR can advance the session state machine.
         OpenXRManager.PollEventsPublic();
 
+        PostProcessingOverride.Tick();
         _voidRoom.UpdatePressAnyKeyClick(_gameCam == null);
 
         // Detect scene changes and apply a grace period during which we skip

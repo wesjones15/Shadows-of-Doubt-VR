@@ -21,11 +21,11 @@ the room should instead be gated on that (or on both, whichever is later) rather
 
 A visual-noise/grain effect is visible over the void room, most apparent when transitioning
 from the press-any-key void into the main-menu void (i.e. it's present on both, so it's not
-specific to one screen). It was observed with DepthOfField forced off on every Volume (the
-since-removed `PostProcessingOverride` stopgap), so it isn't DepthOfField — likely film grain or
-dithering, applied via the HDRP volume/camera settings.
+specific to one screen). This survives `PostProcessingOverride.ForceDisableDepthOfField`
+(`SoDVR/VR/PostProcessingOverride.cs`), so it isn't DepthOfField — likely film grain or
+dithering, still being applied via the HDRP volume/camera settings even with DoF forced off.
 
 Needs identifying which HDRP component/camera setting is responsible (candidates: film grain,
 dithering — see `HDAdditionalCameraData.dithering`, `FrameSettingsField.Dithering` already
-referenced elsewhere in `VRCamera.cs`) and disabling it, e.g. via the
+referenced elsewhere in `VRCamera.cs`) and either disabling it the same way DoF was, or via the
 existing `EyeRenderState`/`TakeOverCameras` neutral-environment path in `VoidRoom.cs`.
