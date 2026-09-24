@@ -1279,8 +1279,15 @@ public class VRCamera : MonoBehaviour
         // legacy laser/cursor-dot system is for the WorldSpace-canvas pipeline and would otherwise
         // draw a second, redundant beam alongside it. IsInteractable (not IsShowing) so this and
         // each RT panel's own interaction gate read the exact same stable signal every frame.
-        bool anyRTPanelOwnsPointer = _menuRTPanel.IsInteractable || _tooltipRTPanel.IsInteractable;
-        if (anyRTPanelOwnsPointer)
+        //
+        // Also suppressed for the whole void-room period (_gameCam == null: press-any-key, main
+        // menu, loading) regardless of MenuRTPanel's own discovery/placement timing — reported bug:
+        // 2 legacy aim-dots visible right where the menu panel was about to appear, in the frames
+        // before MenuRTPanel had discovered/placed its quad. Nothing legacy (case board, notebook
+        // windows, any of it) can exist while there's no real game camera, so there's nothing this
+        // would incorrectly suppress — nothing legitimate is reachable there in the first place.
+        bool suppressLegacyPointer = _gameCam == null || _menuRTPanel.IsInteractable || _tooltipRTPanel.IsInteractable;
+        if (suppressLegacyPointer)
         {
             if (_cursorRect != null && _cursorRect.gameObject.activeSelf) _cursorRect.gameObject.SetActive(false);
             if (_laserLine != null && _laserLine.enabled) _laserLine.enabled = false;
@@ -1312,12 +1319,10 @@ public class VRCamera : MonoBehaviour
 
         // Depth scan: find ALL managed canvases the controller ray hits within their rects, and
         // render a world-space aim dot at every hit. The nearest hit drives the primary cursor
-        // canvas (for click targeting / tooltip depth). Skipped while any RT panel owns
-        // interaction — this scan is a legacy-WorldSpace-canvas visual (hardcoded to the right
-        // controller, unaware of RTPanelPointer's hand swap) that would otherwise render a stray
-        // dot at whatever other Menu-category legacy canvas happens to sit near the RT panel.
+        // canvas (for click targeting / tooltip depth). Skipped under the same conditions as the
+        // legacy laser above — see suppressLegacyPointer's comment.
         AimScanResult aim;
-        if (anyRTPanelOwnsPointer)
+        if (suppressLegacyPointer)
         {
             _controllerInteraction.HideAllAimDots();
             aim = default;
