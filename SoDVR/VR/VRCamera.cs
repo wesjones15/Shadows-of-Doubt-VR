@@ -63,6 +63,7 @@ public class VRCamera : MonoBehaviour
     private readonly CanvasMaterialPatcher _materialPatcher = new();
     private readonly CanvasPlacement _canvasPlacement = new();
     private readonly MenuRTPanel _menuRTPanel = new(UILayer);
+    private readonly TooltipRTPanel _tooltipRTPanel = new(UILayer);
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
     // The swapchain copy still runs every frame, so head tracking stays smooth via ATW.
@@ -362,7 +363,7 @@ public class VRCamera : MonoBehaviour
                     ref _actionPanelCanvas, ref _actionPanelId, ref _minimapCanvasRef,
                     ref _popupMessageGO, ref _popupMessageCanvas,
                     ref _tutorialMessageGO, ref _tutorialMessageCanvas,
-                    _windowNestedList, _noGroupInteractable);
+                    _windowNestedList, _noGroupInteractable, _tooltipRTPanel.IsOwned);
             }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] ScanAndConvertCanvases outer: {ex.GetType().Name}: {ex.Message}"); }
         }
@@ -373,6 +374,12 @@ public class VRCamera : MonoBehaviour
         {
             try { _menuRTPanel.Tick(_leftCam); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
+
+            // TooltipCanvas is time-shared with the legacy pipeline (see TooltipRTPanel's own
+            // doc comment) — this call is what pulls it out of _managedCanvases while a dialog is
+            // active and hands it back the instant the dialog closes.
+            try { _tooltipRTPanel.Tick(_leftCam, _managedCanvases, _popupMessageCanvas, _tutorialMessageCanvas); }
+            catch (Exception ex) { Log.LogWarning($"[VRCamera] TooltipRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
         }
 
         // F8: re-centre all canvases in front of the current head pose.
@@ -1187,10 +1194,12 @@ public class VRCamera : MonoBehaviour
                 // Viewport at minimum zoom (applied once after MapController is ready).
                 _canvasPlacement.UpdateMinimapZoom(_materialPatcher);
 
-                // MenuCanvas's RT panel renders first so its texture is current before the eye
-                // cameras render the quad sampling it this frame.
+                // RT panels render first so their textures are current before the eye cameras
+                // render the quads sampling them this frame.
                 try { _menuRTPanel.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.Render: {ex.Message}"); }
+                try { _tooltipRTPanel.Render(); }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] TooltipRTPanel.Render: {ex.Message}"); }
 
                 // No GL.invertCulling — HDRP flipYMode handles both Y-flip and culling.
                 _rightCam.Render();
@@ -1254,7 +1263,7 @@ public class VRCamera : MonoBehaviour
             _leftCam, _gameCamRef, _rightControllerGO, _leftControllerGO,
             _actionPanelCanvas, _casePanelCanvas, _minimapCanvasRef,
             _popupMessageGO, _tutorialMessageGO,
-            _popupMessageCanvas, _tutorialMessageCanvas,
+            _popupMessageCanvas, _tutorialMessageCanvas, _tooltipRTPanel.IsOwned,
             _nestedDragTransforms, _nestedDragRelative,
             _windowNestedList,
             _gripDragEnforce, _caseBoardOffsets, _gripDragAnchorOffsets,
@@ -1266,11 +1275,12 @@ public class VRCamera : MonoBehaviour
         _caseBoard.UpdateGripDrag();
         (_minimapBBtnLocalOffset, _minimapBBtnLocalRot, _minimapBBtnHasOffset) = _caseBoard.MinimapBBtnResult;
 
-        // MenuRTPanel owns its own laser/cursor/hover/click while its quad is visible — the
+        // Any RT panel owns its own laser/cursor/hover/click while its quad is visible — the
         // legacy laser/cursor-dot system is for the WorldSpace-canvas pipeline and would otherwise
         // draw a second, redundant beam alongside it. IsInteractable (not IsShowing) so this and
-        // MenuRTPanel's own interaction gate read the exact same stable signal every frame.
-        if (_menuRTPanel.IsInteractable)
+        // each RT panel's own interaction gate read the exact same stable signal every frame.
+        bool anyRTPanelOwnsPointer = _menuRTPanel.IsInteractable || _tooltipRTPanel.IsInteractable;
+        if (anyRTPanelOwnsPointer)
         {
             if (_cursorRect != null && _cursorRect.gameObject.activeSelf) _cursorRect.gameObject.SetActive(false);
             if (_laserLine != null && _laserLine.enabled) _laserLine.enabled = false;
@@ -1288,6 +1298,12 @@ public class VRCamera : MonoBehaviour
                 _managedCanvases, _lastRescanFrame, () => _forceScanFrames = 30, OnSaveLoadButtonClicked);
         }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.UpdateInteraction: {ex.Message}"); }
+        try
+        {
+            _tooltipRTPanel.UpdateInteraction(_rightControllerGO, _leftControllerGO,
+                _managedCanvases, _lastRescanFrame, () => _forceScanFrames = 30, OnSaveLoadButtonClicked);
+        }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] TooltipRTPanel.UpdateInteraction: {ex.Message}"); }
 
         _controllerInteraction.UpdateLeftInteractMarker(_leftControllerGO, _menuRTPanel.Canvas, _gameCamRef,
             _leftCam, _interactionLayerMask, _baseInteractionRange);
@@ -1300,9 +1316,8 @@ public class VRCamera : MonoBehaviour
         // interaction — this scan is a legacy-WorldSpace-canvas visual (hardcoded to the right
         // controller, unaware of RTPanelPointer's hand swap) that would otherwise render a stray
         // dot at whatever other Menu-category legacy canvas happens to sit near the RT panel.
-        bool anyRTPanelInteractable = _menuRTPanel.IsInteractable;
         AimScanResult aim;
-        if (anyRTPanelInteractable)
+        if (anyRTPanelOwnsPointer)
         {
             _controllerInteraction.HideAllAimDots();
             aim = default;

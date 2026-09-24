@@ -38,7 +38,8 @@ internal static class CanvasConversionScanner
         ref Canvas? actionPanelCanvas, ref int actionPanelId, ref Canvas? minimapCanvasRef,
         ref GameObject? popupMessageGO, ref Canvas? popupMessageCanvas,
         ref GameObject? tutorialMessageGO, ref Canvas? tutorialMessageCanvas,
-        List<Canvas> windowNestedList, HashSet<int> noGroupInteractable)
+        List<Canvas> windowNestedList, HashSet<int> noGroupInteractable,
+        bool tooltipRTPanelOwnsDialog)
     {
         var dead = new List<int>();
         foreach (var kvp in managedCanvases)
@@ -73,6 +74,14 @@ internal static class CanvasConversionScanner
             // MenuCanvas is owned outright by MenuRTPanel (RT-projected quad, immune to
             // post-processing) — not WorldSpace-converted here, never added to managedCanvases.
             if (cname == "MenuCanvas") continue;
+
+            // TooltipCanvas is time-shared with TooltipRTPanel (see its own doc comment): while a
+            // dialog is active, it's removed from managedCanvases and its renderMode flipped to
+            // ScreenSpaceCamera by that panel. Without this check, this scan (running independently
+            // every UICanvasScanRate frames) would see "not in managedCanvases, not WorldSpace" and
+            // re-claim it mid-dialog — re-adding it here and forcing it back to WorldSpace out from
+            // under the RT panel that currently owns it.
+            if (cname == "TooltipCanvas" && tooltipRTPanelOwnsDialog) continue;
 
             // Skip transient map-component canvases (high-churn, hundreds spawned/destroyed)
             if (cname.IndexOf("MapDuct",    StringComparison.OrdinalIgnoreCase) >= 0 ||

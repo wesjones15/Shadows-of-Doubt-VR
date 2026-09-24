@@ -180,6 +180,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private GameObject? _ctxTutorialMessageGO;
     private Canvas? _ctxPopupMessageCanvas;
     private Canvas? _ctxTutorialMessageCanvas;
+    private bool _ctxTooltipRTPanelOwnsDialog;
     private Dictionary<int, (Vector3 worldPos, Quaternion worldRot)> _ctxNestedDragTransforms = null!;
     private Dictionary<int, (Vector3 localOffset, Quaternion localRot)> _ctxNestedDragRelative = null!;
     private List<Canvas> _ctxWindowNestedList = null!;
@@ -210,7 +211,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         Camera? leftCam, Camera? gameCamRef, GameObject? rightControllerGO, GameObject? leftControllerGO,
         Canvas? actionPanelCanvas, Canvas? casePanelCanvas, Canvas? minimapCanvasRef,
         GameObject? popupMessageGO, GameObject? tutorialMessageGO,
-        Canvas? popupMessageCanvas, Canvas? tutorialMessageCanvas,
+        Canvas? popupMessageCanvas, Canvas? tutorialMessageCanvas, bool tooltipRTPanelOwnsDialog,
         Dictionary<int, (Vector3 worldPos, Quaternion worldRot)> nestedDragTransforms,
         Dictionary<int, (Vector3 localOffset, Quaternion localRot)> nestedDragRelative,
         List<Canvas> windowNestedList,
@@ -240,6 +241,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         _ctxTutorialMessageGO = tutorialMessageGO;
         _ctxPopupMessageCanvas = popupMessageCanvas;
         _ctxTutorialMessageCanvas = tutorialMessageCanvas;
+        _ctxTooltipRTPanelOwnsDialog = tooltipRTPanelOwnsDialog;
         _ctxNestedDragTransforms = nestedDragTransforms;
         _ctxNestedDragRelative = nestedDragRelative;
         _ctxWindowNestedList = windowNestedList;
@@ -2194,9 +2196,13 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
 
         // Dialog mode: add PopupMessage/TutorialMessage canvases directly to hits. Their parent
         // (TooltipCanvas) GraphicRaycaster can't resolve children at different localScale, so we
-        // test PopupMessage's own GraphicRaycaster separately.
-        bool dialogActive = (_ctxPopupMessageGO != null && _ctxPopupMessageGO.activeSelf)
-                         || (_ctxTutorialMessageGO != null && _ctxTutorialMessageGO.activeSelf);
+        // test PopupMessage's own GraphicRaycaster separately. Skipped entirely while
+        // TooltipRTPanel owns the dialog — it's overridden their worldCamera to its own projector
+        // camera, and this plane test (against a now-stale TooltipCanvas-relative transform) would
+        // fight it rather than find anything meaningful.
+        bool dialogActive = !_ctxTooltipRTPanelOwnsDialog &&
+                             ((_ctxPopupMessageGO != null && _ctxPopupMessageGO.activeSelf)
+                           || (_ctxTutorialMessageGO != null && _ctxTutorialMessageGO.activeSelf));
         if (dialogActive)
         {
             Canvas?[] dialogCanvases = { _ctxPopupMessageCanvas, _ctxTutorialMessageCanvas };
