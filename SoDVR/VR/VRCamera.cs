@@ -1242,7 +1242,7 @@ public class VRCamera : MonoBehaviour
         try
         {
             _rtPanelInput.Update(_rightControllerGO, _leftControllerGO, legacyHitDistance,
-                new RTPanelClickContext(_managedCanvases, _lastRescanFrame, () => _forceScanFrames = 30));
+                new RTPanelClickContext(() => _forceScanFrames = 30));
         }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] RTPanelInput.Update: {ex.Message}"); }
 

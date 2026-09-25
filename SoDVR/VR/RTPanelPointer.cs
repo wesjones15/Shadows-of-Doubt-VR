@@ -31,18 +31,13 @@ internal readonly struct RTPointerInput
     }
 }
 
-/// <summary>Legacy-pipeline state CanvasClickRouter.InvokeButtonClick still needs when a click
-/// spawns new content (rescan-cooldown clearing).</summary>
+/// <summary>What a click needs from outside the RT pipeline: a prompt legacy-canvas scan, since a
+/// click can open a canvas the legacy pipeline still owns.</summary>
 internal readonly struct RTPanelClickContext
 {
-    public readonly Dictionary<int, Canvas> ManagedCanvases;
-    public readonly Dictionary<int, int> LastRescanFrame;
     public readonly Action RequestForceScan;
 
-    public RTPanelClickContext(Dictionary<int, Canvas> managedCanvases, Dictionary<int, int> lastRescanFrame, Action requestForceScan)
-    {
-        ManagedCanvases = managedCanvases; LastRescanFrame = lastRescanFrame; RequestForceScan = requestForceScan;
-    }
+    public RTPanelClickContext(Action requestForceScan) => RequestForceScan = requestForceScan;
 }
 
 /// <summary>
@@ -313,13 +308,15 @@ internal sealed class RTPanelPointer
         if (_ped == null || _canvas == null) return;
         if (_onBeforeClick != null && _onBeforeClick(go)) return;
 
-        Log.LogInfo($"[{_logTag}] Click: '{go.name}'");
-        bool handledByButton = CanvasClickRouter.InvokeButtonClick(go, _canvas, ctx.ManagedCanvases, ctx.LastRescanFrame, ctx.RequestForceScan);
-        if (!handledByButton)
-        {
-            ExecuteEvents.ExecuteHierarchy(go, _ped, ExecuteEvents.pointerClickHandler);
-            ExecuteEvents.ExecuteHierarchy(go, _ped, ExecuteEvents.submitHandler);
-        }
+        // Exactly what a mouse click does: pointerClick to every handler on the object that takes it
+        // (Button and the game's ButtonController alike) — the game's own click code runs its
+        // persistent listeners and OnLeftClick/OnPress itself.
+        _ped.clickCount = 1;
+        _ped.clickTime = Time.unscaledTime;
+        var handler = ExecuteEvents.ExecuteHierarchy(go, _ped, ExecuteEvents.pointerClickHandler);
+        _ped.pointerClick = handler!;
+        LogClick(go, handler);
+        ctx.RequestForceScan();
 
         var walker = go.transform;
         for (int i = 0; i < 6 && walker != null; i++)
@@ -333,6 +330,31 @@ internal sealed class RTPanelPointer
             }
             walker = walker.parent;
         }
+    }
+
+    // Diagnostic: who took the click, whether the game's mouse-input guard was open, and the
+    // Button's persistent listeners (target, method, state at rest) — shows any double fire.
+    private void LogClick(GameObject go, GameObject? handler)
+    {
+        var sb = new System.Text.StringBuilder($"[{_logTag}] Click: '{go.name}' handledBy='{handler?.name ?? "none"}'");
+        try { sb.Append($" mouseInputMode={InputController.Instance?.mouseInputMode}"); } catch { }
+        try
+        {
+            var btn = handler != null ? handler.GetComponent<Button>() : null;
+            if (btn != null)
+            {
+                int count = btn.onClick.GetPersistentEventCount();
+                sb.Append($" persistent={count}");
+                for (int i = 0; i < count; i++)
+                {
+                    var target = btn.onClick.GetPersistentTarget(i);
+                    sb.Append($" [{target?.GetIl2CppType().Name ?? "null"}.{btn.onClick.GetPersistentMethodName(i)} {btn.onClick.GetPersistentListenerState(i)}]");
+                }
+            }
+            if (handler != null && handler.GetComponent<ButtonController>() is { } bc) sb.Append($" buttonController={bc.GetIl2CppType().Name}");
+        }
+        catch (Exception ex) { sb.Append($" (listener read failed: {ex.Message})"); }
+        Log.LogInfo(sb.ToString());
     }
 
     /// <summary>A complete right-button press/release/click on whatever is under the pointer, on
