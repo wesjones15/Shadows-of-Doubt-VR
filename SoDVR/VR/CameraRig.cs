@@ -238,11 +238,12 @@ internal static class CameraRig
     /// directly; TAA only softened it. Caller still needs to set <c>targetTexture</c> once the
     /// panel's RenderTexture exists.
     /// </summary>
-    public static Camera SetupRTPanelProjectorCamera(string logTag, int cullingLayer)
+    /// <param name="sharedScreen">A screen-sized panel: placed at the pose every such panel shares.</param>
+    public static Camera SetupRTPanelProjectorCamera(string logTag, int cullingLayer, bool sharedScreen = false)
     {
         var camGO = new GameObject($"SoDVR_{logTag}_Camera");
         UnityEngine.Object.DontDestroyOnLoad(camGO);
-        camGO.transform.position = NextProjectorIsolationPosition();
+        camGO.transform.position = sharedScreen ? SharedScreenProjectorPosition : NextProjectorIsolationPosition();
         var cam = camGO.AddComponent<Camera>();
         cam.enabled = false; // manual render only
         cam.stereoTargetEye = StereoTargetEyeMask.None;
@@ -290,15 +291,21 @@ internal static class CameraRig
     }
 
     // A ScreenSpaceCamera canvas sits planeDistance in front of its projector, and every projector
-    // culls the shared UI layer — so two projectors at the same spot could each see the other's
-    // canvas, and one near the player could see legacy WorldSpace UI. Each gets its own spot below
-    // anything in the city, further apart than a projector's far clip plane. Not far below: the
-    // canvas is laid out at that world position, and at -10000 m a float only resolves ~1 mm —
+    // culls the shared UI layer — so one near the player could see legacy WorldSpace UI. Projectors
+    // sit below anything in the city, further from it than their far clip plane. Not far below:
+    // the canvas is laid out at that world position, and at -10000 m a float only resolves ~1 mm —
     // about 2 canvas pixels — which snapped vertical movement into steps and made small buttons
     // (a note's 24 px close button) miss their own hit test.
     private const float ProjectorIsolationDepth = -500f;
     private const float ProjectorIsolationSpacing = 50f;
     private static int s_projectorCount;
+
+    // The flat game draws all its screen canvases in one screen and copies world positions between
+    // them (the pin quick-menu goes where its pin is). Screen-sized panels therefore share one
+    // projector pose, so a screen pixel is the same world point on every one of them. A
+    // ScreenSpaceCamera canvas is drawn only by its own camera, so sharing the spot doesn't mix
+    // their renders; panels of another size (the window sheet, the pause menu) keep their own spot.
+    private static readonly Vector3 SharedScreenProjectorPosition = new(-2f * ProjectorIsolationSpacing, ProjectorIsolationDepth, 0f);
 
     private static Vector3 NextProjectorIsolationPosition() =>
         new(s_projectorCount++ * ProjectorIsolationSpacing, ProjectorIsolationDepth, 0f);
