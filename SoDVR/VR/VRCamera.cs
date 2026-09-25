@@ -1278,7 +1278,7 @@ public class VRCamera : MonoBehaviour
 
         // Grip-drag: move CaseBoard canvases with the grip button.
         bool rtOwnsGrip = false;
-        try { rtOwnsGrip = _rtPanelGrip.Update(_rightControllerGO); }
+        try { rtOwnsGrip = _rtPanelGrip.Update(_rightControllerGO, _leftControllerGO, _rtPanelInput.ActiveHandIsRight); }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] RTPanelGrip.Update: {ex.Message}"); }
         _caseBoard.UpdateGripDrag(rtOwnsGrip);
         (_minimapBBtnLocalOffset, _minimapBBtnLocalRot, _minimapBBtnHasOffset) = _caseBoard.MinimapBBtnResult;

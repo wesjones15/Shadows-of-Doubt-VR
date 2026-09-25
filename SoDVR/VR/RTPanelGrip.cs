@@ -22,9 +22,10 @@ internal interface IRTGripTarget
 }
 
 /// <summary>
-/// Right-grip 6DOF drag of RT panels — the legacy WorldSpace grip-drag's math, ported: the point
-/// grabbed stays under the controller ray and the panel keeps its rotation relative to the
-/// controller. Right controller only, matching legacy.
+/// Grip 6DOF drag of RT panels — the legacy WorldSpace grip-drag's math, ported: the point grabbed
+/// stays under the controller ray and the panel keeps its rotation relative to the controller.
+/// Belongs to whichever hand carries the laser (RTPanelInput's active hand), so pointing and
+/// grabbing are always the same hand.
 /// </summary>
 internal sealed class RTPanelGrip
 {
@@ -34,7 +35,9 @@ internal sealed class RTPanelGrip
 
     private readonly List<IRTGripTarget> _targets = new();
     private IRTGripTarget? _dragging;
-    private bool _gripWasPressed;
+    private bool _draggingWithRightHand;
+    private bool _rightGripWasPressed;
+    private bool _leftGripWasPressed;
     private Vector3 _hitOffsetFromController;
     private Vector3 _hitOffsetFromTarget;
     private Quaternion _rotationOffset;
@@ -54,17 +57,30 @@ internal sealed class RTPanelGrip
 
     /// <summary>Returns true while this frame's grip belongs to an RT panel (grabbed one this
     /// press, or is mid-drag) — the legacy grip-drag must not start then.</summary>
-    public bool Update(GameObject? rightControllerGO)
+    public bool Update(GameObject? rightControllerGO, GameObject? leftControllerGO, bool activeHandIsRight)
     {
-        OpenXRManager.GetGripState(true, out bool gripNow);
-        bool pressed = gripNow && !_gripWasPressed;
-        bool released = !gripNow && _gripWasPressed;
-        _gripWasPressed = gripNow;
+        OpenXRManager.GetGripState(true, out bool rightGrip);
+        OpenXRManager.GetGripState(false, out bool leftGrip);
+        bool rightPressed = rightGrip && !_rightGripWasPressed;
+        bool leftPressed = leftGrip && !_leftGripWasPressed;
+        _rightGripWasPressed = rightGrip;
+        _leftGripWasPressed = leftGrip;
 
-        if (rightControllerGO == null) { EndDrag(); return false; }
-        var ctrl = rightControllerGO.transform;
+        // A drag stays with the hand that started it; a new one starts on the laser hand.
+        bool useRight = _dragging != null ? _draggingWithRightHand : activeHandIsRight;
+        bool gripNow = useRight ? rightGrip : leftGrip;
+        bool pressed = useRight ? rightPressed : leftPressed;
+        bool released = _dragging != null && !gripNow;
 
-        if (pressed && _dragging == null) TryBeginDrag(ctrl);
+        var hand = useRight ? rightControllerGO : leftControllerGO;
+        if (hand == null) { EndDrag(); return false; }
+        var ctrl = hand.transform;
+
+        if (pressed && _dragging == null)
+        {
+            TryBeginDrag(ctrl);
+            _draggingWithRightHand = useRight;
+        }
 
         if (_dragging != null && gripNow)
         {

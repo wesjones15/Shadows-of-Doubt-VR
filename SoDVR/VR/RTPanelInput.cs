@@ -40,6 +40,10 @@ internal sealed class RTPanelInput
     private Vector3 _laserEnd;
 
     public bool HasFocus => _focus != null;
+
+    /// <summary>Which hand currently carries the laser — the hand every RT panel interaction,
+    /// grip-drag included, belongs to.</summary>
+    public bool ActiveHandIsRight => _useRightHand;
     public bool IsCapturing => _captured != null;
     public Vector3 FocusPoint => _laserEnd;
     public float FocusDistance { get; private set; }
