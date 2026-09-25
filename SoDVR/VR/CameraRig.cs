@@ -291,9 +291,12 @@ internal static class CameraRig
 
     // A ScreenSpaceCamera canvas sits planeDistance in front of its projector, and every projector
     // culls the shared UI layer — so two projectors at the same spot could each see the other's
-    // canvas, and one near the player could see legacy WorldSpace UI. Each gets its own spot far
-    // below anything in the city, further apart than a projector's far clip plane.
-    private const float ProjectorIsolationDepth = -10000f;
+    // canvas, and one near the player could see legacy WorldSpace UI. Each gets its own spot below
+    // anything in the city, further apart than a projector's far clip plane. Not far below: the
+    // canvas is laid out at that world position, and at -10000 m a float only resolves ~1 mm —
+    // about 2 canvas pixels — which snapped vertical movement into steps and made small buttons
+    // (a note's 24 px close button) miss their own hit test.
+    private const float ProjectorIsolationDepth = -500f;
     private const float ProjectorIsolationSpacing = 50f;
     private static int s_projectorCount;
 
