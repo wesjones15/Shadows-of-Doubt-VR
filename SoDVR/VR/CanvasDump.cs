@@ -89,6 +89,66 @@ internal static class CanvasDump
         }
 
         DumpContextMenuControllerMembers();
+        DumpInventoryCloseButton();
+    }
+
+    /// <summary>
+    /// Why the inventory's X (BioScreenController.closeButton) isn't drawn in its RT panel: every
+    /// way it could be hidden — inactive, faded by colour / CanvasRenderer / CanvasGroup alpha,
+    /// culled or clipped by a mask, on a nested canvas, or placed outside the canvas rect.
+    /// </summary>
+    public static void DumpInventoryCloseButton()
+    {
+        try
+        {
+            var bio = BioScreenController.Instance;
+            if (bio == null) { Log.LogInfo("[CanvasDump] BioScreenController.Instance=null"); return; }
+            var button = bio.closeButton;
+            Log.LogInfo($"[CanvasDump] BioScreenController isOpen={bio.isOpen} openedFromPause={bio.openedFromPause} " +
+                        $"inventoryDisplayProgress={bio.inventoryDisplayProgress:F2} closeButton={(button == null ? "null" : "set")}");
+            if (button == null) return;
+
+            var t = button.transform;
+            Canvas? owner = null;
+            var path = new StringBuilder(t.gameObject.name);
+            for (var tr = t.parent; tr != null; tr = tr.parent)
+            {
+                path.Insert(0, tr.gameObject.name + "/");
+                if (owner == null) owner = tr.GetComponent<Canvas>();
+            }
+            owner ??= t.GetComponent<Canvas>();
+            var root = owner != null ? owner.rootCanvas : null;
+            Log.LogInfo($"[CanvasDump] closeButton path='{path}' activeSelf={t.gameObject.activeSelf} activeInHierarchy={t.gameObject.activeInHierarchy} " +
+                        $"interactable={button.interactable} ownerCanvas='{owner?.gameObject.name}' nested={(owner != null && !owner.isRootCanvas)} " +
+                        $"overrideSorting={owner?.overrideSorting} sortingOrder={owner?.sortingOrder} rootCanvas='{root?.gameObject.name}' " +
+                        $"rectInRoot={(root != null ? CanvasLocalRect(root, t.GetComponent<RectTransform>()) : "n/a")} rootRect={DescribeRect(root?.GetComponent<RectTransform>())} " +
+                        $"canvasGroups=[{DescribeCanvasGroupChain(t)}] masks=[{DescribeMasks(t)}]");
+
+            foreach (var g in t.GetComponentsInChildren<Graphic>(true))
+            {
+                if (g == null) continue;
+                var cr = g.canvasRenderer;
+                Log.LogInfo($"[CanvasDump]   graphic '{g.gameObject.name}' {g.GetIl2CppType().Name} activeInHierarchy={g.gameObject.activeInHierarchy} " +
+                            $"enabled={g.enabled} colorA={g.color.a:F2} rendererA={cr.GetAlpha():F2} inheritedA={cr.GetInheritedAlpha():F2} " +
+                            $"cull={cr.cull} raycastTarget={g.raycastTarget} depth={g.depth} " +
+                            $"rect={(root != null ? CanvasLocalRect(root, g.rectTransform) : "n/a")}");
+            }
+        }
+        catch (Exception ex) { Log.LogWarning($"[CanvasDump] Inventory close button: {ex.Message}"); }
+    }
+
+    private static string DescribeMasks(Transform t)
+    {
+        var sb = new StringBuilder();
+        for (var tr = t.parent; tr != null; tr = tr.parent)
+        {
+            var mask = tr.GetComponent<Mask>();
+            var rectMask = tr.GetComponent<RectMask2D>();
+            if ((mask == null || !mask.enabled) && (rectMask == null || !rectMask.enabled)) continue;
+            if (sb.Length > 0) sb.Append("; ");
+            sb.Append($"'{tr.gameObject.name}' {(mask != null && mask.enabled ? "Mask" : "RectMask2D")}");
+        }
+        return sb.ToString();
     }
 
     private static void DumpChildren(Canvas canvas, Transform parent, int maxDepth, int depth)

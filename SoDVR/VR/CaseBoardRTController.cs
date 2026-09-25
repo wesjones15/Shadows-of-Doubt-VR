@@ -38,6 +38,8 @@ internal sealed class CaseBoardRTController
     // Set whenever the anchor moves (open, F8); consumed by the next Tick, since F8 is handled
     // after this frame's Tick has already run.
     private bool _relayoutPending;
+    private bool _inventoryWasOpen;
+    private int _inventoryDumpFrame = -1;
 
     public CaseBoardRTController(int quadLayer, RTPanelInput input, RTPanelGrip grip)
     {
@@ -81,6 +83,19 @@ internal sealed class CaseBoardRTController
         _relayoutPending = false;
         foreach (var panel in _panels) panel.Tick(open, relayout, _anchor);
         _windows.Tick(relayout, _anchor);
+        LogInventoryCloseButtonAfterOpen();
+    }
+
+    // Diagnostic for the inventory's missing X (__pending_tasks.md §3), logged once the open
+    // animation has settled.
+    private void LogInventoryCloseButtonAfterOpen()
+    {
+        bool inventoryOpen = false;
+        try { inventoryOpen = BioScreenController.Instance != null && BioScreenController.Instance.isOpen; } catch { }
+        if (inventoryOpen && !_inventoryWasOpen) _inventoryDumpFrame = Time.frameCount + 60;
+        _inventoryWasOpen = inventoryOpen;
+        if (!inventoryOpen || Time.frameCount != _inventoryDumpFrame) return;
+        CanvasDump.DumpInventoryCloseButton();
     }
 
     /// <summary>F8: re-place the board in front of the current head pose.</summary>

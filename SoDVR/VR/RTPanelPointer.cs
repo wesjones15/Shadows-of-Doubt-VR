@@ -231,6 +231,8 @@ internal sealed class RTPanelPointer
         _dragRejected = false;
         _pressWorldPoint = worldPoint;
 
+        LogPressCandidates();
+
         if (_extension != null && _extension.TryTakePress(hitGo, sample))
         {
             _pressed = hitGo ?? sample.Canvas.gameObject;
@@ -413,6 +415,20 @@ internal sealed class RTPanelPointer
             if (TryRaycastCanvas(overlay, ped, out result)) return result.gameObject;
         }
         return _canvas != null && TryRaycastCanvas(_canvas, ped, out result) ? result.gameObject : null;
+    }
+
+    // Diagnostic: every canvas's top hit under a press, to check which one should have won.
+    private void LogPressCandidates()
+    {
+        if (_ped == null || _canvas == null) return;
+        var sb = new System.Text.StringBuilder();
+        for (int i = _overlayCanvases.Count - 1; i >= -1; i--)
+        {
+            var c = i >= 0 ? _overlayCanvases[i] : _canvas;
+            if (c == null || !TryRaycastCanvas(c, _ped, out var r)) continue;
+            sb.Append($" '{r.gameObject.name}'@'{c.gameObject.name}'(layer={r.sortingLayer} order={r.sortingOrder} depth={r.depth})");
+        }
+        Log.LogInfo($"[{_logTag}] Press candidates:{(sb.Length > 0 ? sb.ToString() : " none")}");
     }
 
     private static bool TryRaycastCanvas(Canvas canvas, PointerEventData ped, out RaycastResult result)

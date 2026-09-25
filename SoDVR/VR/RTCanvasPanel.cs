@@ -153,15 +153,21 @@ internal sealed class RTCanvasPanel
     /// while it's showing.</summary>
     public Rect PixelRectOf(RectTransform rt)
     {
-        if (ProjectorCamera == null || Texture == null) return Rect.zero;
+        if (Texture == null) return Rect.zero;
+        var r = UnclampedPixelRectOf(rt);
+        return Rect.MinMaxRect(
+            Mathf.Clamp(r.xMin, 0f, Texture.width), Mathf.Clamp(r.yMin, 0f, Texture.height),
+            Mathf.Clamp(r.xMax, 0f, Texture.width), Mathf.Clamp(r.yMax, 0f, Texture.height));
+    }
+
+    /// <summary>The same rect before clamping to the texture — where the game actually put it.</summary>
+    public Rect UnclampedPixelRectOf(RectTransform rt)
+    {
+        if (ProjectorCamera == null) return Rect.zero;
         var r = rt.rect;
         Vector3 a = ProjectorCamera.WorldToScreenPoint(rt.TransformPoint(new Vector3(r.xMin, r.yMin, 0f)));
         Vector3 b = ProjectorCamera.WorldToScreenPoint(rt.TransformPoint(new Vector3(r.xMax, r.yMax, 0f)));
-        float xMin = Mathf.Clamp(Mathf.Min(a.x, b.x), 0f, Texture.width);
-        float xMax = Mathf.Clamp(Mathf.Max(a.x, b.x), 0f, Texture.width);
-        float yMin = Mathf.Clamp(Mathf.Min(a.y, b.y), 0f, Texture.height);
-        float yMax = Mathf.Clamp(Mathf.Max(a.y, b.y), 0f, Texture.height);
-        return Rect.MinMaxRect(xMin, yMin, xMax, yMax);
+        return Rect.MinMaxRect(Mathf.Min(a.x, b.x), Mathf.Min(a.y, b.y), Mathf.Max(a.x, b.x), Mathf.Max(a.y, b.y));
     }
 
     /// <summary>
