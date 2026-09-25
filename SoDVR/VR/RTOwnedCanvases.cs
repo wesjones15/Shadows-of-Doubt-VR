@@ -24,6 +24,7 @@ internal static class RTOwnedCanvases
         "CaseCanvas",
         "TooltipCanvas",
         "DialogCanvas",
+        "MinimapCanvas",
         ConversationSpeechPanel.CanvasName,
     };
 
