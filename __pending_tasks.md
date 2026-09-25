@@ -1,7 +1,7 @@
 # Pending tasks
 
-Observations from testing the void room (see `SoDVR/VR/Rooms/VoidRoomController.cs`,
-`SoDVR/VR/Rooms/VoidRoom.cs`) that weren't fixed on the spot — noted here so they aren't lost.
+Observations from testing (the void room, the case board, the legacy canvases) that weren't fixed on
+the spot — noted here so they aren't lost.
 
 ## 1. Void room terminates a hair before player movement is enabled
 
@@ -30,30 +30,21 @@ dithering — see `HDAdditionalCameraData.dithering`, `FrameSettingsField.Dither
 referenced elsewhere in `VRCamera.cs`) and either disabling it the same way DoF was, or via the
 existing `EyeRenderState`/`TakeOverCameras` neutral-environment path in `VoidRoom.cs`.
 
-## 3. BioDisplayCanvas (Inventory) RT panel still misbehaves — deferred
+## 3. BioDisplayCanvas (Inventory) close X — unconfirmed
 
-Reported after the case-board RT migration (2026-09-24): the Inventory panel works for item
-selection and Inspect, but has remaining issues, including its close button not showing. It can be
-closed from the navbar, so this was deferred rather than blocking the migration.
-
-What's already ruled out: content clipped at the texture edge. After `9f3b715` (screen-sized
-texture, game's own ConstantPixelSize scaler left enabled) the `[CaseBoardPanel] ... reach past the
-texture edge` diagnostic logged nothing for BioDisplayCanvas, so the close button isn't being cut off
-— the cause is elsewhere (candidates: the button is hidden by the game's controller/mouse-mode
-state, lives on another canvas, or is excluded by `CaseBoardPanel`'s content-rect/visibility
-rules). Start with an F9 capture with Inventory open and a careful look at what the flat game shows.
+Reported after the case-board RT migration (2026-09-24): the inventory's close X didn't show. The
+inventory has since become two views, `InventoryDisplayArea` and `SocialCreditArea`, placed side by
+side at the vanilla gap (`18c04ec`), and it closes instantly (`0f38248`); both confirmed in the
+headset. Whether the X now shows and works wasn't re-checked, and the X-specific diagnostics were
+removed in cleanup. If it's still missing, start from an F9 capture with the inventory open;
+content clipped at the texture edge is already ruled out.
 
 ## 4. Minimap — revisit to match vanilla — deferred
 
 MinimapCanvas is still on the legacy WorldSpace pipeline and behaves like the base mod's map. After
 the rest of the case-board migration, rework it to behave more like the vanilla game's map rather
-than porting the legacy map hacks (`CaseBoardInteraction`'s manual `mapCursorNode` driving, hidden
+than porting the legacy map hacks (`LegacyCanvasInteraction`'s manual `mapCursorNode` driving, hidden
 overlay-button skip, ScrollRect-based panning) onto an RT panel as-is.
-
-Update (2026-09-25): the panel is now centred on the screen centre (inventory in the middle, XP bar
-on the right). The close button is still under investigation: legacy showed a working X in the
-case-board inventory, and its state (active, alphas, masks, owning canvas, rect) is now logged
-automatically about a second after the inventory opens (`[CanvasDump] closeButton ...`).
 
 ## 5. Inventory status cards — deferred to a HUD refactor
 
@@ -72,14 +63,13 @@ reproduced afterwards. If it recurs, copy `BepInEx/LogOutput.log` and Player.log
 and check how `VRCamera`/`OpenXRManager` handle the VISIBLE → FOCUSED transition and whether frame
 submission resumes.
 
-## 7. Pin quick-menu never shows — step 6's fix reverted
+## 7. Legacy canvases still click the base mod's way
 
-The game puts the pin quick-menu (and right-click context menus) at a world position copied from
-another canvas, which in the flat game is the same screen. Each RT canvas has its own projector at
-its own spot, so the copy lands tens of metres off the TooltipCanvas texture (logged x ≈ 93,228)
-and the menu is never visible. Sharing one projector pose between the screen-sized panels fixed
-that (`6fedc16`), but after loading a save the pause menu and case board then took a long time to
-open; reverting it (`e821ed0`) made them instant again, confirmed by the user. The mechanism behind
-that delay is unknown. Fix the quick-menu another way — e.g. move a tracked TooltipCanvas element
-that lands off its texture back inside it (its view is placed at the laser anyway, so only its
-canvas position needs correcting).
+`CanvasClickRouter.TryClick`, used for every canvas still on the legacy pipeline (dialogue,
+computers, keyboard, fingerprints, ...; not the minimap's map nodes, which have their own path),
+fires Buttons through `InvokeButtonClick`: persistent `onClick` listeners only, then switches them
+Off. On RT panels that broke every button whose action is an `OnLeftClick` override or an `OnPress`
+subscriber (the open-note eyeball), fixed there by sending the click the way a mouse does
+(`bd21454`, `caseboard_findings.md` §7). The same buttons on legacy canvases are presumably dead
+too — untested. When one of those canvases is next worked on (or moved to an RT panel), send it
+vanilla clicks and test that surface's buttons.

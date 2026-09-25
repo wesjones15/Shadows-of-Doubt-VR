@@ -14,10 +14,11 @@ case-board RT code. `v1_findings.md` is cited below only for still-valid histori
 lessons (why a composite-canvas approach was abandoned) that predate and aren't superseded by that
 rewrite. `ARCHITECTURE.md` covers how the current canvas subsystem files fit together generally.
 
-**Status as of 2026-09-24: scoping only. No case-board-specific RT code has been written yet.**
-`MenuCanvas` and `TooltipCanvas`'s dialog mode are already migrated onto the compositor-based
-pipeline; the case board is the next target, sequenced last per the original rewrite plan because
-it was already the hardest surface in the base mod.
+**Status as of 2026-09-25: migrated.** Every case-board canvas except `MinimapCanvas` is an RT
+panel, and the legacy WorldSpace corkboard machinery is deleted. §0–§6 are the original scoping
+notes (file/line references into the since-renamed `CaseBoardInteraction.cs` are historical);
+**§7 records what the migration found and how each problem was solved.** `ARCHITECTURE.md` has the
+current file map.
 
 **Important correction to earlier case-board planning discussion:** an RT panel's laser was
 previously believed to be unable to escape HDRP post-processing (it has to exist in real, moving
@@ -310,3 +311,82 @@ the first navbar RT build z-fought like a legacy panel. Consequences for every m
 the RT panel must find its canvas by name wherever it lives and detach it itself
 (`RTCanvasPanel.Attach` does this), and the canvas must be in `RTOwnedCanvases` so the scanner's
 nested walk and the material patcher never touch it, even before the panel attaches.
+
+---
+
+## 7. What the migration found (2026-09-25)
+
+Each item: symptom → verified cause → fix. Commit hashes point at the change.
+
+**Clicks must arrive the way a mouse click does (`bd21454`).** The base mod's `InvokeButtonClick`
+fires only a Button's persistent `onClick` listeners and, when there are any, sends no pointer
+click. The game's own `ButtonController.OnPointerClick` then never runs, and that is what calls
+`OnLeftClick` (overridden by `FactButtonController`, `ContextButtonController`, ...) and raises
+`OnPress`. The open-note eyeball (`FactButtonController.ToggleHidden`, subscribed to
+`toggleHiddenButton.OnPress`) did nothing while zero-listener buttons like the Connections tab
+worked. The base mod skipped the game's path to avoid double fire because it also sent real OS
+clicks; RT panels send none. `RTPanelPointer` now sends down/up/click exactly like Unity's input
+module, with no `submit` (which ran `Button.Press` a second time) and no listener-state changes
+(the old code switched persistent listeners Off after invoking them). The game's `mouseInputMode`
+guard accepts these events. The legacy router still has the old behaviour (`__pending_tasks.md` §7).
+
+**Projector precision (`3b292cf`).** Projectors parked at y=-10000 quantised canvas positions to
+about 2 px: the corkboard's vertical pan moved in steps, the 24 px note minus button failed its hit
+test, and open-note scroll content flipped a pixel every few frames. At -500 m it's gone. Note
+slots are also placed on whole units (`2f3a21b`), since a half-pixel window position flips too.
+
+**Cross-canvas position copies, and why projectors aren't shared.** In the flat game every canvas
+is one screen, and the game copies world positions between them: the pin quick-menu takes its
+pin's position (a CaseCanvas point), so on TooltipCanvas it landed about 93,000 units off the
+texture. Giving the screen-sized projectors one shared pose fixed that (`6fedc16`), but after a
+save load the pause menu and case board then took a long time to open (A/B confirmed by the user;
+mechanism never found), so it was reverted (`e821ed0`). Instead, an element drawn off the
+TooltipCanvas texture is mapped through whichever RT projector sees it on its canvas plane to the
+same screen point on TooltipCanvas (`RTCanvasPanel.TryMapFromOtherScreen`, `4ee3141`). Context
+menus opened by A are positioned for the OS cursor instead (logged at pixel x=-426, on no other
+panel's screen), so anything still off the texture is slid onto it (`4902946`). The views are
+placed at the laser regardless; only the canvas position is corrected.
+
+**Zero z-scale breaks text under a perspective projector (`22990c7`).** The game scales the pin
+context menu `(1, 1, 0)`. On its overlay canvas that's inert, but our projectors are perspective
+cameras, and TextMeshPro's SDF shader then corrects each glyph by its surface normal, which a zero
+z-scale collapses: glyphs drew as solid blocks. Tooltip-canvas elements get z put back to 1 each
+frame.
+
+**Compositor order (`74c0f85`).** Panels are composited farthest-first by quad centre. A tooltip 5 cm
+in front of the navbar's edge can still be farther from the eye than the navbar's centre, so the
+navbar was drawn over it. TooltipCanvas views are now always drawn last, as the flat game's topmost
+canvas.
+
+**Draw order: legacy vs native.** `CanvasMaterialPatcher` forced render queues by graphic type
+(background 3000, additive 3001, everything else 3008, text 3009), so in the legacy pipeline every
+button drew above every background regardless of hierarchy. RT panels use the game's native draw
+order, so anything the game layers underneath stays underneath. This explains differences from
+legacy when comparing the two.
+
+**Corkboard panning.** The board's `CustomScrollRect` doesn't move from drag events, so the trigger
+pan drives `ContentContainer.anchoredPosition` directly (`75131fc`) and keeps the cork covering the
+viewport, or centred when zoomed out (`a263adc`). The corkboard view shows the whole texture while
+the board is open (`ded64cb`): the usual "enough visible graphics" rule hid it when panned onto bare
+cork, with no way back.
+
+**Visibility must count renderer alpha (`cea9827`).** The inventory fades out through each element's
+`CanvasRenderer.SetAlpha`, leaving colour and CanvasGroup alpha at 1, so its views showed black.
+
+**Custom links follow the laser (`8a2fbb4`).** The quick-menu's new link starts the game's
+`CasePanelController.CustomStringLink` coroutine, whose preview follows the OS mouse. The click is
+taken over and runs `CorkboardInput`'s own link instead, like the B-hold link.
+
+**Small targets.** A note's 24 px minus button gets a hit area as wide as the other buttons in its
+column (`raycastPadding`, `c1947cd`). Its hover corners match it through
+`ButtonController.additionalHighlightRectModifier`, which takes (left, bottom, right, top) with the
+same sign as `raycastPadding` (`31ea5ed`).
+
+**Not causes.** Game-window OS focus had nothing to do with the post-load menu delay; the focus
+change was reverted (`51e69f3`).
+
+**Decided against: laying canvases out at 1920x1080.** The case-board canvases are laid out as a
+2560x1440 screen at scale 1, so edge-anchored parts spread wider than in a 1080p layout (the XP-bar
+gap). Separate inventory/XP views fixed that (`18c04ec`). A 1080 layout would only make the UI
+1.33x bigger, not sharper — the texture already has about twice the pixels the headset shows at
+board distance. If text legibility ever matters, enlarge that panel's world size instead.

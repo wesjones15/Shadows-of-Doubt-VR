@@ -91,6 +91,27 @@ rt.Create();
 
 Each frame, before the eyes render: `projectorCam.Render(); rt.GenerateMips();`
 
+**Where projectors sit.** Every projector culls the shared UI layer (all 32 layers are named by the
+game, so there's no free one), and a ScreenSpaceCamera canvas sits `planeDistance` in front of its
+projector. So each projector gets its own spot, 50 m apart and 500 m below the city
+(`CameraRig.NextProjectorIsolationPosition`): no projector sees another's canvas or the legacy
+WorldSpace UI. Don't park them much further out: the canvas is laid out at that world position,
+and at -10000 m a float resolves only ~1 mm, about 2 canvas pixels. That snapped movement into
+steps and made a 24 px button miss its own hit test. Don't give projectors one shared pose either:
+it was tried, and after a save load it delayed the pause menu and case board by a long time
+(cause unknown, `caseboard_findings.md` §7).
+
+**Separate projectors break the game's cross-canvas position copies.** In the flat game every
+canvas is one screen, and the game copies world positions between canvases (the pin quick-menu
+takes its pin's position). Here such a copy lands on the other projector's plane, far off this
+texture. `RTCanvasPanel.TryMapFromOtherScreen` maps it through whichever attached projector sees it
+to the same screen point on this canvas.
+
+**The projectors are perspective cameras.** TextMeshPro's SDF shader then applies a
+perspective-correction term that uses each glyph's surface normal, so text under a zero z-scale
+(the game scales some elements `(1, 1, 0)`) draws as solid blocks. On the game's overlay canvases
+that term never runs.
+
 ### 2. A world-space quad that only places the panel, never renders
 
 Each panel keeps a real `GameObject` quad (`GameObject.CreatePrimitive(PrimitiveType.Quad)`),
@@ -178,7 +199,10 @@ compositor; it owns no renderer.
   target, so drawing into the target after the fact doesn't feed UI into next frame's
   reprojection.
 - **Ordering.** Panels are sorted farthest-first from each eye (they're alpha-blended), then lasers
-  are drawn last.
+  are drawn last. The sort uses each quad's centre, which misorders a small quad just in front of a
+  large one's edge (a tooltip over the navbar's edge is farther than the navbar's centre). So
+  panels added with `onTop` (TooltipCanvas's views, the flat game's topmost canvas) are drawn after
+  all the others.
 - **Throttled rendering.** If you skip `Camera.Render()` on some frames and resubmit the last image,
   composite inside the same block as the render, so the resubmitted image already contains the UI.
 - **Colour.** The panel's pixels reach the headset exactly as the projector camera produced them, with
@@ -202,17 +226,21 @@ compositor; it owns no renderer.
 
 ## Adding another immune panel
 
-1. Create a projector camera (`CameraRig.SetupRTPanelProjectorCamera`) and texture
-   (`CameraRig.CreateRTPanelTexture`), switch the canvas to `ScreenSpaceCamera` against that camera,
-   and render it plus `GenerateMips()` each frame before the eyes render.
-2. Create the quad with `CameraRig.CreateRTPanelQuad`, which returns the quad, collider, material and
-   mesh with the renderer already disabled. Size it from the texture's aspect ratio.
-3. Give the panel an `AppendOverlay(PostFXOverlayCompositor)` that calls `AddPanel(mesh,
-   quad.transform.localToWorldMatrix, material)` while it's visible, and forwards to its
-   `RTPanelPointer.AppendOverlay` for the laser.
-4. Call it from the coordinator between `BeginFrame()` and the two `Composite` calls.
+Use `RTCanvasPanel`, which does the projector, texture, quads and pointer registration:
 
-`MenuRTPanel.cs` and `TooltipRTPanel.cs` are the reference implementations.
+1. Add the canvas's name to `RTOwnedCanvases`, so the legacy scanner and material patcher never
+   touch it, even before the panel finds it.
+2. Find the canvas and `Attach` it (screen layout: the game's own scaler lays it out as the flat
+   game does) or `AttachSheet` it (you position content on it yourself, like open notes).
+3. `CreateView` for each part to show. Each view is a sub-rect of the texture on its own world
+   quad, with its own `RTPanelPointer` registered with `RTPanelInput`. Set its pixel rect, pose and
+   `Visible` each tick.
+4. Call the panel's `Render()` from the coordinator's `LateUpdate` before the eyes render, and its
+   `AppendOverlay` between `BeginFrame()` and the `Composite` calls.
+
+`TooltipRTPanel.cs` (many small views of one canvas), `CaseBoardPanel.cs` (screen layout) and
+`CaseBoardWindows.cs` (sheet layout) are the reference implementations. `MenuRTPanel.cs` predates
+`RTCanvasPanel` and still builds its pieces by hand.
 
 ## Tradeoffs and limits
 
@@ -220,7 +248,7 @@ compositor; it owns no renderer.
   accepted deliberately. Occluding them would need HDRP's internal depth buffer, which isn't
   exposed through the camera target.
 - **Only what goes through the compositor is immune.** Anything still rendered as world-space canvas
-  geometry by the eye cameras (here: HUD, case board and other not-yet-migrated canvases) still gets
+  geometry by the eye cameras (here: HUD, minimap and the other not-yet-migrated canvases) still gets
   DoF, TAA and the rest.
 - **Text resolution is bounded by the eye buffer.** The panel is resampled into the eye RT (rendered
   at 0.7× the headset's recommended resolution here), then again by the compositor's lens
