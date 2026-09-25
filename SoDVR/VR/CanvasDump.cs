@@ -26,7 +26,7 @@ internal static class CanvasDump
     {
         ("ActionPanelCanvas", 1), ("CaseCanvas", 1), ("BioDisplayCanvas", 1), ("LocationDetailsCanvas", 1),
         ("UpgradesDisplayCanvas", 1), ("WindowCanvas", 1), ("TooltipCanvas", 4),
-        ("DialogCanvas", 4), ("MinimapCanvas", 4),
+        ("DialogCanvas", 4), ("MinimapCanvas", 4), ("GameCanvas", 3), ("MessageSystemCanvas", 3),
     };
 
     // The map spawns hundreds of address buttons under one parent.
