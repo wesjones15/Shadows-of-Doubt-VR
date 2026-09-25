@@ -184,8 +184,8 @@ internal static class CanvasDump
                 if (g.gameObject.activeInHierarchy && g.enabled) maxDepth = Math.Max(maxDepth, g.depth);
                 Log.LogInfo($"[CanvasDump]   graphic '{g.gameObject.name}' {g.GetIl2CppType().Name} activeInHierarchy={g.gameObject.activeInHierarchy} " +
                             $"enabled={g.enabled} colorA={g.color.a:F2} rendererA={cr.GetAlpha():F2} inheritedA={cr.GetInheritedAlpha():F2} " +
-                            $"cull={cr.cull} raycastTarget={g.raycastTarget} depth={g.depth} " +
-                            $"rect={(root != null ? CanvasLocalRect(root, g.rectTransform) : "n/a")}");
+                            $"cull={cr.cull} raycastTarget={g.raycastTarget} depth={g.depth} raycastPadding={g.raycastPadding} " +
+                            $"rect={(root != null ? CanvasLocalRect(root, g.rectTransform) : "n/a")}{DescribeImageHitTest(g)} components=[{DescribeComponents(g.transform)}]");
             }
 
             for (var tr = t; tr != null; tr = tr.parent)
@@ -193,13 +193,22 @@ internal static class CanvasDump
                 var r = tr.GetComponent<RectTransform>();
                 if (r != null)
                     Log.LogInfo($"[CanvasDump]   layout '{tr.gameObject.name}' anchorMin={r.anchorMin} anchorMax={r.anchorMax} pivot={r.pivot} " +
-                                $"anchoredPosition={r.anchoredPosition} sizeDelta={r.sizeDelta} localPosition={r.localPosition} localScale={r.localScale}");
+                                $"anchoredPosition={r.anchoredPosition} sizeDelta={r.sizeDelta} localPosition={r.localPosition} localScale={r.localScale} localEuler={r.localEulerAngles}");
                 if (root != null && tr == root.transform) break;
             }
 
             if (root != null && rt != null) LogOccluders(root, t, RootLocalRect(root, rt), maxDepth);
         }
         catch (Exception ex) { Log.LogWarning($"[CanvasDump] {label}: {ex.Message}"); }
+    }
+
+    // An Image with an alpha hit-test threshold only takes hits on its opaque pixels — a thin glyph
+    // (the open-note minus) is then nearly impossible to hit with a laser.
+    private static string DescribeImageHitTest(Graphic g)
+    {
+        var image = g.TryCast<Image>();
+        if (image == null) return "";
+        return $" alphaHitTestMinimumThreshold={image.alphaHitTestMinimumThreshold:F2} sprite='{image.sprite?.name}' type={image.type}";
     }
 
     private const int MaxOccludersLogged = 12;

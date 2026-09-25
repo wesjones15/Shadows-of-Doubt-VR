@@ -466,10 +466,28 @@ internal sealed class RTPanelPointer
         for (int i = _overlayCanvases.Count - 1; i >= -1; i--)
         {
             var c = i >= 0 ? _overlayCanvases[i] : _canvas;
-            if (c == null || !TryRaycastCanvas(c, _ped, out var r)) continue;
-            sb.Append($" '{r.gameObject.name}'@'{c.gameObject.name}'(layer={r.sortingLayer} order={r.sortingOrder} depth={r.depth})");
+            if (c == null) continue;
+            if (TryRaycastCanvas(c, _ped, out var r))
+                sb.Append($" '{r.gameObject.name}'@'{c.gameObject.name}'(layer={r.sortingLayer} order={r.sortingOrder} depth={r.depth})");
+            AppendRejectedUnderPoint(sb, c, _ped.position);
         }
         Log.LogInfo($"[{_logTag}] Press candidates at pixel ({_ped.position.x:F0},{_ped.position.y:F0}):{(sb.Length > 0 ? sb.ToString() : " none")}");
+    }
+
+    // Diagnostic: raycast targets of this canvas whose rect contains the point but whose own
+    // raycast filter (an Image's alpha hit test, say) turned the hit down.
+    private static void AppendRejectedUnderPoint(System.Text.StringBuilder sb, Canvas canvas, Vector2 point)
+    {
+        var cam = canvas.worldCamera;
+        foreach (var g in canvas.GetComponentsInChildren<Graphic>(false))
+        {
+            if (g == null || !g.enabled || !g.raycastTarget || g.canvas != canvas) continue;
+            if (!RectTransformUtility.RectangleContainsScreenPoint(g.rectTransform, point, cam)) continue;
+            if (cam != null && Vector3.Dot(cam.transform.forward, g.transform.forward) <= 0f)
+                sb.Append($" [skipped as facing away from the camera: '{g.gameObject.name}'@'{canvas.gameObject.name}']");
+            else if (!g.Raycast(point, cam))
+                sb.Append($" [rejected by its raycast filter: '{g.gameObject.name}'@'{canvas.gameObject.name}' depth={g.depth}]");
+        }
     }
 
     private static bool TryRaycastCanvas(Canvas canvas, PointerEventData ped, out RaycastResult result)
