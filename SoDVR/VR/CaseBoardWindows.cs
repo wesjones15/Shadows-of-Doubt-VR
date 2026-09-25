@@ -223,8 +223,10 @@ internal sealed class CaseBoardWindows
         var slotCenterPixel = new Vector2((col + 0.5f) * SlotSize, (SlotRows - row - 0.5f) * SlotSize);
         Vector3 slotCenter = _panel.CanvasLocalOfPixel(slotCenterPixel);
         Vector3 rectCenter = Vector3.Scale(rt.localScale, rt.rect.center);
-        var target = slotCenter - rectCenter;
-        target.z = 0f;
+        // Whole units: a half-pixel window position is a candidate for its scroll content flipping
+        // by a pixel every few frames (logged as 0,0,-1,-1).
+        var offset = slotCenter - rectCenter;
+        var target = new Vector3(Mathf.Round(offset.x), Mathf.Round(offset.y), 0f);
         rt.localPosition = target;
         w.LastWritten = target;
         w.HasWritten = true;
