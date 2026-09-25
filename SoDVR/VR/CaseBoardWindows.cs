@@ -267,21 +267,7 @@ internal sealed class CaseBoardWindows
         public Vector3 GripPosition => View.Transform.position;
         public Quaternion GripRotation => View.Transform.rotation;
 
-        public bool TryGripHit(Ray ray, out float distance)
-        {
-            distance = 0f;
-            if (!View.Visible) return false;
-            var t = View.Transform;
-            var plane = new Plane(t.forward, t.position);
-            if (!plane.Raycast(ray, out distance) || distance <= 0f)
-            {
-                plane = new Plane(-t.forward, t.position);
-                if (!plane.Raycast(ray, out distance) || distance <= 0f) return false;
-            }
-            var local = t.InverseTransformPoint(ray.GetPoint(distance));
-            float half = 0.5f * GripMargin;
-            return Mathf.Abs(local.x) <= half && Mathf.Abs(local.y) <= half;
-        }
+        public bool TryGripHit(Ray ray, out float distance) => View.RaycastWithMargin(ray, GripMargin, out distance);
 
         public void SetGripPose(Vector3 position, Quaternion rotation) => View.SetPose(position, rotation);
 

@@ -372,6 +372,24 @@ internal sealed class RTPanelView
         SetPose(canvasCenter + rotation * new Vector3(offset.x, offset.y, 0f), rotation);
     }
 
+    /// <summary>Ray vs this view's plane, hitting within <paramref name="margin"/> times its size —
+    /// the forgiving hit test grip-drag uses.</summary>
+    public bool RaycastWithMargin(Ray ray, float margin, out float distance)
+    {
+        distance = 0f;
+        if (!Visible) return false;
+        var t = _quad.transform;
+        var plane = new Plane(t.forward, t.position);
+        if (!plane.Raycast(ray, out distance) || distance <= 0f)
+        {
+            plane = new Plane(-t.forward, t.position);
+            if (!plane.Raycast(ray, out distance) || distance <= 0f) return false;
+        }
+        var local = t.InverseTransformPoint(ray.GetPoint(distance));
+        float half = 0.5f * margin;
+        return Mathf.Abs(local.x) <= half && Mathf.Abs(local.y) <= half;
+    }
+
     public void AppendOverlay(PostFXOverlayCompositor overlay)
     {
         if (Visible) overlay.AddPanel(_mesh, _quad.transform.localToWorldMatrix, _material);

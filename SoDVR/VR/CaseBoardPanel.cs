@@ -109,17 +109,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     public bool TryGripHit(Ray ray, out float distance)
     {
         distance = 0f;
-        if (!_draggable || _view == null || !_view.Visible) return false;
-        var t = _view.Transform;
-        var plane = new Plane(t.forward, t.position);
-        if (!plane.Raycast(ray, out distance) || distance <= 0f)
-        {
-            plane = new Plane(-t.forward, t.position);
-            if (!plane.Raycast(ray, out distance) || distance <= 0f) return false;
-        }
-        var local = t.InverseTransformPoint(ray.GetPoint(distance));
-        float half = 0.5f * GripMargin;
-        return Mathf.Abs(local.x) <= half && Mathf.Abs(local.y) <= half;
+        return _draggable && _view != null && _view.RaycastWithMargin(ray, GripMargin, out distance);
     }
 
     public void SetGripPose(Vector3 position, Quaternion rotation)
