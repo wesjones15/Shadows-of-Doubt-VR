@@ -116,6 +116,10 @@ internal sealed class CaseBoardWindows
             try
             {
                 var scroll = w.Info?.scrollRect;
+                if (scroll != null && w.ScrollLogFramesLeft == ScrollLogFrames - 1)
+                    Log.LogInfo($"[CaseBoardWindows] '{name}' scroll setup: movementType={scroll.movementType} " +
+                                $"verticalScrollbar={(scroll.verticalScrollbar == null ? "none" : $"'{scroll.verticalScrollbar.name}' steps={scroll.verticalScrollbar.numberOfSteps} size={scroll.verticalScrollbar.size:F3}")} " +
+                                $"content={scroll.content?.rect.size} viewport={scroll.viewport?.rect.size}");
                 if (scroll != null && scroll.content != null)
                     Log.LogInfo($"[CaseBoardWindows] '{name}' frame {Time.frameCount}: scroll content anchoredPosition={scroll.content.anchoredPosition} " +
                                 $"velocity={scroll.velocity} normalized={scroll.normalizedPosition} gameMovesSoFar={w.GameMoves}");
