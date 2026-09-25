@@ -174,7 +174,7 @@ internal static class CanvasConversionScanner
                 // Genuine UI sub-panels (WindowCanvas, LocationDetailsCanvas, ActionPanelCanvas)
                 // are all root canvases, not nested, so this filter does not affect them.
                 string ncName = nc.gameObject.name ?? "";
-                if (RTOwnedCanvases.IsOwned(ncName)) continue;
+                if (RTOwnedCanvases.Contains(nc.transform)) continue;
                 if (ncName.IndexOf("(Clone)", StringComparison.OrdinalIgnoreCase) >= 0) continue;
                 // Also skip Loading Icon regardless of clone suffix — it is transient.
                 if (ncName.IndexOf("Loading Icon", StringComparison.OrdinalIgnoreCase) >= 0) continue;
