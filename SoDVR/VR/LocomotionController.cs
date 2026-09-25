@@ -368,23 +368,11 @@ internal sealed class LocomotionController
             const uint KEYEVENTF_KEYUP = 0x0002;
             keybd_event(VK_ESCAPE, 0, 0,               UIntPtr.Zero); // key down
             keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, UIntPtr.Zero); // key up
-            Log.LogInfo($"[Locomotion] Menu button → ESC (t={Time.realtimeSinceStartup:F1}s frame={Time.frameCount} {DescribePauseGate()})");
+            Log.LogInfo("[Locomotion] Menu button → ESC");
         }
         catch (Exception ex) { Log.LogWarning($"[Locomotion] UpdateMenuButton: {ex.Message}"); }
 
         return true;
-    }
-
-    // Diagnostic: after loading a save the menu button did nothing for several seconds. ESC is a
-    // real key event (needs the game window focused) and the game has its own pause gate.
-    private static string DescribePauseGate()
-    {
-        try
-        {
-            var sd = SessionData.Instance;
-            return $"windowFocused={Application.isFocused} enableUserPause={sd?.enableUserPause} play={sd?.play} startedGame={sd?.startedGame}";
-        }
-        catch (Exception ex) { return $"pause gate unreadable: {ex.Message}"; }
     }
 
     /// <summary>
