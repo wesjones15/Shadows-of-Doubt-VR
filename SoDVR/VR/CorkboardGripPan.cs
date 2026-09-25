@@ -16,6 +16,8 @@ internal sealed class CorkboardGripPan : IRTGripPanTarget
 
     private readonly CaseBoardPanel _corkboard;
     private RTPanelView? _view;
+    private RectTransform? _content;
+    private Vector2 _contentStart;
 
     public CorkboardGripPan(CaseBoardPanel corkboard) => _corkboard = corkboard;
 
@@ -38,6 +40,8 @@ internal sealed class CorkboardGripPan : IRTGripPanTarget
         {
             var content = CasePanelController.Instance?.corkBoard?.gameObject;
             if (content != null) board = ExecuteEvents.GetEventHandler<IDragHandler>(content);
+            _content = CasePanelController.Instance?.corkBoard;
+            if (_content != null) _contentStart = _content.anchoredPosition;
         }
         catch (Exception ex) { Log.LogWarning($"[CorkboardGripPan] Board lookup: {ex.Message}"); }
         if (_view == null || board == null) { _view = null; return; }
@@ -50,6 +54,10 @@ internal sealed class CorkboardGripPan : IRTGripPanTarget
     public void EndPan()
     {
         _view?.Pointer.EndExternalDrag();
+        // Diagnostic: whether the pan actually moved the board.
+        if (_view != null && _content != null)
+            Log.LogInfo($"[CorkboardGripPan] Pan end: board content moved {_contentStart} → {_content.anchoredPosition}");
+        _content = null;
         _view = null;
     }
 }

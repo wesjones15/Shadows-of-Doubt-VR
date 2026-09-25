@@ -218,17 +218,24 @@ internal sealed class RTPanelPointer
         var es = EventSystem.current;
         if (es == null || _canvas == null || _quadCollider == null || !TryRaycastPlane(ray, out _, out var point)) return false;
 
-        var pressRaycast = new RaycastResult { gameObject = target, module = _canvas.GetComponent<GraphicRaycaster>() };
         Vector2 position = PixelAt(point);
         var ped = new PointerEventData(es)
         {
             button = PointerEventData.InputButton.Left,
             position = position,
             pressPosition = position,
-            pointerPressRaycast = pressRaycast,
-            pointerCurrentRaycast = pressRaycast,
             useDragThreshold = false,
         };
+        // A real hit from the canvas's own raycaster, as a press would carry: the target reads the
+        // press camera from it (pressEventCamera) to map positions onto itself.
+        if (RaycastUI(ped, out var pressRaycast) == null)
+        {
+            Log.LogInfo($"[{_logTag}] External drag of '{target.name}' not started: nothing under the ray to take the press camera from");
+            return false;
+        }
+        ped.pointerPressRaycast = pressRaycast;
+        ped.pointerCurrentRaycast = pressRaycast;
+        Log.LogInfo($"[{_logTag}] External drag of '{target.name}' from '{pressRaycast.gameObject?.name}' pressEventCamera='{ped.pressEventCamera?.name}'");
         try
         {
             ExecuteEvents.Execute(target, ped, ExecuteEvents.initializePotentialDrag);
