@@ -9,7 +9,7 @@ namespace SoDVR.VR;
 /// Ignored: transient/world-space canvases — never converted, never in depth scan.
 /// HUD: body-locked (VROrigin yaw only), non-interactable, excluded from ray system.
 /// </summary>
-internal enum CanvasCategory { HUD, Menu, Panel, Tooltip, Ignored, Default }
+internal enum CanvasCategory { HUD, Menu, Panel, Ignored, Default }
 
 internal readonly struct CanvasCategoryDefaults
 {
@@ -17,14 +17,11 @@ internal readonly struct CanvasCategoryDefaults
     public readonly float VerticalOffset;       // metres above (+) / below (-) eye level
     public readonly float TargetWorldWidth;     // desired world width in metres; scale = this / sizeDelta.x
     public readonly bool  RecentreOnActivate;   // reposition when canvas becomes active
-    public readonly bool  RepositionEveryFrame; // never mark positioned (tooltip behaviour)
     public readonly bool  IsHUD;                // body-locked; excluded from ray/click system
     public CanvasCategoryDefaults(float dist, float vOff, float targetW,
-                                  bool recentre, bool everyFrame = false,
-                                  bool isHud = false)
+                                  bool recentre, bool isHud = false)
     { Distance = dist; VerticalOffset = vOff; TargetWorldWidth = targetW;
-      RecentreOnActivate = recentre; RepositionEveryFrame = everyFrame;
-      IsHUD = isHud; }
+      RecentreOnActivate = recentre; IsHUD = isHud; }
 }
 
 /// <summary>
@@ -60,7 +57,6 @@ internal static class CanvasCategoryInfo
         // Menu — recentres in front of head on activate; always in front of Panel canvases
         ["MenuCanvas"]                = CanvasCategory.Menu,
         ["DialogCanvas"]              = CanvasCategory.Menu,
-        ["PopupMessage"]              = CanvasCategory.Menu,     // exit/confirm dialogs — placed 0.2m closer
         ["controlsCanvas"]            = CanvasCategory.Menu,
         ["upgradesCanvas"]            = CanvasCategory.Menu,
         ["VirtualCursorCanvas & EventSystem"] = CanvasCategory.Ignored, // game virtual cursor, not ours
@@ -74,16 +70,6 @@ internal static class CanvasCategoryInfo
         ["mapLayerCanvas"]            = CanvasCategory.Panel,
         ["PrototypeBuilderCanvas"]    = CanvasCategory.Panel,
         ["ControlsDisplayCanvas"]     = CanvasCategory.Ignored,  // VR has own controls; keyboard hints block aim dot
-
-        // Tooltip — tracks cursor depth, repositions every frame
-        ["TooltipCanvas"]             = CanvasCategory.Tooltip,
-        ["tooltipsCanvas"]            = CanvasCategory.Tooltip,
-
-        // Ignored nested canvases — must NOT be converted to WorldSpace independently.
-        // These live inside a parent managed canvas and inherit its scale/position/rotation.
-        // Converting them separately breaks their scale (100px initial sizeDelta → 0.016 scale),
-        // positions them far from their parent, and breaks all tooltip logic.
-        ["ContextMenus"]              = CanvasCategory.Ignored,  // nested inside TooltipCanvas; context menu + fast-action icons
     };
 
     // Per-category placement defaults.
@@ -95,7 +81,6 @@ internal static class CanvasCategoryInfo
         [CanvasCategory.Menu]      = new(1.8f,  0.00f, 1.2f, recentre: true),
         [CanvasCategory.Panel]     = new(2.1f,  0.00f, 2.0f, recentre: true),                 // wider: action panel buttons bigger
         [CanvasCategory.HUD]       = new(2.5f, -0.15f, 1.5f, recentre: false, isHud: true),
-        [CanvasCategory.Tooltip]   = new(1.2f, -0.10f, 1.2f, recentre: false, everyFrame: true), // wider: context menu text readable
         [CanvasCategory.Default]   = new(2.0f,  0.00f, 1.6f, recentre: false),
         [CanvasCategory.Ignored]   = new(0f,    0.00f, 1.6f, recentre: false),  // placeholder; never used
     };

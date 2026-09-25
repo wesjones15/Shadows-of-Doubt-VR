@@ -27,8 +27,8 @@ namespace SoDVR.VR;
 /// only needs a new <see cref="ICanvasClickExtensions"/> implementer (or none, if the new menu
 /// system bypasses the router entirely) — CanvasClickRouter itself never changes.
 ///
-/// Cross-cutting VRCamera state this needs every frame (managed canvases, dialog/context-menu
-/// canvas refs, grip-drag persistence dictionaries, etc.) is passed once via
+/// Cross-cutting VRCamera state this needs every frame (managed canvases, grip-drag
+/// persistence dictionaries, etc.) is passed once via
 /// <see cref="SetFrameContext"/> rather than threaded through every method's parameter list —
 /// simplest option for a file this size that's not meant to last.
 /// </summary>
@@ -42,7 +42,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private int _triggerFireFrame;
     // Left-trigger generic click fallback: independent of the right-trigger state above.
     // Minimap pan and middle-drag stay right-hand-only (unaffected by
-    // this), but a legacy WorldSpace canvas — e.g. the save-and-exit confirm popup — needs to be
+    // this), but a legacy WorldSpace canvas needs to be
     // reachable when the player is on their left hand (RTPanelPointer lets them swap there for RT
     // panels; the legacy click router had no equivalent left-hand path at all before this).
     private bool _prevTriggerLeft;
@@ -67,10 +67,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private NewNode? _minimapLastKnownNode;
     private float _minimapLastLoad;
 
-    // ── Visual-shift scratch state (working state for one Tick(), not persisted) ──
-    private Vector3 _contextMenuWorldOffset;
-    private bool _prevContextMenuActive;
-
     // ── Regular canvas grip-drag ─────────────────────────────────────────────
     private bool _gripWasPressed;
     private Canvas? _gripDragCanvas;
@@ -79,15 +75,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private Vector3 _gripDragOffset;
     private Vector3 _gripDragHitLocalOffset;
     private Quaternion _gripDragRotOffset;
-
-    // ── Exposed to VRCamera: written here, read by the still-deferred canvas-positioning
-    // code (PositionCanvases / ForceItemPositionPreRender). Public because those call sites
-    // are outside this pass's scope. ──
-    public bool ContextMenuFreezeApplied;
-
-    /// <summary>Whether a case-board context menu is active as of this frame's PreAimScan —
-    /// needed by VRCamera's ScanAndRenderAimDots call between PreAimScan and PostAimScan.</summary>
-    public bool ContextMenuActive => _prevContextMenuActive;
 
     public bool GripDragActive => _gripDragCanvas != null;
 
@@ -113,10 +100,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private bool _ctxCaseBoardOpen;
     private Transform _ctxCaseBoardAnchor = null!;
     private Canvas? _ctxMinimapCanvasRef;
-    private GameObject? _ctxPopupMessageGO;
-    private GameObject? _ctxTutorialMessageGO;
-    private Canvas? _ctxPopupMessageCanvas;
-    private Canvas? _ctxTutorialMessageCanvas;
     private Dictionary<int, (Vector3 pos, Quaternion rot)> _ctxGripDragEnforce = null!;
     private Dictionary<int, (Vector3 offset, Quaternion rot)> _ctxGripDragAnchorOffsets = null!;
     private Dictionary<int, (Vector3 pos, Quaternion rot, Vector3 scale)> _ctxCanvasVRPose = null!;
@@ -142,8 +125,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         int menuSettingsBtnId, Canvas? menuCanvasRef,
         Camera? leftCam, Camera? gameCamRef, GameObject? rightControllerGO, GameObject? leftControllerGO,
         bool caseBoardOpen, Transform caseBoardAnchor, Canvas? minimapCanvasRef,
-        GameObject? popupMessageGO, GameObject? tutorialMessageGO,
-        Canvas? popupMessageCanvas, Canvas? tutorialMessageCanvas,
         Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
         Dictionary<int, (Vector3 offset, Quaternion rot)> gripDragAnchorOffsets,
         Dictionary<int, (Vector3 pos, Quaternion rot, Vector3 scale)> canvasVRPose,
@@ -165,10 +146,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         _ctxCaseBoardOpen = caseBoardOpen;
         _ctxCaseBoardAnchor = caseBoardAnchor;
         _ctxMinimapCanvasRef = minimapCanvasRef;
-        _ctxPopupMessageGO = popupMessageGO;
-        _ctxTutorialMessageGO = tutorialMessageGO;
-        _ctxPopupMessageCanvas = popupMessageCanvas;
-        _ctxTutorialMessageCanvas = tutorialMessageCanvas;
         _ctxGripDragEnforce = gripDragEnforce;
         _ctxGripDragAnchorOffsets = gripDragAnchorOffsets;
         _ctxCanvasVRPose = canvasVRPose;
@@ -195,46 +172,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         _gripWasPressed = gripNow;
 
         // Start drag: grip pressed while controller ray hits a draggable canvas.
-        // Active when case board is open, a dialog popup is showing, or a context menu is open.
         bool caseBoardOpen = _ctxCaseBoardOpen;
-        bool dialogNowActive = (_ctxPopupMessageGO != null && _ctxPopupMessageGO.activeSelf)
-                            || (_ctxTutorialMessageGO != null && _ctxTutorialMessageGO.activeSelf);
-        // Detect context menu active state (child of TooltipCanvas "ContextMenus" has active child).
-        bool contextMenuNowActive = false;
-        foreach (var kvpCtx in _ctxManagedCanvases)
-        {
-            if (kvpCtx.Value == null) continue;
-            if (CanvasCategoryInfo.GetCanvasCategory(kvpCtx.Value.gameObject.name) != CanvasCategory.Tooltip) continue;
-            try
-            {
-                var cmTr = kvpCtx.Value.transform.Find("ContextMenus");
-                if (cmTr != null && cmTr.gameObject.activeSelf)
-                    for (int ci = 0; ci < cmTr.childCount; ci++)
-                    {
-                        var cmChild = cmTr.GetChild(ci);
-                        if (!cmChild.gameObject.activeSelf) continue;
-                        // Only treat actual context menus as active, NOT PinnedQuickMenu hover tooltips
-                        string childName = cmChild.gameObject.name ?? "";
-                        if (childName.StartsWith("ContextMenu")) { contextMenuNowActive = true; break; }
-                    }
-            }
-            catch { }
-            if (contextMenuNowActive) break;
-        }
-        // When context menu first becomes active, clear TooltipCanvas rescan cooldown so
-        // the HDR material boost is applied to menu items immediately rather than after
-        // up to 10 seconds (RescanCooldownFrames).
-        if (contextMenuNowActive && !_prevContextMenuActive)
-        {
-            foreach (var kvpCtx in _ctxManagedCanvases)
-            {
-                if (kvpCtx.Value == null) continue;
-                if (CanvasCategoryInfo.GetCanvasCategory(kvpCtx.Value.gameObject.name) == CanvasCategory.Tooltip)
-                    _ctxLastRescanFrame.Remove(kvpCtx.Key);
-            }
-        }
-        if (!contextMenuNowActive) ContextMenuFreezeApplied = false; // reset for next open
-        _prevContextMenuActive = contextMenuNowActive;
         // Also allow grip-drag when any interactive canvas is visible (notebook, map, etc.)
         bool anyInteractiveVisible = false;
         if (!caseBoardOpen)
@@ -250,7 +188,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 }
             }
         }
-        bool gripDragAllowed = caseBoardOpen || dialogNowActive || contextMenuNowActive || anyInteractiveVisible;
+        bool gripDragAllowed = caseBoardOpen || anyInteractiveVisible;
         if (gripPressed && !gripOwnedByRTPanel && _gripDragCanvas == null && _ctxRightControllerGO != null && gripDragAllowed)
         {
             Vector3 ctrlPos = _ctxRightControllerGO.transform.position;
@@ -266,10 +204,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 var c = kvp.Value;
                 if (c == null || !CanvasCategoryInfo.IsCanvasVisible(c)) continue;
                 var dragCat = CanvasCategoryInfo.GetCanvasCategory(c.gameObject.name);
-                // Allow grip-drag on Panel and Menu canvases.
-                // Also allow Tooltip canvas when a popup dialog or context menu is active.
-                bool isGrabbableTooltip = dragCat == CanvasCategory.Tooltip && (dialogNowActive || contextMenuNowActive);
-                if (!isGrabbableTooltip && dragCat != CanvasCategory.Panel && dragCat != CanvasCategory.Menu) continue;
+                if (dragCat != CanvasCategory.Panel && dragCat != CanvasCategory.Menu) continue;
                 string cName = c.gameObject.name ?? "";
                 if (cName.Equals("MenuCanvas",             StringComparison.OrdinalIgnoreCase)) continue;  // ESC menu: not draggable
 
@@ -349,28 +284,18 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 // Store offset in the case-board anchor's LOCAL coordinate space.
                 // This means the offset rotates with the anchor — when the case board
                 // reopens facing a different direction, the arrangement is preserved.
-                // Skip Tooltip canvas (dialog host) — its position is transient; no persistence needed.
-                var releasedCat = CanvasCategoryInfo.GetCanvasCategory(releasedName);
-                bool isReleasedTooltip = releasedCat == CanvasCategory.Tooltip;
-                if (!isReleasedTooltip)
-                {
-                    int dragId = _gripDragCanvas.GetInstanceID();
-                    Quaternion invAnchorRot = Quaternion.Inverse(_ctxCaseBoardAnchor.rotation);
-                    _ctxGripDragAnchorOffsets[dragId] = (
-                        invAnchorRot * (_gripDragCanvas.transform.position - _ctxCaseBoardAnchor.position),
-                        invAnchorRot * _gripDragCanvas.transform.rotation
-                    );
-                }
+                int dragId = _gripDragCanvas.GetInstanceID();
+                Quaternion invAnchorRot = Quaternion.Inverse(_ctxCaseBoardAnchor.rotation);
+                _ctxGripDragAnchorOffsets[dragId] = (
+                    invAnchorRot * (_gripDragCanvas.transform.position - _ctxCaseBoardAnchor.position),
+                    invAnchorRot * _gripDragCanvas.transform.rotation
+                );
 
                 // Store absolute position for LateUpdate enforcement (game may reset between frames)
-                if (!isReleasedTooltip)
-                {
-                    int enfId = _gripDragCanvas.GetInstanceID();
-                    _ctxGripDragEnforce[enfId] = (
-                        _gripDragCanvas.transform.position,
-                        _gripDragCanvas.transform.rotation
-                    );
-                }
+                _ctxGripDragEnforce[dragId] = (
+                    _gripDragCanvas.transform.position,
+                    _gripDragCanvas.transform.rotation
+                );
             }
 
             Log.LogInfo($"[CaseBoard] GripDrag end: '{_gripDragCanvas.gameObject.name}'");
@@ -380,9 +305,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
 
     /// <summary>
     /// Everything that has to run BEFORE ControllerInteraction.ScanAndRenderAimDots(): re-enforce
-    /// snapshotted canvas poses, the minimap B-button body-lock, and
-    /// the TooltipCanvas/ContextMenu visual-center shift the aim scan needs
-    /// to land correctly. Call PostAimScan() immediately after the aim scan to undo the shift.
+    /// snapshotted canvas poses and the minimap B-button body-lock.
     /// </summary>
     public void PreAimScan()
     {
@@ -401,37 +324,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 // to 1.0 every frame. Skip HUD canvases (they don't have per-frame scale resets).
                 if (!CanvasCategoryInfo.GetCategoryDefaults(CanvasCategoryInfo.GetCanvasCategory(kvpFz.Value.gameObject.name)).IsHUD)
                     kvpFz.Value.transform.localScale = vrPose.scale;
-            }
-            // Also zero ContextMenus + children (game resets to screen coords every frame).
-            // Only set localPosition — anchoredPosition would override based on anchor config.
-            if (ContextMenuFreezeApplied)
-            {
-                foreach (var kvpFz in _ctxManagedCanvases)
-                {
-                    if (kvpFz.Value == null) continue;
-                    if (CanvasCategoryInfo.GetCanvasCategory(kvpFz.Value.gameObject.name) != CanvasCategory.Tooltip) continue;
-                    try
-                    {
-                        var cmTrFz = kvpFz.Value.transform.Find("ContextMenus");
-                        if (cmTrFz != null)
-                        {
-                            cmTrFz.localPosition = Vector3.zero;
-                            cmTrFz.localRotation = Quaternion.identity;
-                            cmTrFz.localScale    = Vector3.one;
-                            for (int fzi = 0; fzi < cmTrFz.childCount; fzi++)
-                            {
-                                var fzChild = cmTrFz.GetChild(fzi);
-                                if (!fzChild.gameObject.activeSelf) continue;
-                                fzChild.localPosition = Vector3.zero;
-                                fzChild.localRotation = Quaternion.identity;
-                                fzChild.localScale    = Vector3.one;
-                                break;
-                            }
-                        }
-                    }
-                    catch { }
-                    break;
-                }
             }
         }
 
@@ -459,68 +351,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 ec.transform.position = kvpEnf.Value.pos;
                 ec.transform.rotation = kvpEnf.Value.rot;
             }
-        }
-
-        // Shift TooltipCanvas so ContextMenu(Clone) visual center = ContextMenus canvas center
-        // At Update() time the game has already
-        // set ContextMenu(Clone).localPosition to screen coordinates (e.g. -960, 540).  Our
-        // LateUpdate zeroing hasn't run yet, so we read the game's value, compute its world offset
-        // from ContextMenus center, and shift TooltipCanvas to compensate — aim dot scan then
-        // places the dot ON the visible menu.  Shift is undone after the scan.
-        _contextMenuWorldOffset = Vector3.zero;
-        if (ContextMenuFreezeApplied && _prevContextMenuActive)
-        {
-            foreach (var kvpCmS in _ctxManagedCanvases)
-            {
-                if (kvpCmS.Value == null) continue;
-                if (CanvasCategoryInfo.GetCanvasCategory(kvpCmS.Value.gameObject.name) != CanvasCategory.Tooltip) continue;
-                try
-                {
-                    var ttTr = kvpCmS.Value.transform;
-                    var cmsTrS = ttTr.Find("ContextMenus");
-                    if (cmsTrS == null || !cmsTrS.gameObject.activeSelf) break;
-                    for (int csi = 0; csi < cmsTrS.childCount; csi++)
-                    {
-                        var cmChild = cmsTrS.GetChild(csi);
-                        if (cmChild == null || !cmChild.gameObject.activeSelf) continue;
-                        if (!(cmChild.gameObject.name ?? "").StartsWith("ContextMenu")) continue; // skip PinnedQuickMenu
-                        // Visual center = localPos + sizeDelta * (0.5 - pivot)
-                        float cmcx = cmChild.localPosition.x, cmcy = cmChild.localPosition.y;
-                        var cmcrt = cmChild.GetComponent<RectTransform>();
-                        if (cmcrt != null)
-                        {
-                            cmcx += cmcrt.sizeDelta.x * (0.5f - cmcrt.pivot.x);
-                            cmcy += cmcrt.sizeDelta.y * (0.5f - cmcrt.pivot.y);
-                        }
-                        // ContextMenus local space → world space
-                        _contextMenuWorldOffset = cmsTrS.TransformVector(new Vector3(cmcx, cmcy, 0f));
-                        ttTr.position += _contextMenuWorldOffset;
-                        break; // first active ContextMenu(Clone) only
-                    }
-                }
-                catch { }
-                break; // only one TooltipCanvas
-            }
-        }
-    }
-
-    /// <summary>
-    /// Everything that has to run AFTER ControllerInteraction.ScanAndRenderAimDots(): undo the
-    /// visual-center shift PreAimScan applied.
-    /// </summary>
-    public void PostAimScan()
-    {
-        // Undo TooltipCanvas shift applied for context menu aim dot alignment.
-        if (_contextMenuWorldOffset != Vector3.zero)
-        {
-            foreach (var kvpCmU in _ctxManagedCanvases)
-            {
-                if (kvpCmU.Value == null) continue;
-                if (CanvasCategoryInfo.GetCanvasCategory(kvpCmU.Value.gameObject.name) != CanvasCategory.Tooltip) continue;
-                try { kvpCmU.Value.transform.position -= _contextMenuWorldOffset; } catch { }
-                break;
-            }
-            _contextMenuWorldOffset = Vector3.zero;
         }
     }
 
@@ -618,7 +448,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
 
         // ── Left trigger → same generic click fallback, independent state ──
         // Not gated on the right hand's state;
-        // a legacy dialog is either reachable from the left hand or it isn't.
+        // a legacy canvas is either reachable from the left hand or it isn't.
         if (_ctxLeftControllerGO != null)
         {
             OpenXRManager.GetTriggerState(false, out bool triggerNowLeft);
@@ -885,97 +715,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     // "Extract generic canvas-click routing into CanvasClickRouter.cs" commit for the original
     // inline form) — only the field references changed, to _ctx* equivalents or VRCamera.-
     // qualified statics.
-
-    public void CollectExtraHitCandidates(Ray ray, Camera leftCam, List<(float dist, Canvas canvas, Vector3 wp)> hits)
-    {
-        // Context menu mode: add ContextMenus canvas directly to hits. ContextMenus is a nested
-        // canvas (CanvasCategory.Ignored) inside TooltipCanvas — its own GraphicRaycaster handles
-        // its children, but TooltipCanvas's raycaster can't see them.
-        if (_prevContextMenuActive)
-        {
-            foreach (var kvpCm in _ctxManagedCanvases)
-            {
-                if (kvpCm.Value == null) continue;
-                if (CanvasCategoryInfo.GetCanvasCategory(kvpCm.Value.gameObject.name ?? "") != CanvasCategory.Tooltip) continue;
-                try
-                {
-                    var cmTr = kvpCm.Value.transform.Find("ContextMenus");
-                    if (cmTr == null || !cmTr.gameObject.activeSelf) continue;
-                    var cmCanvas = cmTr.GetComponent<Canvas>();
-                    if (cmCanvas == null) continue;
-                    if (cmCanvas.worldCamera == null) cmCanvas.worldCamera = leftCam;
-                    var cmPlane = new Plane(-cmCanvas.transform.forward, cmCanvas.transform.position);
-                    if (!cmPlane.Raycast(ray, out float cmDist)) continue;
-                    if (cmDist <= 0f) continue;
-                    Vector3 cmWp = ray.origin + ray.direction * cmDist;
-                    if (leftCam.WorldToScreenPoint(cmWp).z < 0f) continue;
-                    hits.Add((cmDist, cmCanvas, cmWp));
-                    Log.LogInfo($"[CaseBoard] ContextMenus added to click hits: dist={cmDist:F2}");
-                }
-                catch { }
-            }
-        }
-
-        // Dialog mode: add PopupMessage/TutorialMessage canvases directly to hits. Their parent
-        // (TooltipCanvas) GraphicRaycaster can't resolve children at different localScale, so we
-        // test PopupMessage's own GraphicRaycaster separately. Skipped entirely while
-        // TooltipRTPanel owns the dialog — it's overridden their worldCamera to its own projector
-        // camera, and this plane test (against a now-stale TooltipCanvas-relative transform) would
-        // fight it rather than find anything meaningful.
-        bool dialogActive = ((_ctxPopupMessageGO != null && _ctxPopupMessageGO.activeSelf)
-                           || (_ctxTutorialMessageGO != null && _ctxTutorialMessageGO.activeSelf));
-        if (dialogActive)
-        {
-            Canvas?[] dialogCanvases = { _ctxPopupMessageCanvas, _ctxTutorialMessageCanvas };
-            foreach (var dc in dialogCanvases)
-            {
-                if (dc == null || !dc.gameObject.activeSelf) continue;
-                try
-                {
-                    if (dc.worldCamera == null) dc.worldCamera = leftCam;
-                    var dcPlane = new Plane(-dc.transform.forward, dc.transform.position);
-                    if (!dcPlane.Raycast(ray, out float dcDist)) continue;
-                    if (dcDist <= 0f) continue;
-                    Vector3 dcWp = ray.origin + ray.direction * dcDist;
-                    if (leftCam.WorldToScreenPoint(dcWp).z < 0f) continue;
-                    hits.Add((dcDist, dc, dcWp));
-                }
-                catch { }
-            }
-        }
-    }
-
-    public void PreRaycastFixup(Canvas hitCanvas)
-    {
-        // If context menu is active and this is TooltipCanvas, zero ContextMenus + active child
-        // immediately before raycasting so GraphicRaycaster sees non-degenerate transforms. The
-        // game sets ContextMenu(Clone).localScale.z = 0 and localPosition = screen coords every
-        // frame; without zeroing here the raycaster can't find the menu items.
-        if (_prevContextMenuActive && (hitCanvas.gameObject.name ?? "").IndexOf("Tooltip", StringComparison.OrdinalIgnoreCase) >= 0)
-        {
-            try
-            {
-                var cmZeroTr = hitCanvas.transform.Find("ContextMenus");
-                if (cmZeroTr != null)
-                {
-                    cmZeroTr.localPosition = Vector3.zero;
-                    cmZeroTr.localRotation = Quaternion.identity;
-                    cmZeroTr.localScale    = Vector3.one;
-                    for (int czi = 0; czi < cmZeroTr.childCount; czi++)
-                    {
-                        var czChild = cmZeroTr.GetChild(czi);
-                        if (!czChild.gameObject.activeSelf) continue;
-                        if (!(czChild.gameObject.name ?? "").StartsWith("ContextMenu")) continue;
-                        czChild.localPosition = Vector3.zero;
-                        czChild.localRotation = Quaternion.identity;
-                        czChild.localScale    = Vector3.one;
-                        break;
-                    }
-                }
-            }
-            catch { }
-        }
-    }
 
     public int SelectBestResult(Canvas hitCanvas, Il2CppSystem.Collections.Generic.List<RaycastResult> results)
     {

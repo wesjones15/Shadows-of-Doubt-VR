@@ -13,7 +13,7 @@ namespace SoDVR.VR;
 /// mechanically from VRCamera, not redesigned.
 ///
 /// <see cref="PositionCanvases"/> is a single foreach over every managed canvas with one long
-/// per-category if/else-if/continue chain (cursor → tooltip/dialog → HUD → B-button-minimap →
+/// per-category if/else-if/continue chain (cursor → HUD → B-button-minimap →
 /// already-positioned skip → default), sharing locals across every branch and
 /// mutating cross-cutting VRCamera dictionaries throughout. It moves as one method rather than
 /// being split further — fine-grained sub-extraction would need the same kind of
@@ -25,7 +25,6 @@ internal sealed class CanvasPlacement
     private static ManualLogSource Log => Plugin.Log;
 
     // Cluster-local — nowhere else in VRCamera touches these.
-    private bool _dialogCanvasPlaced; // true once dialog-mode tooltip is placed (world-lock until dialog closes)
     private int  _placementIndex;     // incremental depth offset counter per placement cycle
 
     internal void PositionCanvases(
@@ -41,11 +40,9 @@ internal sealed class CanvasPlacement
         Dictionary<int, (Vector3 offset, Quaternion rot)> gripDragAnchorOffsets,
         Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
         bool caseBoardOpen, bool caseBoardJustOpened, Transform caseBoardAnchor, bool caseBoardAnchorPlaced,
-        GameObject? popupMessageGO, GameObject? tutorialMessageGO,
-        ref Vector3 contextMenuFreezePos, ref Quaternion contextMenuFreezeRot,
         LocomotionController locomotion,
         ref bool minimapBBtnHasOffset, ref Vector3 minimapBBtnLocalOffset, ref Quaternion minimapBBtnLocalRot,
-        bool cursorHasTarget, Vector3 cursorTargetPos, Quaternion cursorTargetRot, float cursorAimDepth)
+        bool cursorHasTarget, Vector3 cursorTargetPos, Quaternion cursorTargetRot)
     {
         // Suppress FadeOverlay graphics every 4 frames (prevents black screen flash).
         if (managedFades.Count > 0 && (frameCount % 4) == 0)
@@ -167,10 +164,9 @@ internal sealed class CanvasPlacement
             var catDefs = CanvasCategoryInfo.GetCategoryDefaults(cat);
 
             // ── Per-frame scale enforcement ───────────────────────────────────
-            // The game resets localScale on certain canvases (PopupMessage,
-            // WindowCanvas) every frame. ScaleFix in the 90-frame scan is too
+            // The game resets localScale on some canvases every frame. ScaleFix in the 90-frame scan is too
             // slow — enforce correct scale every frame for visible canvases.
-            if (!isCursorCanvas && !catDefs.IsHUD && cat != CanvasCategory.Ignored && !catDefs.RepositionEveryFrame)
+            if (!isCursorCanvas && !catDefs.IsHUD && cat != CanvasCategory.Ignored)
             {
                 try
                 {
@@ -203,127 +199,6 @@ internal sealed class CanvasPlacement
                     Vector3 toHead = (headPos - cursorTargetPos).normalized;
                     canvas.transform.position = cursorTargetPos + toHead * 0.02f;
                     canvas.transform.rotation = cursorTargetRot;
-                }
-                continue;
-            }
-
-            // ── Tooltip / Dialog mode ─────────────────────────────────────────
-            if (catDefs.RepositionEveryFrame)
-            {
-                if (!canvas.gameObject.activeSelf || !canvas.enabled) continue;
-
-                // Context menu freeze: when ContextMenus has active children (a right-click
-                // context menu is showing), world-lock TooltipCanvas so the menu stays put.
-                // Orient to match the pin board so the menu is coplanar with the board.
-                bool contextMenuFrozen = false;
-                try
-                {
-                    var cmTr = canvas.transform.Find("ContextMenus");
-                    if (cmTr != null && cmTr.gameObject.activeSelf)
-                        for (int ci = 0; ci < cmTr.childCount; ci++)
-                        {
-                            var cmChild = cmTr.GetChild(ci);
-                            if (!cmChild.gameObject.activeSelf) continue;
-                            // Only freeze for actual context menus, NOT PinnedQuickMenu hover tooltips
-                            string childName = cmChild.gameObject.name ?? "";
-                            if (childName.StartsWith("ContextMenu")) { contextMenuFrozen = true; break; }
-                        }
-                }
-                catch { }
-                if (contextMenuFrozen)
-                {
-                    if (!caseBoard.ContextMenuFreezeApplied)
-                    {
-                        // First freeze frame: compute snap position/rotation.
-                        float cmDist = catDefs.Distance;
-                        if (cmDist <= 0f) cmDist = 1.0f;
-                        contextMenuFreezePos = headPos + forward * cmDist + Vector3.up * catDefs.VerticalOffset;
-                        contextMenuFreezeRot = yawOnly;
-                        caseBoard.ContextMenuFreezeApplied = true;
-
-                        Log.LogInfo($"[CanvasPlacement] Context menu freeze: dist={cmDist:F2} freezePos={contextMenuFreezePos} freezeRot={contextMenuFreezeRot.eulerAngles}");
-                    }
-
-                    // The game repositions ContextMenus AND its children at SCREEN COORDINATES
-                    // every frame.  In WorldSpace, this offset is 0.5-0.6m from canvas center.
-                    // Fix: zero localPosition ONLY (not anchoredPosition — setting anchoredPosition
-                    // after localPosition overrides it based on anchor config, causing position drift).
-                    // localPosition = zero puts the child's pivot at the parent's pivot regardless of anchors.
-                    try
-                    {
-                        var cmTr2 = canvas.transform.Find("ContextMenus");
-                        if (cmTr2 != null)
-                        {
-                            cmTr2.localPosition = Vector3.zero;
-                            cmTr2.localRotation = Quaternion.identity;
-                            cmTr2.localScale    = Vector3.one;
-
-                            for (int cci = 0; cci < cmTr2.childCount; cci++)
-                            {
-                                var child = cmTr2.GetChild(cci);
-                                if (!child.gameObject.activeSelf) continue;
-                                child.localPosition = Vector3.zero;
-                                child.localRotation = Quaternion.identity;
-                                child.localScale = Vector3.one;
-                                break;
-                            }
-                        }
-                    }
-                    catch { }
-
-                    // Enforce position/rotation EVERY frame to prevent game from overwriting.
-                    canvas.transform.position = contextMenuFreezePos;
-                    canvas.transform.rotation = contextMenuFreezeRot;
-                    continue;
-                }
-
-                // When PopupMessage or TutorialMessage is active, TooltipCanvas
-                // switches to dialog mode: positioned ONCE in front of head (world-locked after that).
-                // The player can grip-drag the dialog to reposition it freely.
-                bool dialogActive = (popupMessageGO != null && popupMessageGO.activeSelf)
-                                 || (tutorialMessageGO != null && tutorialMessageGO.activeSelf);
-                if (dialogActive)
-                {
-                    if (!_dialogCanvasPlaced)
-                    {
-                        // First frame the dialog is active — snap to head position.
-                        float dialogDist = VRSettingsPanel.MenuDistance - 0.2f;
-                        canvas.transform.position = headPos + forward * dialogDist + Vector3.up * catDefs.VerticalOffset;
-                        canvas.transform.rotation = yawOnly;
-                        _dialogCanvasPlaced = true;
-                    }
-                    // else: canvas is world-locked; let the player grip-drag it.
-                    // Scale up TooltipCanvas to popup size while dialog is active.
-                    try
-                    {
-                        var rtDlg = canvas.GetComponent<RectTransform>();
-                        if (rtDlg != null)
-                        {
-                            float popupScale = CanvasCategoryInfo.GetCategoryDefaults(CanvasCategory.Menu).TargetWorldWidth / rtDlg.sizeDelta.x;
-                            if (!Mathf.Approximately(canvas.transform.localScale.x, popupScale))
-                                canvas.transform.localScale = Vector3.one * popupScale;
-                        }
-                    }
-                    catch { }
-                }
-                else
-                {
-                    _dialogCanvasPlaced = false; // dialog closed — allow fresh placement next time
-                    float tooltipDist = cursorAimDepth - 0.02f;
-                    canvas.transform.position = headPos + forward * tooltipDist + Vector3.up * catDefs.VerticalOffset;
-                    canvas.transform.rotation = yawOnly;
-                    // Restore tooltip scale if it was enlarged for dialog mode.
-                    try
-                    {
-                        var rtTip = canvas.GetComponent<RectTransform>();
-                        if (rtTip != null)
-                        {
-                            float tipScale = catDefs.TargetWorldWidth / rtTip.sizeDelta.x;
-                            if (!Mathf.Approximately(canvas.transform.localScale.x, tipScale))
-                                canvas.transform.localScale = Vector3.one * tipScale;
-                        }
-                    }
-                    catch { }
                 }
                 continue;
             }
@@ -398,7 +273,6 @@ internal sealed class CanvasPlacement
             if (cat == CanvasCategory.Menu) dist = VRSettingsPanel.MenuDistance;
             float vOff = catDefs.VerticalOffset;
 
-            // PopupMessage/TutorialMessage: now nested under TooltipCanvas, handled in dialog mode above.
             string cname = canvas.gameObject.name ?? "";
 
             // If user previously grip-dragged this canvas, restore relative to the case-board

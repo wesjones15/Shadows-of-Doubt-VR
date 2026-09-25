@@ -35,8 +35,6 @@ internal static class CanvasConversionScanner
         int frameCount, Dictionary<int, int> lastRescanFrame,
         Dictionary<int, Graphic> managedFades, Camera? leftCam,
         ref Canvas? minimapCanvasRef,
-        ref GameObject? popupMessageGO, ref Canvas? popupMessageCanvas,
-        ref GameObject? tutorialMessageGO, ref Canvas? tutorialMessageCanvas,
         HashSet<int> noGroupInteractable)
     {
         var dead = new List<int>();
@@ -127,14 +125,7 @@ internal static class CanvasConversionScanner
 
             // Enforce correct scale — the game may reset localScale when it opens/closes
             // UI panels (e.g. WindowCanvas when opening notebook). Re-apply every scan.
-            // Skip Tooltip canvases when dialog is active — PositionCanvases manages their scale.
             var cd = CanvasCategoryInfo.GetCategoryDefaults(CanvasCategoryInfo.GetCanvasCategory(c.gameObject.name ?? ""));
-            if (cd.RepositionEveryFrame)
-            {
-                bool dlgUp = (popupMessageGO != null && popupMessageGO.activeSelf)
-                          || (tutorialMessageGO != null && tutorialMessageGO.activeSelf);
-                if (dlgUp) continue;
-            }
             var rtAfter = c.GetComponent<RectTransform>();
             var sdAfter = rtAfter != null ? rtAfter.sizeDelta : Vector2.zero;
             // Skip canvases with zero sizeDelta — scale calculation would be invalid.
@@ -226,36 +217,6 @@ internal static class CanvasConversionScanner
                 // (PaperImg, CityText, DrawingBrush, Key, Vent, Duct etc.) — NOT the case board.
                 // The actual case-board investigation content (pins, notes, connections) lives
                 // elsewhere (likely in GameCanvas's direct graphic hierarchy, found dynamically).
-                // PopupMessage and TutorialMessage are dialog sub-canvases nested under
-                // TooltipCanvas. They stay nested (not reparented) — when active,
-                // PositionCanvases switches TooltipCanvas from tooltip to dialog mode.
-                if (ncName.Equals("PopupMessage", StringComparison.OrdinalIgnoreCase))
-                {
-                    popupMessageGO = nc.gameObject;
-                    popupMessageCanvas = nc;
-                    // Give PopupMessage its own GraphicRaycaster — the parent
-                    // TooltipCanvas raycaster can't resolve hits on deeply nested
-                    // sub-canvas children at localScale 0.2.
-                    try
-                    {
-                        if (nc.GetComponent<GraphicRaycaster>() == null)
-                            nc.gameObject.AddComponent<GraphicRaycaster>();
-                        nc.worldCamera = leftCam;
-                    }
-                    catch { }
-                }
-                else if (ncName.Equals("TutorialMessage", StringComparison.OrdinalIgnoreCase))
-                {
-                    tutorialMessageGO = nc.gameObject;
-                    tutorialMessageCanvas = nc;
-                    try
-                    {
-                        if (nc.GetComponent<GraphicRaycaster>() == null)
-                            nc.gameObject.AddComponent<GraphicRaycaster>();
-                        nc.worldCamera = leftCam;
-                    }
-                    catch { }
-                }
                 nestedCanvasIds.Add(nid);   // always nested — never independently positioned
 
                 // ScrollRect content canvases render on top of their parent canvas's sibling

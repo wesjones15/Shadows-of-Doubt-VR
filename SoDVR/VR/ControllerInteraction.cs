@@ -346,19 +346,17 @@ internal sealed class ControllerInteraction
 
     /// <summary>
     /// Depth scan: find ALL managed canvases the controller ray hits within their rects.
-    /// The nearest hit drives the primary cursor canvas (for click targeting / tooltip depth).
+    /// The nearest hit drives the primary cursor canvas (for click targeting).
     /// Every hit gets a world-space aim dot so the user can see aim on canvases behind others.
     /// </summary>
     public AimScanResult ScanAndRenderAimDots(
         GameObject? rightControllerGO, Camera? leftCam,
         Dictionary<int, Canvas> managedCanvases, Canvas? cursorCanvas,
-        bool prevContextMenuActive, GameObject? popupMessageGO, GameObject? tutorialMessageGO,
         HashSet<int> nestedCanvasIds,
         HashSet<int> noGroupInteractable)
     {
         _aimDotHits.Clear();
         var result = new AimScanResult();
-        float nearestPlane = float.MaxValue;
 
         if (rightControllerGO != null && leftCam != null)
         {
@@ -378,18 +376,6 @@ internal sealed class ControllerInteraction
                 if (CanvasCategoryInfo.IsCanvasEffectivelyHidden(c, noGroupInteractable)) continue;
                 if (cursorCanvas != null && c.GetInstanceID() == cursorCanvas.GetInstanceID()) continue;
                 if (c.gameObject.name?.IndexOf("VRCursor", StringComparison.OrdinalIgnoreCase) >= 0) continue;
-                if (CanvasCategoryInfo.GetCategoryDefaults(CanvasCategoryInfo.GetCanvasCategory(c.gameObject.name)).RepositionEveryFrame)
-                {
-                    // RepositionEveryFrame canvases (TooltipCanvas) are normally skip —
-                    // EXCEPT when context menu is active (frozen in place, plane is valid)
-                    // or when a dialog popup is showing.
-                    if (!prevContextMenuActive)
-                    {
-                        bool dialogUp = (popupMessageGO != null && popupMessageGO.activeSelf)
-                                     || (tutorialMessageGO != null && tutorialMessageGO.activeSelf);
-                        if (!dialogUp) continue;
-                    }
-                }
                 var aimCat = CanvasCategoryInfo.GetCanvasCategory(c.gameObject.name);
                 if (aimCat == CanvasCategory.HUD) continue;
                 if (nestedCanvasIds.Contains(kvp.Key)) continue;
@@ -398,7 +384,6 @@ internal sealed class ControllerInteraction
                 if (!pl.Raycast(new Ray(dCtrlPos, dCtrlFwd), out float hitDist) || hitDist <= 0f) continue;
 
                 float depth = Vector3.Dot(c.transform.position - dHeadPos, dHeadFwd);
-                if (depth > 0f && depth < nearestPlane) nearestPlane = depth;
 
                 // Bounds check: only count as a hit when ray lands inside the canvas rect.
                 Vector3 worldHitPt = dCtrlPos + dCtrlFwd * hitDist;
@@ -424,13 +409,11 @@ internal sealed class ControllerInteraction
                 result.TargetCanvas = bestCanvas;
                 result.TargetPos = bestCanvas.transform.position;
                 result.TargetRot = bestCanvas.transform.rotation;
-                result.AimDepth = bestDepth - 0.01f;
             }
             else
             {
                 result.HasTarget = false;
                 result.TargetCanvas = null;
-                if (nearestPlane < float.MaxValue) result.AimDepth = nearestPlane - 0.01f;
             }
         }
 
@@ -538,5 +521,4 @@ internal struct AimScanResult
     public Canvas? TargetCanvas;
     public Vector3 TargetPos;
     public Quaternion TargetRot;
-    public float AimDepth;
 }

@@ -14,10 +14,8 @@ namespace SoDVR.VR;
 /// — none of this depends on case-board or any other specific canvas's mechanics, which is why
 /// it's split apart from CaseBoardInteraction rather than bundled with it.
 ///
-/// Minimap/context-menu/dialog-specific behavior (extra hit candidates like ContextMenus/dialogs,
-/// minimap's hidden-overlay-button skip and
-/// map-node click, the minimap branch of a right-click) is reached through
-/// <see cref="ICanvasClickExtensions"/> rather than being inline here — <c>ext</c> is null until
+/// Minimap-specific behavior (its hidden-overlay-button skip, map-node click and map context menu)
+/// is reached through <see cref="ICanvasClickExtensions"/> rather than being inline here — <c>ext</c> is null until
 /// CaseBoardInteraction (a later step in this split) implements it, and stays null forever if a
 /// future menu rewrite bypasses this router entirely for that surface.
 /// </summary>
@@ -63,8 +61,6 @@ internal static class CanvasClickRouter
             hits.Add((dist, canvas, wp));
         }
 
-        ext?.CollectExtraHitCandidates(ray, leftCam, hits);
-
         if (hits.Count == 0) return;
         // Sort by depth (nearest first).  Nested canvases within the same parent share the same
         // plane distance, so break ties by sortingOrder descending — the highest sortingOrder is
@@ -87,8 +83,6 @@ internal static class CanvasClickRouter
             Vector3 screenPt = leftCam.WorldToScreenPoint(hitWorld);
             var ped = new PointerEventData(es);
             ped.position = new Vector2(screenPt.x, screenPt.y);
-
-            ext?.PreRaycastFixup(hitCanvas);
 
             try
             {
@@ -456,14 +450,6 @@ internal static class CanvasClickRouter
 /// </summary>
 internal interface ICanvasClickExtensions
 {
-    /// <summary>Append extra hit candidates (e.g. an active context-menu canvas, dialog popups,
-    /// grip-dragged notes) that the generic managedCanvases scan wouldn't find on its own.</summary>
-    void CollectExtraHitCandidates(Ray ray, Camera leftCam, List<(float dist, Canvas canvas, Vector3 wp)> hits);
-
-    /// <summary>Called for each hit canvas right before its GraphicRaycaster runs, so
-    /// implementation-specific fixups (e.g. zeroing a context-menu's transform) happen first.</summary>
-    void PreRaycastFixup(Canvas hitCanvas);
-
     /// <summary>Pick which raycast result to use (e.g. skip a transparent overlay button on the
     /// minimap). Return an out-of-range index (or let the default apply) to mean "use the
     /// nearest (index 0)".</summary>
@@ -477,8 +463,7 @@ internal interface ICanvasClickExtensions
     /// true if handled, to skip the generic ExecuteEvents fallback.</summary>
     bool TryHandleSpecialClick(Canvas hitCanvas, GameObject hitGo, PointerEventData ped);
 
-    /// <summary>Handle a right-click (e.g. minimap's map context menu, case board's
-    /// ContextMenuController). Return true if handled, to skip the generic ExecuteEvents
-    /// fallback.</summary>
+    /// <summary>Handle a right-click (e.g. the minimap's map context menu). Return true if
+    /// handled, to skip the generic ExecuteEvents fallback.</summary>
     bool TryHandleSpecialRightClick(Canvas targetCanvas, GameObject hitGo, PointerEventData ped, Vector3 origin, Vector3 direction);
 }

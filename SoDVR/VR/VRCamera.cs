@@ -118,17 +118,7 @@ public class VRCamera : MonoBehaviour
     private readonly HashSet<int>         _nestedCanvasIds = new();
     private Canvas?                       _minimapCanvasRef;     // cached reference to MinimapCanvas
 
-    // PopupMessage / TutorialMessage: nested dialog canvases under TooltipCanvas.
-    // When active, TooltipCanvas is repositioned as a Menu dialog instead of a tooltip.
-    private GameObject?                   _popupMessageGO;
-    private GameObject?                   _tutorialMessageGO;
-    private Canvas?                       _popupMessageCanvas;
-    private Canvas?                       _tutorialMessageCanvas;
-
     // ── CaseBoard grip-relocate ───────────────────────────────────────────────
-    private Vector3    _contextMenuFreezePos;    // world position to enforce while context menu is frozen
-    private Quaternion _contextMenuFreezeRot;    // world rotation to enforce while context menu is frozen
-    private Vector3    _contextMenuChildWorldPos; // actual world pos of context menu child after zeroing (set in pre-render)
     // Grip-drag offset stored relative to the case-board anchor, which is re-placed each time the
     // case board opens, so offsets stay consistent.
     private readonly Dictionary<int, (Vector3 offset, Quaternion rot)> _gripDragAnchorOffsets = new();
@@ -209,7 +199,6 @@ public class VRCamera : MonoBehaviour
     // The dot moves via anchoredPosition (2D) inside this fixed-distance canvas.
     private Canvas?        _cursorCanvas;         // VRCursorCanvasInternal once scan converts it
     private RectTransform? _cursorRect;           // the dot's RectTransform inside _cursorCanvas
-    private float          _cursorAimDepth = UIDistance - 0.01f; // head-fwd depth of nearest aimed-at canvas (for tooltips)
     private Vector3?       _uiPointerPoint;       // where the laser is on UI (RT panel or legacy canvas) — TooltipRTPanel places menus and tooltips there
     private bool           _cursorHasTarget;      // true when depth scan found a canvas rect hit this frame
     private Canvas?        _cursorTargetCanvas;   // the nearest aimed-at canvas (for button mapping: A=RMB, B=MMB)
@@ -347,8 +336,6 @@ public class VRCamera : MonoBehaviour
                     _frameCount, _lastRescanFrame,
                     _managedFades, _leftCam,
                     ref _minimapCanvasRef,
-                    ref _popupMessageGO, ref _popupMessageCanvas,
-                    ref _tutorialMessageGO, ref _tutorialMessageCanvas,
                     _noGroupInteractable);
             }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] ScanAndConvertCanvases outer: {ex.GetType().Name}: {ex.Message}"); }
@@ -1056,11 +1043,9 @@ public class VRCamera : MonoBehaviour
                 _gripDragAnchorOffsets,
                 _gripDragEnforce,
                 _caseBoardRT.IsOpen, _caseBoardRT.JustOpened, _caseBoardRT.Anchor, _caseBoardRT.AnchorPlaced,
-                _popupMessageGO, _tutorialMessageGO,
-                ref _contextMenuFreezePos, ref _contextMenuFreezeRot,
                 _locomotion,
                 ref _minimapBBtnHasOffset, ref _minimapBBtnLocalOffset, ref _minimapBBtnLocalRot,
-                _cursorHasTarget, _cursorTargetPos, _cursorTargetRot, _cursorAimDepth);
+                _cursorHasTarget, _cursorTargetPos, _cursorTargetRot);
         }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] PositionCanvases exception: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}"); }
 
@@ -1222,8 +1207,6 @@ public class VRCamera : MonoBehaviour
             _menuRTPanel.SettingsBtnId, _menuRTPanel.Canvas,
             _leftCam, _gameCamRef, _rightControllerGO, _leftControllerGO,
             _caseBoardRT.IsOpen, _caseBoardRT.Anchor, _minimapCanvasRef,
-            _popupMessageGO, _tutorialMessageGO,
-            _popupMessageCanvas, _tutorialMessageCanvas,
             _gripDragEnforce, _gripDragAnchorOffsets,
             _canvasVRPose, _nestedCanvasIds,
             transform, _cursorHasTarget, _cursorTargetCanvas,
@@ -1249,8 +1232,7 @@ public class VRCamera : MonoBehaviour
         AimScanResult aim = voidPeriod
             ? default
             : _controllerInteraction.ScanAndRenderAimDots(_rightControllerGO, _leftCam,
-                _managedCanvases, _cursorCanvas, _caseBoard.ContextMenuActive, _popupMessageGO, _tutorialMessageGO,
-                _nestedCanvasIds, _noGroupInteractable);
+                _managedCanvases, _cursorCanvas, _nestedCanvasIds, _noGroupInteractable);
 
         float legacyHitDistance = _caseBoard.HasActiveGesture ? 0f
                                 : aim.HasTarget ? _controllerInteraction.NearestLegacyUIHitDistance(_rightControllerGO.transform.position)
@@ -1285,9 +1267,7 @@ public class VRCamera : MonoBehaviour
         _cursorTargetCanvas = aim.TargetCanvas;
         _cursorTargetPos    = aim.TargetPos;
         _cursorTargetRot    = aim.TargetRot;
-        _cursorAimDepth     = aim.AimDepth;
 
-        _caseBoard.PostAimScan();
         _caseBoard.Tick(rtOwnsPointer);
 
         _controllerInteraction.UpdateVrSettingsScroll();
@@ -1299,42 +1279,6 @@ public class VRCamera : MonoBehaviour
     /// <summary>Called right before each VR eye camera renders — last chance to position items + arms.</summary>
     private void ForceItemPositionPreRender()
     {
-        // Context menu: enforce ContextMenus + child zeroing right before render.
-        // The game may reset transforms between our LateUpdate and render.
-        // Only set localPosition — anchoredPosition would override based on anchor config.
-        if (_caseBoard.ContextMenuFreezeApplied)
-        {
-            foreach (var kvpPR in _managedCanvases)
-            {
-                if (kvpPR.Value == null) continue;
-                if (CanvasCategoryInfo.GetCanvasCategory(kvpPR.Value.gameObject.name) != CanvasCategory.Tooltip) continue;
-                kvpPR.Value.transform.position = _contextMenuFreezePos;
-                kvpPR.Value.transform.rotation  = _contextMenuFreezeRot;
-                try
-                {
-                    var cmTrPR = kvpPR.Value.transform.Find("ContextMenus");
-                    if (cmTrPR != null)
-                    {
-                        cmTrPR.localPosition = Vector3.zero;
-                        cmTrPR.localRotation = Quaternion.identity;
-                        cmTrPR.localScale    = Vector3.one;
-                        for (int pri = 0; pri < cmTrPR.childCount; pri++)
-                        {
-                            var prChild = cmTrPR.GetChild(pri);
-                            if (!prChild.gameObject.activeSelf) continue;
-                            prChild.localPosition = Vector3.zero;
-                            prChild.localRotation = Quaternion.identity;
-                            prChild.localScale    = Vector3.one;
-                            _contextMenuChildWorldPos = prChild.position;
-                            break;
-                        }
-                    }
-                }
-                catch { }
-                break;
-            }
-        }
-
         // Override carried world object position AND final arm positioning right before render
         // (Animator/game scripts may have overwritten what Update() set earlier this frame).
         _heldItem.ReapplyBeforeRender(_interactionController, _rightControllerGO, _leftControllerGO);

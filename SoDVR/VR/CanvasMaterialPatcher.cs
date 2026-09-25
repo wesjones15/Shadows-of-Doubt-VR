@@ -33,7 +33,7 @@ internal sealed class CanvasMaterialPatcher
     // Written here (via RelaxMenuCanvasClipping's Mask-based discovery, or ForceUIZTestAlways's
     // ScrollRect fallback discovery), read+written externally by VRCamera's UpdateMinimapZoom
     // (still VRCamera-owned today, eventual CanvasPlacement territory) once it applies the
-    // zoom-to-fit. Same public-field pattern as CaseBoardInteraction.ContextMenuFreezeApplied.
+    // zoom-to-fit.
     public Transform? MinimapViewportTransform;
     public bool MinimapZoomApplied;
 
