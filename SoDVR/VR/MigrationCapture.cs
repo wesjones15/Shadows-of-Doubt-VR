@@ -1,17 +1,14 @@
 using System;
 using BepInEx.Logging;
 using HarmonyLib;
-using TMPro;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace SoDVR.VR;
 
 /// <summary>
-/// TEMPORARY step-0 capture for moving dialogue, the map and the virtual keyboard onto RT panels:
-/// which game calls end a conversation, how the option list and the map window are laid out, and
-/// whether the game's own on-screen keyboard can be opened for a focused text field. Removed once
+/// TEMPORARY step-0 capture for moving dialogue and the map onto RT panels: which game calls
+/// end a conversation, and how the option list and the map window are laid out. Removed once
 /// those panels are built.
 /// </summary>
 internal static class MigrationCapture
@@ -19,7 +16,6 @@ internal static class MigrationCapture
     private static ManualLogSource Log => Plugin.Log;
 
     private const int OptionsSettleFrames = 15;
-    private const int KeyboardTryFrames = 30;
     private const int MapCursorLogFrames = 60;
 
     private static bool _dialogMode;
@@ -27,15 +23,11 @@ internal static class MigrationCapture
     private static bool _mapShowing;
     private static int _mapLogAt = -1;
     private static int _mapCursorCountdown;
-    private static TMP_InputField? _focusedField;
-    private static int _keyboardTryAt = -1;
-    private static bool _keyboardActive;
 
     public static void Tick(int frame)
     {
         try { TickDialogue(frame); } catch (Exception ex) { Log.LogWarning($"[Capture] dialogue: {ex.Message}"); }
         try { TickMap(frame); } catch (Exception ex) { Log.LogWarning($"[Capture] map: {ex.Message}"); }
-        try { TickKeyboard(frame); } catch (Exception ex) { Log.LogWarning($"[Capture] keyboard: {ex.Message}"); }
     }
 
     private static void TickDialogue(int frame)
@@ -123,51 +115,6 @@ internal static class MigrationCapture
         }
     }
 
-    private static void TickKeyboard(int frame)
-    {
-        var selected = EventSystem.current != null ? EventSystem.current.currentSelectedGameObject : null;
-        var field = selected != null ? selected.GetComponent<TMP_InputField>() : null;
-        if (field != _focusedField)
-        {
-            _focusedField = field;
-            if (field != null)
-            {
-                var canvas = field.GetComponentInParent<Canvas>();
-                Log.LogInfo($"[Capture] input field focused '{PathOf(field.transform)}' canvas='{(canvas != null ? canvas.rootCanvas.name : "none")}' " +
-                            $"lineType={field.lineType} text='{field.text}'");
-                LogKeyboardState("on focus");
-                _keyboardTryAt = frame + KeyboardTryFrames;
-            }
-        }
-
-        var vk = VirtualKeyboardController.Instance;
-        bool active = vk != null && vk.isActive;
-        if (active != _keyboardActive)
-        {
-            _keyboardActive = active;
-            LogKeyboardState($"isActive → {active}");
-        }
-
-        if (frame != _keyboardTryAt || field == null || vk == null || vk.isActive) return;
-        Log.LogInfo("[Capture] keyboard experiment: InitializeTextFromTarget + ActivateVirtualKeyboard + send 'vr'");
-        vk.InitializeTextFromTarget(field, field.text);
-        vk.ActivateVirtualKeyboard(field.lineType != TMP_InputField.LineType.SingleLine, "", field.text);
-        vk.SendStringToVirtualKeyboardInput("vr");
-        LogKeyboardState("after experiment");
-    }
-
-    private static void LogKeyboardState(string when)
-    {
-        var vk = VirtualKeyboardController.Instance;
-        if (vk == null) { Log.LogInfo($"[Capture] keyboard {when}: Instance=null"); return; }
-        var go = vk.keyboardCanvas;
-        var canvas = go != null ? go.GetComponentInParent<Canvas>() : null;
-        Log.LogInfo($"[Capture] keyboard {when}: isActive={vk.isActive} canvasGO='{(go != null ? PathOf(go.transform) : "null")}' " +
-                    $"activeInHierarchy={(go != null && go.activeInHierarchy)} rootCanvas='{(canvas != null ? canvas.rootCanvas.name : "none")}' " +
-                    $"target='{(vk._targetInputField != null ? vk._targetInputField.name : "null")}' " +
-                    $"keyboardText='{(vk.keyboardText != null ? vk.keyboardText.text : "null")}' steam={vk.steamKeyboardLaunched}");
-    }
-
     private static string Describe(RectTransform? rt)
     {
         if (rt == null) return "null";
@@ -218,24 +165,5 @@ internal static class MigrationCapture
     private static class CloseMapPatch
     {
         private static void Prefix(bool __0) => Log.LogInfo($"[Capture] call MapController.CloseMap({__0})");
-    }
-
-    [HarmonyPatch(typeof(VirtualKeyboardController), nameof(VirtualKeyboardController.ActivateVirtualKeyboard))]
-    private static class ActivateKeyboardPatch
-    {
-        private static void Prefix(bool __0, string __1) => Log.LogInfo($"[Capture] call VirtualKeyboard.Activate(multiline={__0}, label='{__1}')");
-    }
-
-    [HarmonyPatch(typeof(VirtualKeyboardController), nameof(VirtualKeyboardController.DeactivateVirtualKeyboard))]
-    private static class DeactivateKeyboardPatch
-    {
-        private static void Prefix() => Log.LogInfo("[Capture] call VirtualKeyboard.Deactivate");
-    }
-
-    [HarmonyPatch(typeof(VirtualKeyboardController), nameof(VirtualKeyboardController.SubmitText))]
-    private static class SubmitKeyboardPatch
-    {
-        private static void Postfix(VirtualKeyboardController __instance) =>
-            Log.LogInfo($"[Capture] call VirtualKeyboard.SubmitText → target text='{(__instance._targetInputField != null ? __instance._targetInputField.text : "null")}'");
     }
 }
