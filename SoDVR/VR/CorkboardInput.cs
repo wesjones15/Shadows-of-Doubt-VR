@@ -116,26 +116,27 @@ internal sealed class CorkboardInput : IRTPointerExtension
 
     /// <summary>The pin under the pointer: the raycast hit's own DragCasePanel ancestor, or else a
     /// direct rect test against every pin (topmost first), since not every pin graphic is a
-    /// raycast target. A button inside a pin (below its DragCasePanel) is left to the ordinary
-    /// click path.</summary>
+    /// raycast target. The pin's photo is a button (its evidence button) but is the pin itself as
+    /// far as pressing, dragging and linking go; any other button inside a pin is left to the
+    /// ordinary click path.</summary>
     private static bool TryFindPin(GameObject? hitGo, in RTPointerSample sample, out RectTransform pinRT, out DragCasePanel? pinDrag)
     {
         pinRT = null!;
         pinDrag = null;
         if (hitGo != null)
         {
-            bool passedSelectable = false;
+            Transform? selectable = null;
             for (var t = hitGo.transform; t != null; t = t.parent)
             {
                 var dcp = t.GetComponent<DragCasePanel>();
                 if (dcp != null)
                 {
-                    if (passedSelectable) return false;
+                    if (selectable != null && !IsEvidenceButtonOf(selectable, t)) return false;
                     pinRT = t.GetComponent<RectTransform>();
                     pinDrag = dcp;
                     return pinRT != null;
                 }
-                if (t.GetComponent<Selectable>() != null) passedSelectable = true;
+                if (t.GetComponent<Selectable>() != null) selectable ??= t;
             }
         }
 
@@ -152,6 +153,12 @@ internal sealed class CorkboardInput : IRTPointerExtension
             return true;
         }
         return false;
+    }
+
+    private static bool IsEvidenceButtonOf(Transform selectable, Transform pin)
+    {
+        var evidenceButton = PinControllerOf(pin)?.evidenceButton;
+        return evidenceButton != null && selectable.IsChildOf(evidenceButton.transform);
     }
 
     private static PinnedItemController? PinControllerOf(Transform t)
