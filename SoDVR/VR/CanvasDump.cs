@@ -21,13 +21,16 @@ internal static class CanvasDump
 {
     private static BepInEx.Logging.ManualLogSource Log => Plugin.Log;
 
-    private static readonly string[] CaseBoardCanvasNames =
+    // Canvas → how many levels of children to dump.
+    private static readonly (string Name, int Depth)[] ChildDumpCanvases =
     {
-        "ActionPanelCanvas", "CaseCanvas", "BioDisplayCanvas", "LocationDetailsCanvas",
-        "UpgradesDisplayCanvas", "WindowCanvas", "TooltipCanvas",
+        ("ActionPanelCanvas", 1), ("CaseCanvas", 1), ("BioDisplayCanvas", 1), ("LocationDetailsCanvas", 1),
+        ("UpgradesDisplayCanvas", 1), ("WindowCanvas", 1), ("TooltipCanvas", 4),
+        ("DialogCanvas", 4), ("MinimapCanvas", 4), ("VirtualKeyboardCanvas", 3),
     };
 
-    private const int TooltipDescendantDepth = 4;
+    // The map spawns hundreds of address buttons under one parent.
+    private const int MaxChildrenListed = 40;
 
     public static void DumpAll()
     {
@@ -77,13 +80,12 @@ internal static class CanvasDump
         }
         catch (Exception ex) { Log.LogWarning($"[CanvasDump] desktopMode read: {ex.Message}"); }
 
-        foreach (var name in CaseBoardCanvasNames)
+        foreach (var (name, depth) in ChildDumpCanvases)
         {
             var canvas = all.FirstOrDefault(c => c.transform.parent == null && c.gameObject.name == name)
                       ?? all.FirstOrDefault(c => c.gameObject.name == name);
             if (canvas == null) { Log.LogInfo($"[CanvasDump] '{name}': not found"); continue; }
 
-            int depth = name == "TooltipCanvas" ? TooltipDescendantDepth : 1;
             Log.LogInfo($"[CanvasDump] '{name}' children (canvas-local rect = xMin,yMin,w,h; canvas rect {DescribeRect(canvas.GetComponent<RectTransform>())}):");
             DumpChildren(canvas, canvas.transform, depth, 1);
         }
@@ -92,7 +94,9 @@ internal static class CanvasDump
     private static void DumpChildren(Canvas canvas, Transform parent, int maxDepth, int depth)
     {
         string indent = new string(' ', depth * 2);
-        for (int i = 0; i < parent.childCount; i++)
+        if (parent.childCount > MaxChildrenListed)
+            Log.LogInfo($"[CanvasDump] {indent}({parent.childCount} children, first {MaxChildrenListed} listed)");
+        for (int i = 0; i < Mathf.Min(parent.childCount, MaxChildrenListed); i++)
         {
             var child = parent.GetChild(i);
             if (child == null) continue;
