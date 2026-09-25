@@ -40,9 +40,6 @@ internal sealed class CorkboardInput : IRTPointerExtension
     private Vector2 _panStartLocal;
     private Vector2 _panContentStart;
     private GameObject? _panPressedGo;
-    private Vector2 _panLastSet;
-    private int _panOverrides;
-    private float _panMaxOverride;
 
     private PinnedItemController? _stringSource;
     private RectTransform? _stringFrom;
@@ -132,8 +129,9 @@ internal sealed class CorkboardInput : IRTPointerExtension
 
     /// <summary>A press on empty board pans it: the board's content is moved so the point grabbed
     /// stays under the laser. The game's scroll area doesn't pan from pointer events alone (drag
-    /// events reach it and it doesn't move), so its content position is driven directly; the scroll
-    /// area still applies its own bounds. Buttons and strings on the board keep the ordinary path.</summary>
+    /// events reach it and it doesn't move), so its content position is driven directly and kept
+    /// covering the viewport (<see cref="CoverShift"/>). Buttons and strings on the board keep the
+    /// ordinary path.</summary>
     private bool TryBeginPan(GameObject? hitGo, in RTPointerSample sample)
     {
         if (hitGo != null && (HasSelectableAncestor(hitGo.transform) || StringControllerOf(hitGo.transform) != null)) return false;
@@ -151,10 +149,6 @@ internal sealed class CorkboardInput : IRTPointerExtension
         _panStartLocal = local;
         _panContentStart = content.anchoredPosition;
         _panPressedGo = hitGo;
-        _panLastSet = content.anchoredPosition;
-        _panOverrides = 0;
-        _panMaxOverride = 0f;
-        LogScrollSetup(_panScroll);
         return true;
     }
 
@@ -162,23 +156,14 @@ internal sealed class CorkboardInput : IRTPointerExtension
     {
         if (_panContent == null || _panViewport == null) return;
         if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(_panViewport, sample.ScreenPosition, sample.EventCamera, out var local)) return;
-        // Diagnostic: something else moving the content between our writes (vertical pan steps).
-        var drift = _panContent.anchoredPosition - _panLastSet;
-        if (drift.sqrMagnitude > 0.0001f) { _panOverrides++; _panMaxOverride = Mathf.Max(_panMaxOverride, drift.magnitude); }
         _panContent.anchoredPosition = _panContentStart + (local - _panStartLocal);
         _panContent.anchoredPosition += CoverShift(_panContent, _panViewport);
-        _panLastSet = _panContent.anchoredPosition;
         if (_panScroll != null) _panScroll.velocity = Vector2.zero;
     }
 
     private void EndPan(in RTPointerSample sample)
     {
-        if (_panContent == null) return;
-        if (_dragging)
-        {
-            Log.LogInfo($"[Corkboard] Board pan: content {_panContentStart} → {_panContent.anchoredPosition}; moved by something else between frames {_panOverrides}x (max {_panMaxOverride:F1})");
-            return;
-        }
+        if (_panContent == null || _dragging) return;
         // Not a pan after all: a plain click on the board, as the ordinary path would have sent it.
         var es = EventSystem.current;
         if (_panPressedGo == null || es == null) return;
@@ -186,21 +171,6 @@ internal sealed class CorkboardInput : IRTPointerExtension
         ExecuteEvents.ExecuteHierarchy(_panPressedGo, ped, ExecuteEvents.pointerDownHandler);
         ExecuteEvents.ExecuteHierarchy(_panPressedGo, ped, ExecuteEvents.pointerUpHandler);
         ExecuteEvents.ExecuteHierarchy(_panPressedGo, ped, ExecuteEvents.pointerClickHandler);
-    }
-
-    // Diagnostic for the stepped vertical pan: a scrollbar with steps would snap the content.
-    private static void LogScrollSetup(ScrollRect? scroll)
-    {
-        if (scroll == null) { Log.LogInfo("[Corkboard] Board pan: no ScrollRect above the board content"); return; }
-        try
-        {
-            var h = scroll.horizontalScrollbar;
-            var v = scroll.verticalScrollbar;
-            Log.LogInfo($"[Corkboard] Board pan: scroll '{scroll.gameObject.name}' movementType={scroll.movementType} inertia={scroll.inertia} " +
-                        $"horizontalScrollbar={(h == null ? "none" : $"'{h.name}' steps={h.numberOfSteps}")} " +
-                        $"verticalScrollbar={(v == null ? "none" : $"'{v.name}' steps={v.numberOfSteps}")}");
-        }
-        catch (Exception ex) { Log.LogWarning($"[Corkboard] Scroll setup: {ex.Message}"); }
     }
 
     /// <summary>How far to move the board content (in the viewport's own units, which is what

@@ -35,8 +35,6 @@ internal sealed class CaseBoardWindows
 
     private const float WindowMarginPixels = 6f;
     private const float GripMargin = 1.3f;
-    private const int DiagnosticDelayFrames = 60;
-    private const int ScrollLogFrames = 30;
 
     // Default placement for a new window, in board-anchor space: in front of the navbar (where
     // legacy put WindowCanvas, at menu distance), each further window cascaded right/down/nearer.
@@ -86,59 +84,11 @@ internal sealed class CaseBoardWindows
             {
                 w.View.SetPixelRect(Grow(_panel.PixelRectOf(w.Rect), WindowMarginPixels));
                 if (--w.OverlayRefreshCountdown <= 0) RefreshOverlays(w);
-                LogDiagnostics(w);
             }
             w.View.Visible = visible;
         }
     }
 
-    // Diagnostics for open notes: why the close (minus) button is never hit, how often the game
-    // re-centres the window, and whether its scroll content jitters (the first note opened).
-    private void LogDiagnostics(BoardWindow w)
-    {
-        string name = w.Canvas.gameObject.name;
-        if (Time.frameCount == w.DiagnosticFrame)
-        {
-            var close = w.Info != null && w.Info.closeButton != null ? w.Info.closeButton.transform : null;
-            CanvasDump.DumpButton($"open-note close '{name}'", close);
-            LogHighlights(w);
-            var closeRect = close != null ? close.GetComponent<RectTransform>() : null;
-            if (closeRect != null)
-                Log.LogInfo($"[CaseBoardWindows] '{name}' close button pixelRect={_panel.UnclampedPixelRectOf(closeRect)} viewPixelRect={w.View.PixelRect}");
-            // The visible minus/X glyph is a separate element; presses on it land ~10-20 px above the button.
-            var icon = w.Info != null && w.Info.closeButtonIcon != null ? w.Info.closeButtonIcon.rectTransform : null;
-            CanvasDump.DumpButton($"open-note close icon '{name}'", icon);
-            if (icon != null)
-                Log.LogInfo($"[CaseBoardWindows] '{name}' close icon pixelRect={_panel.UnclampedPixelRectOf(icon)}");
-        }
-
-        if (w.ScrollLogFramesLeft > 0 && Time.frameCount >= w.DiagnosticFrame)
-        {
-            w.ScrollLogFramesLeft--;
-            try
-            {
-                var scroll = w.Info?.scrollRect;
-                if (scroll != null && w.ScrollLogFramesLeft == ScrollLogFrames - 1)
-                    Log.LogInfo($"[CaseBoardWindows] '{name}' scroll setup: movementType={scroll.movementType} " +
-                                $"verticalScrollbar={(scroll.verticalScrollbar == null ? "none" : $"'{scroll.verticalScrollbar.name}' steps={scroll.verticalScrollbar.numberOfSteps} size={scroll.verticalScrollbar.size:F3}")} " +
-                                $"content={scroll.content?.rect.size} viewport={scroll.viewport?.rect.size}");
-                if (scroll != null && scroll.content != null)
-                    Log.LogInfo($"[CaseBoardWindows] '{name}' frame {Time.frameCount}: scroll content anchoredPosition={scroll.content.anchoredPosition} " +
-                                $"velocity={scroll.velocity} normalized={scroll.normalizedPosition} gameMovesSoFar={w.GameMoves}");
-            }
-            catch (Exception ex) { Log.LogWarning($"[CaseBoardWindows] Scroll log: {ex.Message}"); w.ScrollLogFramesLeft = 0; }
-        }
-
-        if (Time.unscaledTime - w.MoveCountStart >= 1f)
-        {
-            if (w.GameMoves > 0)
-                Log.LogInfo($"[CaseBoardWindows] Game moved '{name}' {w.GameMoves}x in the last {Time.unscaledTime - w.MoveCountStart:F1}s (last to {w.LastGamePosition}) — slot re-applied each time.");
-            w.GameMoves = 0;
-            w.MoveCountStart = Time.unscaledTime;
-        }
-    }
-
-    /// <summary>Re-applies every window's slot (the game may have moved it since Tick), then renders.</summary>
     /// <summary>Right before any case-board panel renders: a pin the game created this frame for a
     /// re-pinned note is moved back before the corkboard draws it far off the board.</summary>
     public void BeforeRender()
@@ -146,6 +96,7 @@ internal sealed class CaseBoardWindows
         foreach (var w in _windows.Values) w.Controls?.Tick();
     }
 
+    /// <summary>Re-applies every window's slot (the game may have moved it since Tick), then renders.</summary>
     public void Render()
     {
         foreach (var w in _windows.Values) ApplySlot(w);
@@ -190,9 +141,6 @@ internal sealed class CaseBoardWindows
         {
             Info = info,
             Controls = controls,
-            DiagnosticFrame = Time.frameCount + DiagnosticDelayFrames,
-            ScrollLogFramesLeft = _windows.Count == 0 ? ScrollLogFrames : 0,
-            MoveCountStart = Time.unscaledTime,
         };
         _slots[slot] = w;
         _windows[id] = w;
@@ -221,52 +169,20 @@ internal sealed class CaseBoardWindows
         Log.LogInfo($"[CaseBoardWindows] Window closed: slot={w.Slot}");
     }
 
-    /// <summary>Moves the window's rect centre onto its slot centre, counting how often the game had
-    /// moved it since the last write (diagnostic: the game re-centres open notes every frame).</summary>
+    /// <summary>Moves the window's rect centre onto its slot centre. The game re-centres open notes
+    /// every frame, so this runs every frame too.</summary>
     private void ApplySlot(BoardWindow w)
     {
         if (w.Canvas == null) return;
         var rt = w.Rect;
-        if (w.HasWritten && (rt.localPosition - w.LastWritten).sqrMagnitude > 0.25f)
-        {
-            w.GameMoves++;
-            w.LastGamePosition = rt.localPosition;
-        }
-
         int col = w.Slot % SlotColumns, row = w.Slot / SlotColumns;
         var slotCenterPixel = new Vector2((col + 0.5f) * SlotSize, (SlotRows - row - 0.5f) * SlotSize);
         Vector3 slotCenter = _panel.CanvasLocalOfPixel(slotCenterPixel);
         Vector3 rectCenter = Vector3.Scale(rt.localScale, rt.rect.center);
-        // Whole units: a half-pixel window position is a candidate for its scroll content flipping
-        // by a pixel every few frames (logged as 0,0,-1,-1).
+        // Whole units: at a half-pixel window position the scroll content flips by a pixel every few
+        // frames (the note-scroll jitter).
         var offset = slotCenter - rectCenter;
-        var target = new Vector3(Mathf.Round(offset.x), Mathf.Round(offset.y), 0f);
-        rt.localPosition = target;
-        w.LastWritten = target;
-        w.HasWritten = true;
-    }
-
-    /// <summary>A window's graphics belong to its own (nested) canvas and any canvases nested
-    /// further in (the Notebook's Scroll View) — WindowCanvas's raycaster never sees them, so each
-    /// is registered with the view's pointer and pointed at the projector.</summary>
-    // Diagnostic: how ButtonController's hover corners (its "additional highlight") are sized from
-    // the button and additionalHighlightRectModifier, before growing the close button's to its hit area.
-    private static void LogHighlights(BoardWindow w)
-    {
-        if (w.Info == null) return;
-        foreach (var bc in w.Info.GetComponentsInChildren<ButtonController>(false))
-        {
-            if (bc == null) continue;
-            try
-            {
-                var own = bc.GetComponent<RectTransform>();
-                var hl = bc.additionalHighlightRect;
-                Log.LogInfo($"[CaseBoardWindows] highlight '{bc.gameObject.name}' use={bc.useAdditionalHighlight} modifier={bc.additionalHighlightRectModifier} " +
-                            $"atFront={bc.additionalHighlightAtFront} button={own?.rect.size} " +
-                            $"highlight={(hl == null ? "none" : $"size={hl.rect.size} anchorMin={hl.anchorMin} anchorMax={hl.anchorMax} offsetMin={hl.offsetMin} offsetMax={hl.offsetMax} parent='{hl.parent?.name}'")}");
-            }
-            catch (Exception ex) { Log.LogWarning($"[CaseBoardWindows] highlight '{bc.gameObject.name}': {ex.Message}"); }
-        }
+        rt.localPosition = new Vector3(Mathf.Round(offset.x), Mathf.Round(offset.y), 0f);
     }
 
     // Buttons wider than this aren't "the other buttons in its column" (a scrollbar, a tab strip).
@@ -321,6 +237,9 @@ internal sealed class CaseBoardWindows
         return new Vector2(Mathf.Min(a, b), Mathf.Max(a, b));
     }
 
+    /// <summary>A window's graphics belong to its own (nested) canvas and any canvases nested
+    /// further in (the Notebook's Scroll View) — WindowCanvas's raycaster never sees them, so each
+    /// is registered with the view's pointer and pointed at the projector.</summary>
     private void RefreshOverlays(BoardWindow w)
     {
         w.OverlayRefreshCountdown = OverlayRefreshFrames;
@@ -389,15 +308,8 @@ internal sealed class CaseBoardWindows
         public RTPanelView View { get; }
         public int Slot { get; }
         public int OverlayRefreshCountdown;
-        public Vector3 LastWritten;
-        public bool HasWritten;
         public InfoWindow? Info;
         public WindowPointerExtension? Controls;
-        public int DiagnosticFrame;
-        public int ScrollLogFramesLeft;
-        public int GameMoves;
-        public Vector3 LastGamePosition;
-        public float MoveCountStart;
 
         public void SetLayout(Vector3 offset, Quaternion rotation)
         {

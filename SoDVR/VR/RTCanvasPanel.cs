@@ -331,42 +331,6 @@ internal sealed class RTCanvasPanel
     private static Vector2Int ScreenSize() => new(
         Mathf.Clamp(Screen.width > 0 ? Screen.width : 1920, 64, 4096),
         Mathf.Clamp(Screen.height > 0 ? Screen.height : 1080, 64, 4096));
-
-    /// <summary>
-    /// Diagnostic: visibly drawn graphics that reach past the texture's edges, so are cut off in
-    /// every view. Returns how many, plus a few examples (buttons first — a missing close button is
-    /// what this exists to explain).
-    /// </summary>
-    public int CountContentOutsideTexture(out string examples)
-    {
-        examples = "";
-        if (Canvas == null || Texture == null || ProjectorCamera == null) return 0;
-        int count = 0;
-        var names = new List<string>();
-        foreach (var g in Canvas.GetComponentsInChildren<Graphic>(false))
-        {
-            if (g == null || !g.enabled || !IsVisiblyDrawn(g)) continue;
-            var r = g.rectTransform.rect;
-            Vector3 a = ProjectorCamera.WorldToScreenPoint(g.rectTransform.TransformPoint(new Vector3(r.xMin, r.yMin, 0f)));
-            Vector3 b = ProjectorCamera.WorldToScreenPoint(g.rectTransform.TransformPoint(new Vector3(r.xMax, r.yMax, 0f)));
-            bool outside = Mathf.Min(a.x, b.x) < -0.5f || Mathf.Min(a.y, b.y) < -0.5f
-                        || Mathf.Max(a.x, b.x) > Texture.width + 0.5f || Mathf.Max(a.y, b.y) > Texture.height + 0.5f;
-            if (!outside) continue;
-            count++;
-            string entry = $"'{g.gameObject.name}'({Mathf.Min(a.x, b.x):F0},{Mathf.Min(a.y, b.y):F0}..{Mathf.Max(a.x, b.x):F0},{Mathf.Max(a.y, b.y):F0})";
-            if (HasSelectableAncestor(g.transform)) names.Insert(0, entry); else names.Add(entry);
-        }
-        examples = string.Join(" ", names.GetRange(0, Math.Min(6, names.Count)));
-        return count;
-    }
-
-    // GetComponentInParent is unreliable across the IL2CPP interop — walk parents by hand.
-    private static bool HasSelectableAncestor(Transform t)
-    {
-        for (var tr = t; tr != null; tr = tr.parent)
-            if (tr.GetComponent<Selectable>() != null) return true;
-        return false;
-    }
 }
 
 /// <summary>

@@ -41,7 +41,6 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     private readonly string?[] _regionPaths;
     private readonly Func<bool>? _shownWhile;
     private readonly bool _wholeCanvas;
-    private bool _wasShownWhile;
     private readonly List<Region> _regions = new();
 
     private int _discoveryCooldown;
@@ -103,9 +102,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
         if (showing && (!_wasShowing || --_refreshCountdown <= 0))
         {
             _refreshCountdown = ContentRefreshFrames;
-            bool hadContent = AnyContent();
             RefreshRegions();
-            if (AnyContent() && (!hadContent || !_wasShowing)) LogContentCutOff();
         }
         _wasShowing = showing;
 
@@ -161,8 +158,6 @@ internal sealed class CaseBoardPanel : IRTGripTarget
         bool shown = false;
         try { shown = _shownWhile(); }
         catch (Exception ex) { Log.LogWarning($"[CaseBoardPanel] {_canvasName} open-state read: {ex.Message}"); }
-        if (shown != _wasShownWhile) Log.LogInfo($"[CaseBoardPanel] {_canvasName} game open state → {shown}");
-        _wasShownWhile = shown;
         return shown;
     }
 
@@ -213,13 +208,6 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     }
 
     // ──────────────────────────────────────────────────────────────────────────────────────
-
-    private void LogContentCutOff()
-    {
-        int outside = _panel.CountContentOutsideTexture(out string examples);
-        if (outside > 0)
-            Log.LogWarning($"[CaseBoardPanel] {_canvasName}: {outside} visible graphic(s) reach past the texture edge and are cut off: {examples}");
-    }
 
     private void PlaceFromLayout(Transform anchor)
     {
