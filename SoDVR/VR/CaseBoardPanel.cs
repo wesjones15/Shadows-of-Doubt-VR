@@ -32,6 +32,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     private readonly RTPanelGrip _grip;
     private readonly RTCanvasPanel _panel;
     private readonly IRTPointerExtension? _pointerExtension;
+    private readonly bool _centred;
 
     private RTPanelView? _view;
     private int _discoveryCooldown;
@@ -48,10 +49,14 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     /// width, so the panel reads at the size it always has.</param>
     /// <param name="distanceInFrontOfAnchor">Default placement, towards the player from the anchor.</param>
     /// <param name="pointerExtension">Panel-specific input handling (the corkboard's pins).</param>
+    /// <param name="centred">Keep the screen centre in the middle of the panel — for a canvas whose
+    /// main content is centred on screen with extras off to one side (the inventory and its XP
+    /// bar), which a view tight to the content would push off-centre.</param>
     public CaseBoardPanel(string canvasName, float screenWorldWidth, float distanceInFrontOfAnchor,
         bool draggable, int quadLayer, RTPanelInput input, RTPanelGrip grip,
-        IRTPointerExtension? pointerExtension = null)
+        IRTPointerExtension? pointerExtension = null, bool centred = false)
     {
+        _centred = centred;
         _pointerExtension = pointerExtension;
         _canvasName = canvasName;
         _screenWorldWidth = screenWorldWidth;
@@ -90,7 +95,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
             var rect = _panel.ContentPixelRect(ContentMarginPixels, out int graphicCount);
             bool hadContent = _hasContent;
             _hasContent = graphicCount >= MinContentGraphics;
-            if (_hasContent) _view!.SetPixelRect(rect);
+            if (_hasContent) _view!.SetPixelRect(_centred ? CentredOnScreen(rect) : rect);
             if (_hasContent && (!hadContent || !_wasShowing)) LogContentCutOff();
         }
         _wasShowing = showing;
@@ -98,6 +103,16 @@ internal sealed class CaseBoardPanel : IRTGripTarget
         bool visible = showing && _hasContent;
         if (visible) _view!.SetCanvasPose(_posePosition, _poseRotation);
         _view!.Visible = visible;
+    }
+
+    /// <summary>The content rect widened to be symmetric about the screen's vertical centre line.</summary>
+    private Rect CentredOnScreen(Rect content)
+    {
+        var texture = _panel.Texture;
+        if (texture == null) return content;
+        float centre = texture.width * 0.5f;
+        float half = Mathf.Min(centre, Mathf.Max(centre - content.xMin, content.xMax - centre));
+        return Rect.MinMaxRect(centre - half, content.yMin, centre + half, content.yMax);
     }
 
     public void Render() => _panel.Render();
