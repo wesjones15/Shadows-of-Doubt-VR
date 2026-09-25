@@ -74,6 +74,7 @@ internal sealed class LocomotionController
 
     private bool _tabHeldDown;
     private bool _backpackBtnPrev;             // edge detection for backpack gesture
+    private bool _ignoreBUntilReleased;
     private bool _minimapInBBtnContext;        // true while B is held and minimap shown (not case board)
 
     private bool _flashlightBtnPrev;
@@ -599,7 +600,10 @@ internal sealed class LocomotionController
     }
 
     /// <summary>Right B → Tab (notebook/map), or X (inventory) if controller is behind shoulder.</summary>
-    public NotebookOutcome UpdateNotebook(bool settingsOpen, bool caseBoardOpen, GameObject? rightControllerGO,
+    /// <param name="inConversation">B ends a conversation instead; the press that ends it must not
+    /// then open the map once the conversation is gone.</param>
+    public NotebookOutcome UpdateNotebook(bool settingsOpen, bool caseBoardOpen, bool inConversation,
+                                           GameObject? rightControllerGO,
                                            Camera? leftCam, bool cursorHasTarget, Canvas? minimapCanvasRef,
                                            Transform vrOrigin)
     {
@@ -611,6 +615,14 @@ internal sealed class LocomotionController
         }
 
         OpenXRManager.GetButtonBState(out bool pressed);
+
+        if (inConversation) _ignoreBUntilReleased = true;
+        if (_ignoreBUntilReleased)
+        {
+            if (_tabHeldDown) ReleaseTabKey();
+            if (!pressed && !inConversation) _ignoreBUntilReleased = false;
+            return default;
+        }
 
         // When case board is open, B = middle-click — suppress Tab.
         // Don't suppress based on cursorHasTarget while Tab is held — the map/notebook

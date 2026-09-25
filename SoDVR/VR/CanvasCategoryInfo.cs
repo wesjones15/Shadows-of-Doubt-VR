@@ -56,7 +56,6 @@ internal static class CanvasCategoryInfo
 
         // Menu — recentres in front of head on activate; always in front of Panel canvases
         ["MenuCanvas"]                = CanvasCategory.Menu,
-        ["DialogCanvas"]              = CanvasCategory.Menu,
         ["controlsCanvas"]            = CanvasCategory.Menu,
         ["upgradesCanvas"]            = CanvasCategory.Menu,
         ["VirtualCursorCanvas & EventSystem"] = CanvasCategory.Ignored, // game virtual cursor, not ours

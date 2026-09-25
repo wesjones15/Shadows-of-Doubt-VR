@@ -65,6 +65,7 @@ public class VRCamera : MonoBehaviour
     private MenuRTPanel _menuRTPanel = null!;
     private TooltipRTPanel _tooltipRTPanel = null!;
     private CaseBoardRTController _caseBoardRT = null!;
+    private DialogueRTPanel _dialogueRT = null!;
     private readonly PostFXOverlayCompositor _overlay = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
@@ -230,6 +231,7 @@ public class VRCamera : MonoBehaviour
         _tooltipRTPanel = new TooltipRTPanel(UILayer, _rtPanelInput, _rtPanelGrip, OnSaveLoadButtonClicked,
             pin => _caseBoardRT.BeginLinkFrom(pin));
         _caseBoardRT = new CaseBoardRTController(UILayer, _rtPanelInput, _rtPanelGrip);
+        _dialogueRT = new DialogueRTPanel(UILayer, _rtPanelInput, _rtPanelGrip);
         Log.LogInfo("[VRCamera] Awake — polling for SYNCHRONIZED state before swapchain setup.");
     }
 
@@ -357,6 +359,9 @@ public class VRCamera : MonoBehaviour
 
             try { _caseBoardRT.Tick(_leftCam); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] CaseBoardRTController.Tick: {ex.GetType().Name}: {ex.Message}"); }
+
+            try { _dialogueRT.Tick(_leftCam); }
+            catch (Exception ex) { Log.LogWarning($"[VRCamera] DialogueRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
         }
 
         // F8: re-centre all canvases in front of the current head pose.
@@ -573,7 +578,7 @@ public class VRCamera : MonoBehaviour
                 _locomotion.UpdateYButton();
                 _locomotion.UpdateSprint();
 
-                var notebookOutcome = _locomotion.UpdateNotebook(vrSettingsOpenForInput, caseBoardOpenForInput,
+                var notebookOutcome = _locomotion.UpdateNotebook(vrSettingsOpenForInput, caseBoardOpenForInput, _dialogueRT.IsOpen,
                     _rightControllerGO, _leftCam, pointerOnUI, _minimapCanvasRef, transform);
                 if (notebookOutcome.TabJustReleased)
                 {
@@ -1136,6 +1141,8 @@ public class VRCamera : MonoBehaviour
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] TooltipRTPanel.Render: {ex.Message}"); }
                 try { _caseBoardRT.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] CaseBoardRTController.Render: {ex.Message}"); }
+                try { _dialogueRT.Render(); }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] DialogueRTPanel.Render: {ex.Message}"); }
 
                 // No GL.invertCulling — HDRP flipYMode handles both Y-flip and culling.
                 _rightCam.Render();
@@ -1147,6 +1154,7 @@ public class VRCamera : MonoBehaviour
                     _menuRTPanel.AppendOverlay(_overlay);
                     _tooltipRTPanel.AppendOverlay(_overlay);
                     _caseBoardRT.AppendOverlay(_overlay);
+                    _dialogueRT.AppendOverlay(_overlay);
                     _rtPanelInput.AppendOverlay(_overlay);
                     _overlay.Composite(_rightCam, _rightRT);
                     _overlay.Composite(_leftCam, _leftRT);

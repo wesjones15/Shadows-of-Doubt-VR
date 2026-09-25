@@ -31,7 +31,7 @@ internal sealed class MenuRTPanel
 
     // This panel's own world width — deliberately NOT CanvasCategoryInfo's shared Menu default
     // (1.2m): that default is still used by the other WorldSpace Menu-category canvases
-    // (DialogCanvas, controlsCanvas, etc), and CLAUDE.md's own lesson from the prior repo is that panels must
+    // (controlsCanvas, etc), and CLAUDE.md's own lesson from the prior repo is that panels must
     // not share one sizing policy. This panel owns its own size independent of that pipeline.
     private const float PanelWorldWidth = 1.6f;
 
