@@ -51,7 +51,8 @@ internal sealed class CaseBoardRTController
             _navbar,
             corkboard,
             new CaseBoardPanel("BioDisplayCanvas", CaseBoardWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip,
-                regions: new[] { "InventoryDisplayArea", "SocialCreditArea" }),
+                regions: new[] { "InventoryDisplayArea", "SocialCreditArea" },
+                shownWhile: () => BioScreenController.Instance != null && BioScreenController.Instance.isOpen),
             new CaseBoardPanel("LocationDetailsCanvas", CaseBoardWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip),
             new CaseBoardPanel("UpgradesDisplayCanvas", PanelWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip),
         };

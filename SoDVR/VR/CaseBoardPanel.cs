@@ -39,6 +39,8 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     private readonly RTCanvasPanel _panel;
     private readonly IRTPointerExtension? _pointerExtension;
     private readonly string?[] _regionPaths;
+    private readonly Func<bool>? _shownWhile;
+    private bool _wasShownWhile;
     private readonly List<Region> _regions = new();
 
     private int _discoveryCooldown;
@@ -56,10 +58,13 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     /// <param name="pointerExtension">Panel-specific input handling (the corkboard's pins).</param>
     /// <param name="regions">Paths (from the canvas) of the parts to show as separate views, in
     /// left-to-right order; null shows the whole canvas as one view.</param>
+    /// <param name="shownWhile">The game's own "this is open" state, for a panel that fades out after
+    /// closing: the panel hides the moment it turns false instead of waiting out the fade.</param>
     public CaseBoardPanel(string canvasName, float screenWorldWidth, float distanceInFrontOfAnchor,
         bool draggable, int quadLayer, RTPanelInput input, RTPanelGrip grip,
-        IRTPointerExtension? pointerExtension = null, string[]? regions = null)
+        IRTPointerExtension? pointerExtension = null, string[]? regions = null, Func<bool>? shownWhile = null)
     {
+        _shownWhile = shownWhile;
         _pointerExtension = pointerExtension;
         _canvasName = canvasName;
         _screenWorldWidth = screenWorldWidth;
@@ -88,7 +93,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
 
         if (relayout) PlaceFromLayout(anchor);
 
-        bool showing = boardOpen && RTCanvasPanel.IsShowing(_panel.Canvas!);
+        bool showing = boardOpen && RTCanvasPanel.IsShowing(_panel.Canvas!) && ShownWhile();
         if (showing && (!_wasShowing || --_refreshCountdown <= 0))
         {
             _refreshCountdown = ContentRefreshFrames;
@@ -136,6 +141,17 @@ internal sealed class CaseBoardPanel : IRTGripTarget
             region.OffsetPixels = previousRight.HasValue ? previousRight.Value - rect.xMin : 0f;
             previousRight = rect.xMax + region.OffsetPixels;
         }
+    }
+
+    private bool ShownWhile()
+    {
+        if (_shownWhile == null) return true;
+        bool shown = false;
+        try { shown = _shownWhile(); }
+        catch (Exception ex) { Log.LogWarning($"[CaseBoardPanel] {_canvasName} open-state read: {ex.Message}"); }
+        if (shown != _wasShownWhile) Log.LogInfo($"[CaseBoardPanel] {_canvasName} game open state → {shown}");
+        _wasShownWhile = shown;
+        return shown;
     }
 
     private void PlaceView(Region region)
