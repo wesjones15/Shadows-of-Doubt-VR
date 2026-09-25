@@ -210,6 +210,7 @@ public class VRCamera : MonoBehaviour
     private Canvas?        _cursorCanvas;         // VRCursorCanvasInternal once scan converts it
     private RectTransform? _cursorRect;           // the dot's RectTransform inside _cursorCanvas
     private float          _cursorAimDepth = UIDistance - 0.01f; // head-fwd depth of nearest aimed-at canvas (for tooltips)
+    private Vector3?       _uiPointerPoint;       // where the laser is on UI (RT panel or legacy canvas) — TooltipRTPanel places menus and tooltips there
     private bool           _cursorHasTarget;      // true when depth scan found a canvas rect hit this frame
     private Canvas?        _cursorTargetCanvas;   // the nearest aimed-at canvas (for button mapping: A=RMB, B=MMB)
     private Vector3        _cursorTargetPos;      // world pos of nearest aimed-at canvas
@@ -236,7 +237,7 @@ public class VRCamera : MonoBehaviour
         // Stop the background frame thread; we take over the frame loop from here.
         OpenXRManager.StopFrameThread();
         _menuRTPanel = new MenuRTPanel(UILayer, _rtPanelInput, OnSaveLoadButtonClicked);
-        _tooltipRTPanel = new TooltipRTPanel(UILayer, _rtPanelInput, OnSaveLoadButtonClicked);
+        _tooltipRTPanel = new TooltipRTPanel(UILayer, _rtPanelInput, _rtPanelGrip, OnSaveLoadButtonClicked);
         _caseBoardRT = new CaseBoardRTController(UILayer, _rtPanelInput, _rtPanelGrip);
         Log.LogInfo("[VRCamera] Awake — polling for SYNCHRONIZED state before swapchain setup.");
     }
@@ -348,7 +349,7 @@ public class VRCamera : MonoBehaviour
                     ref _minimapCanvasRef,
                     ref _popupMessageGO, ref _popupMessageCanvas,
                     ref _tutorialMessageGO, ref _tutorialMessageCanvas,
-                    _noGroupInteractable, _tooltipRTPanel.IsOwned);
+                    _noGroupInteractable);
             }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] ScanAndConvertCanvases outer: {ex.GetType().Name}: {ex.Message}"); }
         }
@@ -360,10 +361,7 @@ public class VRCamera : MonoBehaviour
             try { _menuRTPanel.Tick(_leftCam); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
-            // TooltipCanvas is time-shared with the legacy pipeline (see TooltipRTPanel's own
-            // doc comment) — this call is what pulls it out of _managedCanvases while a dialog is
-            // active and hands it back the instant the dialog closes.
-            try { _tooltipRTPanel.Tick(_leftCam, _managedCanvases, _popupMessageCanvas, _tutorialMessageCanvas); }
+            try { _tooltipRTPanel.Tick(_leftCam, _uiPointerPoint); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] TooltipRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
             try { _caseBoardRT.Tick(_leftCam); }
@@ -1225,7 +1223,7 @@ public class VRCamera : MonoBehaviour
             _leftCam, _gameCamRef, _rightControllerGO, _leftControllerGO,
             _caseBoardRT.IsOpen, _caseBoardRT.Anchor, _minimapCanvasRef,
             _popupMessageGO, _tutorialMessageGO,
-            _popupMessageCanvas, _tutorialMessageCanvas, _tooltipRTPanel.IsOwned,
+            _popupMessageCanvas, _tutorialMessageCanvas,
             _gripDragEnforce, _gripDragAnchorOffsets,
             _canvasVRPose, _nestedCanvasIds,
             transform, _cursorHasTarget, _cursorTargetCanvas,
@@ -1265,6 +1263,10 @@ public class VRCamera : MonoBehaviour
         catch (Exception ex) { Log.LogWarning($"[VRCamera] RTPanelInput.Update: {ex.Message}"); }
 
         bool rtOwnsPointer = _rtPanelInput.HasFocus || _rtPanelInput.IsCapturing;
+        _uiPointerPoint = rtOwnsPointer ? _rtPanelInput.FocusPoint
+            : legacyHitDistance > 0f && !float.IsPositiveInfinity(legacyHitDistance)
+                ? _rightControllerGO.transform.position + _rightControllerGO.transform.forward * legacyHitDistance
+                : null;
         if (voidPeriod || rtOwnsPointer)
         {
             _controllerInteraction.HideAllAimDots();

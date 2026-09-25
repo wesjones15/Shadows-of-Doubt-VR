@@ -117,7 +117,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private GameObject? _ctxTutorialMessageGO;
     private Canvas? _ctxPopupMessageCanvas;
     private Canvas? _ctxTutorialMessageCanvas;
-    private bool _ctxTooltipRTPanelOwnsDialog;
     private Dictionary<int, (Vector3 pos, Quaternion rot)> _ctxGripDragEnforce = null!;
     private Dictionary<int, (Vector3 offset, Quaternion rot)> _ctxGripDragAnchorOffsets = null!;
     private Dictionary<int, (Vector3 pos, Quaternion rot, Vector3 scale)> _ctxCanvasVRPose = null!;
@@ -144,7 +143,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         Camera? leftCam, Camera? gameCamRef, GameObject? rightControllerGO, GameObject? leftControllerGO,
         bool caseBoardOpen, Transform caseBoardAnchor, Canvas? minimapCanvasRef,
         GameObject? popupMessageGO, GameObject? tutorialMessageGO,
-        Canvas? popupMessageCanvas, Canvas? tutorialMessageCanvas, bool tooltipRTPanelOwnsDialog,
+        Canvas? popupMessageCanvas, Canvas? tutorialMessageCanvas,
         Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
         Dictionary<int, (Vector3 offset, Quaternion rot)> gripDragAnchorOffsets,
         Dictionary<int, (Vector3 pos, Quaternion rot, Vector3 scale)> canvasVRPose,
@@ -170,7 +169,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         _ctxTutorialMessageGO = tutorialMessageGO;
         _ctxPopupMessageCanvas = popupMessageCanvas;
         _ctxTutorialMessageCanvas = tutorialMessageCanvas;
-        _ctxTooltipRTPanelOwnsDialog = tooltipRTPanelOwnsDialog;
         _ctxGripDragEnforce = gripDragEnforce;
         _ctxGripDragAnchorOffsets = gripDragAnchorOffsets;
         _ctxCanvasVRPose = canvasVRPose;
@@ -924,8 +922,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         // TooltipRTPanel owns the dialog — it's overridden their worldCamera to its own projector
         // camera, and this plane test (against a now-stale TooltipCanvas-relative transform) would
         // fight it rather than find anything meaningful.
-        bool dialogActive = !_ctxTooltipRTPanelOwnsDialog &&
-                             ((_ctxPopupMessageGO != null && _ctxPopupMessageGO.activeSelf)
+        bool dialogActive = ((_ctxPopupMessageGO != null && _ctxPopupMessageGO.activeSelf)
                            || (_ctxTutorialMessageGO != null && _ctxTutorialMessageGO.activeSelf));
         if (dialogActive)
         {

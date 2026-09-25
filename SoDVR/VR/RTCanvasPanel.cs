@@ -173,13 +173,18 @@ internal sealed class RTCanvasPanel
     /// is picked up automatically.
     /// </summary>
     public Rect ContentPixelRect(float marginPixels, out int graphicCount)
+        => ContentPixelRect(Canvas != null ? Canvas.transform : null, marginPixels, out graphicCount);
+
+    /// <summary>The same, for just the graphics under <paramref name="content"/> — one element of
+    /// a canvas that hosts several unrelated ones.</summary>
+    public Rect ContentPixelRect(Transform? content, float marginPixels, out int graphicCount)
     {
         graphicCount = 0;
-        if (Canvas == null || Texture == null) return Rect.zero;
+        if (Canvas == null || Texture == null || content == null) return Rect.zero;
 
         Rect union = default;
         var root = Canvas.transform;
-        foreach (var g in Canvas.GetComponentsInChildren<Graphic>(false))
+        foreach (var g in content.GetComponentsInChildren<Graphic>(false))
         {
             if (g == null || !g.enabled || !IsVisiblyDrawn(g)) continue;
             var r = PixelRectOf(g.rectTransform);

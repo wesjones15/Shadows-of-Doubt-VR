@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using BepInEx.Logging;
 using UnityEngine;
@@ -48,6 +49,11 @@ internal sealed class RTPanelInput
     public bool IsCapturing => _captured != null;
     public Vector3 FocusPoint => _laserEnd;
     public float FocusDistance { get; private set; }
+
+    /// <summary>A trigger or A press on the active hand, raised before it is delivered, with the
+    /// RT panel it lands on (null when it lands on legacy UI or nothing) — for popups the game
+    /// dismisses on a click anywhere else, which it detects from the real mouse.</summary>
+    public event Action<RTPanelPointer?>? Pressed;
 
     public void Register(RTPanelPointer pointer)
     {
@@ -126,7 +132,9 @@ internal sealed class RTPanelInput
         }
 
         float legacyLimit = _useRightHand ? legacyHitDistance : float.PositiveInfinity;
-        if (nearest == null || nearestDist >= legacyLimit) { DropFocus(); return; }
+        if (nearest != null && nearestDist >= legacyLimit) nearest = null;
+        if (input.Press || input.SecondaryClick) Pressed?.Invoke(nearest);
+        if (nearest == null) { DropFocus(); return; }
 
         if (_focus != nearest) _focus?.LoseFocus();
         _focus = nearest;
