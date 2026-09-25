@@ -23,6 +23,10 @@ internal sealed class RTCanvasPanel
 {
     private static ManualLogSource Log => Plugin.Log;
 
+    // In the flat game every canvas is one screen; here each has its own projector.
+    private static readonly List<RTCanvasPanel> s_attached = new();
+    private const float PlaneDepthTolerance = 0.05f;
+
     private readonly string _logTag;
     private readonly int _quadLayer;
     private readonly RTPanelInput _input;
@@ -99,6 +103,7 @@ internal sealed class RTCanvasPanel
 
         Canvas = canvas;
         MetersPerPixel = metersPerPixel;
+        s_attached.Add(this);
         var scaler = canvas.GetComponent<CanvasScaler>();
         Log.LogInfo($"[{_logTag}] Attached '{canvas.gameObject.name}': rt={size.x}x{size.y} m/px={metersPerPixel:F6} " +
                     $"scaler={(scaler == null ? "none" : $"{scaler.uiScaleMode} enabled={scaler.enabled}")} layer={canvas.gameObject.layer}");
@@ -266,7 +271,35 @@ internal sealed class RTCanvasPanel
         ProjectorCamera = null;
         Texture = null;
         Canvas = null;
+        s_attached.Remove(this);
     }
+
+    /// <summary>The game copies world positions between canvases that share one screen in the flat
+    /// game (the pin quick-menu takes its pin's position). Here each canvas has its own projector, so
+    /// such a copy lands on another panel's canvas plane: this finds that panel and returns the same
+    /// screen point on this panel's plane — where the flat game would have drawn it.</summary>
+    public bool TryMapFromOtherScreen(Vector3 world, out Vector3 mapped, out string sourceName)
+    {
+        mapped = world;
+        sourceName = "";
+        if (Canvas == null || ProjectorCamera == null) return false;
+        foreach (var other in s_attached)
+        {
+            if (other == this || other.Canvas == null || other.ProjectorCamera == null) continue;
+            var vp = other.ProjectorCamera.WorldToViewportPoint(world);
+            if (Mathf.Abs(vp.z - other.Canvas.planeDistance) > PlaneDepthTolerance) continue;
+            if (vp.x < 0f || vp.x > 1f || vp.y < 0f || vp.y > 1f) continue;
+            mapped = ProjectorCamera.ViewportToWorldPoint(new Vector3(vp.x, vp.y, Canvas.planeDistance));
+            sourceName = other.Canvas.gameObject.name;
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>Whether any of the rect lies on the texture.</summary>
+    public bool OverlapsTexture(Rect pixelRect)
+        => Texture != null && pixelRect.xMax > 0f && pixelRect.yMax > 0f
+           && pixelRect.xMin < Texture.width && pixelRect.yMin < Texture.height;
 
     private bool AnyViewVisible()
     {

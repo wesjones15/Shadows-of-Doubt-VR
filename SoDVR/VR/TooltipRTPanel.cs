@@ -10,7 +10,8 @@ namespace SoDVR.VR;
 /// TooltipCanvas, owned outright. Everything the game shows on it — the confirm and tutorial
 /// dialogs, right-click context menus, the pin quick-menu, hover tooltips — is its own view of one
 /// screen-sized RT. The game places these for a mouse cursor that doesn't exist here, so where they
-/// sit on the canvas doesn't matter; each view is placed in the world by what it is: dialogs in
+/// sit on the canvas only matters in that it must be on the texture; each view is placed in the
+/// world by what it is: dialogs in
 /// front of the head, context and quick menus at the laser point (and left there so the laser can
 /// reach them), tooltips beside the laser as it moves.
 /// </summary>
@@ -85,6 +86,7 @@ internal sealed class TooltipRTPanel
 
         foreach (var e in _elements.Values)
         {
+            BringOnTexture(e);
             var rect = _panel.ContentPixelRect(e.Root, ContentMarginPixels, out int graphicCount);
             bool visible = canvasShowing && e.Root.gameObject.activeInHierarchy && graphicCount > 0;
             if (visible)
@@ -108,7 +110,30 @@ internal sealed class TooltipRTPanel
         }
     }
 
-    public void Render() => _panel.Render();
+    /// <remarks>Positions are corrected again here: the game may have rewritten them in its own
+    /// Update since <see cref="Tick"/>.</remarks>
+    public void Render()
+    {
+        if (!_panel.IsAttached) return;
+        foreach (var e in _elements.Values) BringOnTexture(e);
+        _panel.Render();
+    }
+
+    /// <summary>An element the game positioned from another canvas (the pin quick-menu, from its pin)
+    /// is drawn off this texture; it's moved to where the flat game's shared screen would put it.
+    /// Where it sits in the world is up to its view, so only its canvas position changes.</summary>
+    private void BringOnTexture(Element e)
+    {
+        if (e.Root == null || _panel.OverlapsTexture(_panel.UnclampedPixelRectOf(e.Root))) return;
+        if (_panel.TryMapFromOtherScreen(e.Root.position, out var mapped, out string source))
+        {
+            e.Root.position = mapped;
+            if (!e.LoggedRemap) Log.LogInfo($"[TooltipRTPanel] {e.Kind} '{e.Root.gameObject.name}' remapped from '{source}' to pixel rect {_panel.UnclampedPixelRectOf(e.Root)}");
+        }
+        else if (!e.LoggedRemap)
+            Log.LogInfo($"[TooltipRTPanel] {e.Kind} '{e.Root.gameObject.name}' is off the texture at {_panel.UnclampedPixelRectOf(e.Root)} and on no other panel's screen");
+        e.LoggedRemap = true;
+    }
 
     public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay);
 
@@ -352,6 +377,7 @@ internal sealed class TooltipRTPanel
         public Vector2 Pivot;
         public bool IsContextMenu;
         public bool EverVisible;
+        public bool LoggedRemap;
         public int InvisibleFrames;
         public int OverlayRefreshCountdown;
 
