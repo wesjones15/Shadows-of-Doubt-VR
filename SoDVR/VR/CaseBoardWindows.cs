@@ -78,6 +78,7 @@ internal sealed class CaseBoardWindows
         foreach (var w in _windows.Values)
         {
             if (relayout) w.PlaceFromLayout(anchor);
+            w.Controls?.Tick();
             ApplySlot(w);
             bool visible = canvasShowing && RTCanvasPanel.IsShowing(w.Canvas);
             if (visible)
@@ -170,10 +171,12 @@ internal sealed class CaseBoardWindows
         }
 
         var info = canvas.GetComponent<InfoWindow>();
-        var view = _panel.CreateView(canvas.gameObject.name, extension: new WindowPointerExtension(info));
+        var controls = new WindowPointerExtension(info);
+        var view = _panel.CreateView(canvas.gameObject.name, extension: controls);
         var w = new BoardWindow(canvas, rect, view, slot, _anchor)
         {
             Info = info,
+            Controls = controls,
             DiagnosticFrame = Time.frameCount + DiagnosticDelayFrames,
             ScrollLogFramesLeft = _windows.Count == 0 ? ScrollLogFrames : 0,
             MoveCountStart = Time.unscaledTime,
@@ -301,6 +304,7 @@ internal sealed class CaseBoardWindows
         public Vector3 LastWritten;
         public bool HasWritten;
         public InfoWindow? Info;
+        public WindowPointerExtension? Controls;
         public int DiagnosticFrame;
         public int ScrollLogFramesLeft;
         public int GameMoves;
