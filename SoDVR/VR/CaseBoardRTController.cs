@@ -51,7 +51,7 @@ internal sealed class CaseBoardRTController
             _navbar,
             corkboard,
             new CaseBoardPanel("BioDisplayCanvas", CaseBoardWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip,
-                centred: true),
+                regions: new[] { "InventoryDisplayArea", "SocialCreditArea" }),
             new CaseBoardPanel("LocationDetailsCanvas", CaseBoardWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip),
             new CaseBoardPanel("UpgradesDisplayCanvas", PanelWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip),
         };
