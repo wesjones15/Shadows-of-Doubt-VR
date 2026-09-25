@@ -4,8 +4,8 @@ using UnityEngine;
 
 namespace SoDVR.VR;
 
-/// <summary>Something the right grip can pick up and move: an RT panel (or a group of views laid
-/// out as one canvas) with a pose of its own.</summary>
+/// <summary>Something the grip can pick up and move: an RT panel (or a group of views laid out as
+/// one canvas) with a pose of its own.</summary>
 internal interface IRTGripTarget
 {
     string GripName { get; }
@@ -21,11 +21,23 @@ internal interface IRTGripTarget
     void OnGripReleased();
 }
 
+/// <summary>Something the grip pans instead of moving: a panel whose content scrolls under the
+/// hand (the corkboard) while the panel itself stays put.</summary>
+internal interface IRTGripPanTarget
+{
+    string GripName { get; }
+    bool TryGripHit(Ray ray, out float distance);
+    void BeginPan(Ray ray);
+    void UpdatePan(Ray ray);
+    void EndPan();
+}
+
 /// <summary>
-/// Grip 6DOF drag of RT panels — the legacy WorldSpace grip-drag's math, ported: the point grabbed
-/// stays under the controller ray and the panel keeps its rotation relative to the controller.
-/// Belongs to whichever hand carries the laser (RTPanelInput's active hand), so pointing and
-/// grabbing are always the same hand.
+/// Grip on RT panels: a 6DOF drag of a movable panel — the legacy WorldSpace grip-drag's math,
+/// ported: the point grabbed stays under the controller ray and the panel keeps its rotation
+/// relative to the controller — or a pan of a panel's content. The nearest target of either kind
+/// under the ray wins. Belongs to whichever hand carries the laser (RTPanelInput's active hand), so
+/// pointing and grabbing are always the same hand.
 /// </summary>
 internal sealed class RTPanelGrip
 {
@@ -34,15 +46,17 @@ internal sealed class RTPanelGrip
     private const float MaxGrabDistance = 15f;
 
     private readonly List<IRTGripTarget> _targets = new();
+    private readonly List<IRTGripPanTarget> _panTargets = new();
     private IRTGripTarget? _dragging;
-    private bool _draggingWithRightHand;
+    private IRTGripPanTarget? _panning;
+    private bool _withRightHand;
     private bool _rightGripWasPressed;
     private bool _leftGripWasPressed;
     private Vector3 _hitOffsetFromController;
     private Vector3 _hitOffsetFromTarget;
     private Quaternion _rotationOffset;
 
-    public bool IsDragging => _dragging != null;
+    private bool Active => _dragging != null || _panning != null;
 
     public void Register(IRTGripTarget target)
     {
@@ -55,9 +69,17 @@ internal sealed class RTPanelGrip
         if (_dragging == target) _dragging = null;
     }
 
+    public void Register(IRTGripPanTarget target)
+    {
+        if (!_panTargets.Contains(target)) _panTargets.Add(target);
+    }
+
     /// <summary>Returns true while this frame's grip belongs to an RT panel (grabbed one this
     /// press, or is mid-drag) — the legacy grip-drag must not start then.</summary>
-    public bool Update(GameObject? rightControllerGO, GameObject? leftControllerGO, bool activeHandIsRight)
+    /// <param name="legacyHitDistance">Ray distance to the legacy UI the right-hand ray last hit,
+    /// or +Infinity: an RT target behind it (the corkboard behind the legacy Minimap) must not take
+    /// the grip from it.</param>
+    public bool Update(GameObject? rightControllerGO, GameObject? leftControllerGO, bool activeHandIsRight, float legacyHitDistance)
     {
         OpenXRManager.GetGripState(true, out bool rightGrip);
         OpenXRManager.GetGripState(false, out bool leftGrip);
@@ -67,40 +89,52 @@ internal sealed class RTPanelGrip
         _leftGripWasPressed = leftGrip;
 
         // A drag stays with the hand that started it; a new one starts on the laser hand.
-        bool useRight = _dragging != null ? _draggingWithRightHand : activeHandIsRight;
+        bool useRight = Active ? _withRightHand : activeHandIsRight;
         bool gripNow = useRight ? rightGrip : leftGrip;
         bool pressed = useRight ? rightPressed : leftPressed;
-        bool released = _dragging != null && !gripNow;
+        bool released = Active && !gripNow;
 
         var hand = useRight ? rightControllerGO : leftControllerGO;
-        if (hand == null) { EndDrag(); return false; }
+        if (hand == null) { End(); return false; }
         var ctrl = hand.transform;
+        var ray = new Ray(ctrl.position, ctrl.forward);
 
-        if (pressed && _dragging == null)
+        if (pressed && !Active)
         {
-            TryBeginDrag(ctrl);
-            _draggingWithRightHand = useRight;
+            TryBegin(ctrl, ray, useRight ? legacyHitDistance : float.PositiveInfinity);
+            _withRightHand = useRight;
         }
 
-        if (_dragging != null && gripNow)
+        if (gripNow && _dragging != null)
         {
             Quaternion newRot = ctrl.rotation * _rotationOffset;
             Vector3 newHit = ctrl.position + ctrl.rotation * _hitOffsetFromController;
             _dragging.SetGripPose(newHit - newRot * _hitOffsetFromTarget, newRot);
         }
+        if (gripNow && _panning != null) _panning.UpdatePan(ray);
 
-        bool owned = _dragging != null;
-        if (released) EndDrag();
+        bool owned = Active;
+        if (released) End();
         return owned;
     }
 
-    private void TryBeginDrag(Transform ctrl)
+    private void TryBegin(Transform ctrl, Ray ray, float legacyHitDistance)
     {
-        var ray = new Ray(ctrl.position, ctrl.forward);
+        float bestDist = Mathf.Min(MaxGrabDistance, legacyHitDistance);
         IRTGripTarget? best = null;
-        float bestDist = MaxGrabDistance;
+        IRTGripPanTarget? bestPan = null;
         foreach (var target in _targets)
             if (target.TryGripHit(ray, out float d) && d < bestDist) { best = target; bestDist = d; }
+        foreach (var target in _panTargets)
+            if (target.TryGripHit(ray, out float d) && d < bestDist) { bestPan = target; best = null; bestDist = d; }
+
+        if (bestPan != null)
+        {
+            _panning = bestPan;
+            bestPan.BeginPan(ray);
+            Log.LogInfo($"[RTPanelGrip] Pan '{bestPan.GripName}' dist={bestDist:F2}");
+            return;
+        }
         if (best == null) return;
 
         Vector3 hit = ray.GetPoint(bestDist);
@@ -111,11 +145,19 @@ internal sealed class RTPanelGrip
         Log.LogInfo($"[RTPanelGrip] Grab '{best.GripName}' dist={bestDist:F2}");
     }
 
-    private void EndDrag()
+    private void End()
     {
-        if (_dragging == null) return;
-        _dragging.OnGripReleased();
-        Log.LogInfo($"[RTPanelGrip] Release '{_dragging.GripName}'");
-        _dragging = null;
+        if (_dragging != null)
+        {
+            _dragging.OnGripReleased();
+            Log.LogInfo($"[RTPanelGrip] Release '{_dragging.GripName}'");
+            _dragging = null;
+        }
+        if (_panning != null)
+        {
+            _panning.EndPan();
+            Log.LogInfo($"[RTPanelGrip] Pan end '{_panning.GripName}'");
+            _panning = null;
+        }
     }
 }

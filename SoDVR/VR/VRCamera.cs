@@ -200,6 +200,7 @@ public class VRCamera : MonoBehaviour
     private Canvas?        _cursorCanvas;         // VRCursorCanvasInternal once scan converts it
     private RectTransform? _cursorRect;           // the dot's RectTransform inside _cursorCanvas
     private Vector3?       _uiPointerPoint;       // where the laser is on UI (RT panel or legacy canvas) — TooltipRTPanel places menus and tooltips there
+    private float          _lastLegacyHitDistance = float.PositiveInfinity; // last frame's — the grip runs before this frame's aim scan
     private bool           _cursorHasTarget;      // true when depth scan found a canvas rect hit this frame
     private Canvas?        _cursorTargetCanvas;   // the nearest aimed-at canvas (for button mapping: A=RMB, B=MMB)
     private Vector3        _cursorTargetPos;      // world pos of nearest aimed-at canvas
@@ -1214,7 +1215,7 @@ public class VRCamera : MonoBehaviour
 
         // Grip-drag: move CaseBoard canvases with the grip button.
         bool rtOwnsGrip = false;
-        try { rtOwnsGrip = _rtPanelGrip.Update(_rightControllerGO, _leftControllerGO, _rtPanelInput.ActiveHandIsRight); }
+        try { rtOwnsGrip = _rtPanelGrip.Update(_rightControllerGO, _leftControllerGO, _rtPanelInput.ActiveHandIsRight, _lastLegacyHitDistance); }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] RTPanelGrip.Update: {ex.Message}"); }
         _caseBoard.UpdateGripDrag(rtOwnsGrip);
         (_minimapBBtnLocalOffset, _minimapBBtnLocalRot, _minimapBBtnHasOffset) = _caseBoard.MinimapBBtnResult;
@@ -1237,6 +1238,7 @@ public class VRCamera : MonoBehaviour
         float legacyHitDistance = _caseBoard.HasActiveGesture ? 0f
                                 : aim.HasTarget ? _controllerInteraction.NearestLegacyUIHitDistance(_rightControllerGO.transform.position)
                                 : float.PositiveInfinity;
+        _lastLegacyHitDistance = legacyHitDistance;
         try
         {
             _rtPanelInput.Update(_rightControllerGO, _leftControllerGO, legacyHitDistance,
