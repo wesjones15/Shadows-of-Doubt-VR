@@ -124,20 +124,25 @@ internal sealed class TooltipRTPanel
         _panel.Render();
     }
 
-    /// <summary>An element the game positioned from another canvas (the pin quick-menu, from its pin)
-    /// is drawn off this texture; it's moved to where the flat game's shared screen would put it.
-    /// Where it sits in the world is up to its view, so only its canvas position changes.</summary>
+    /// <summary>Menus and tooltips the game draws off this texture are moved onto it. One positioned
+    /// from another canvas (the pin quick-menu, from its pin) goes where the flat game's shared screen
+    /// would put it; one positioned for a mouse cursor that isn't there (a context menu opened by A)
+    /// is slid just far enough to fit. Where it sits in the world is up to its view, so only its
+    /// canvas position changes.</summary>
     private void BringOnTexture(Element e)
     {
-        if (e.Root == null || _panel.OverlapsTexture(_panel.UnclampedPixelRectOf(e.Root))) return;
-        if (_panel.TryMapFromOtherScreen(e.Root.position, out var mapped, out string source))
+        if (e.Root == null || e.Kind is not (Kind.Menu or Kind.Tooltip)) return;
+        var before = _panel.UnclampedPixelRectOf(e.Root);
+        string how = "";
+        if (!_panel.OverlapsTexture(before) && _panel.TryMapFromOtherScreen(e.Root.position, out var mapped, out string source))
         {
             e.Root.position = mapped;
-            if (!e.LoggedRemap) Log.LogInfo($"[TooltipRTPanel] {e.Kind} '{e.Root.gameObject.name}' remapped from '{source}' to pixel rect {_panel.UnclampedPixelRectOf(e.Root)}");
+            how = $"remapped from '{source}'";
         }
-        else if (!e.LoggedRemap)
-            Log.LogInfo($"[TooltipRTPanel] {e.Kind} '{e.Root.gameObject.name}' is off the texture at {_panel.UnclampedPixelRectOf(e.Root)} and on no other panel's screen");
-        e.LoggedRemap = true;
+        if (_panel.MoveOntoTexture(e.Root)) how += how.Length > 0 ? " and slid onto the texture" : "slid onto the texture";
+        if (how.Length == 0 || e.LoggedMove) return;
+        e.LoggedMove = true;
+        Log.LogInfo($"[TooltipRTPanel] {e.Kind} '{e.Root.gameObject.name}' {how}: {before} → {_panel.UnclampedPixelRectOf(e.Root)}");
     }
 
     public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay, onTop: true);
@@ -404,7 +409,7 @@ internal sealed class TooltipRTPanel
         public Vector2 Pivot;
         public bool IsContextMenu;
         public bool EverVisible;
-        public bool LoggedRemap;
+        public bool LoggedMove;
         public int InvisibleFrames;
         public int OverlayRefreshCountdown;
 

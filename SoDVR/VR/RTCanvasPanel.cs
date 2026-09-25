@@ -297,6 +297,27 @@ internal sealed class RTCanvasPanel
         return false;
     }
 
+    /// <summary>Slides <paramref name="rt"/> the least distance that puts its whole rect on the
+    /// texture; an axis it's too big for is left alone. Returns whether it moved.</summary>
+    public bool MoveOntoTexture(RectTransform rt)
+    {
+        if (Texture == null || ProjectorCamera == null) return false;
+        var r = UnclampedPixelRectOf(rt);
+        var shift = new Vector2(AxisShiftOnto(r.xMin, r.xMax, Texture.width), AxisShiftOnto(r.yMin, r.yMax, Texture.height));
+        if (shift == Vector2.zero) return false;
+        var screen = ProjectorCamera.WorldToScreenPoint(rt.position);
+        rt.position = ProjectorCamera.ScreenToWorldPoint(new Vector3(screen.x + shift.x, screen.y + shift.y, screen.z));
+        return true;
+    }
+
+    private static float AxisShiftOnto(float min, float max, float size)
+    {
+        if (max - min > size) return 0f;
+        if (min < 0f) return -min;
+        if (max > size) return size - max;
+        return 0f;
+    }
+
     /// <summary>Whether any of the rect lies on the texture.</summary>
     public bool OverlapsTexture(Rect pixelRect)
         => Texture != null && pixelRect.xMax > 0f && pixelRect.yMax > 0f
