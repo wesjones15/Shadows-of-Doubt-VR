@@ -62,3 +62,12 @@ inventory content: they're the HUD status display (`StatusController`), visible 
 inventory. The mod hides the HUD while the case board is open, so they don't appear beside the
 case-board inventory. Bring them in (or show the HUD status alongside the board) as part of a HUD
 refactor; the centred Bio panel leaves room on the left for them.
+
+## 6. Black, frozen headset after a Virtual Desktop menu round trip — not reproduced
+
+Reported 2026-09-25: after using the Virtual Desktop shortcut to go from the game to the VD menu and
+back, the headset stayed black and frozen. The session log from that run shows the OpenXR session
+leaving focus (state 5 → 4) when the VD menu opened; the return wasn't captured. Could not be
+reproduced afterwards. If it recurs, copy `BepInEx/LogOutput.log` and Player.log before relaunching
+and check how `VRCamera`/`OpenXRManager` handle the VISIBLE → FOCUSED transition and whether frame
+submission resumes.
