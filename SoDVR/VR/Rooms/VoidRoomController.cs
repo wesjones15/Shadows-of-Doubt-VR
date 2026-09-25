@@ -174,7 +174,6 @@ internal sealed class VoidRoomController
 
         try
         {
-            EnsureGameFocused("press-any-key click");
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
             mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, UIntPtr.Zero);
             Log.LogInfo("[VoidRoom] Simulated click to dismiss press-any-key screen.");

@@ -366,7 +366,6 @@ internal sealed class LocomotionController
         {
             const byte VK_ESCAPE = 0x1B;
             const uint KEYEVENTF_KEYUP = 0x0002;
-            EnsureGameFocused("VK_ESCAPE");
             keybd_event(VK_ESCAPE, 0, 0,               UIntPtr.Zero); // key down
             keybd_event(VK_ESCAPE, 0, KEYEVENTF_KEYUP, UIntPtr.Zero); // key up
             Log.LogInfo($"[Locomotion] Menu button → ESC (t={Time.realtimeSinceStartup:F1}s frame={Time.frameCount} {DescribePauseGate()})");
@@ -510,7 +509,6 @@ internal sealed class LocomotionController
             // Primary: left mouse button (game uses LMB for pick up, interact, attack)
             const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
             const uint MOUSEEVENTF_LEFTUP   = 0x0004;
-            EnsureGameFocused("MOUSEEVENTF_LEFTDOWN");
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
             mouse_event(MOUSEEVENTF_LEFTUP,   0, 0, 0, UIntPtr.Zero);
             Log.LogInfo("[Locomotion] Interact (LMB via left controller aim)");
@@ -534,7 +532,6 @@ internal sealed class LocomotionController
         {
             const byte VK_C = 0x43;
             const uint KEYEVENTF_KEYUP = 0x0002;
-            EnsureGameFocused("VK_C");
             keybd_event(VK_C, 0, 0,               UIntPtr.Zero);
             keybd_event(VK_C, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
             Log.LogInfo("[Locomotion] Crouch (C)");
@@ -559,7 +556,6 @@ internal sealed class LocomotionController
         {
             const byte VK_F = 0x46;
             const uint KEYEVENTF_KEYUP = 0x0002;
-            EnsureGameFocused("VK_F");
             keybd_event(VK_F, 0, 0,               UIntPtr.Zero);
             keybd_event(VK_F, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
             Log.LogInfo("[Locomotion] Y button → Alternate (F)");
@@ -663,7 +659,6 @@ internal sealed class LocomotionController
                 {
                     const byte VK_X = 0x58;
                     const uint KEYEVENTF_KEYUP = 0x0002;
-                    EnsureGameFocused("VK_X");
                     keybd_event(VK_X, 0, 0,               UIntPtr.Zero);
                     keybd_event(VK_X, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);
                     Log.LogInfo("[Locomotion] Backpack gesture → Inventory (X)");
@@ -684,7 +679,6 @@ internal sealed class LocomotionController
             try
             {
                 const byte VK_TAB = 0x09;
-                EnsureGameFocused("VK_TAB");
                 keybd_event(VK_TAB, 0, 0, UIntPtr.Zero); // key DOWN
                 _tabHeldDown = true;
                 _minimapInBBtnContext = true;
@@ -749,7 +743,6 @@ internal sealed class LocomotionController
         {
             const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
             const uint MOUSEEVENTF_MIDDLEUP   = 0x0040;
-            EnsureGameFocused("MOUSEEVENTF_MIDDLEDOWN");
             mouse_event(MOUSEEVENTF_MIDDLEDOWN, 0, 0, 0, UIntPtr.Zero);
             mouse_event(MOUSEEVENTF_MIDDLEUP,   0, 0, 0, UIntPtr.Zero);
             Log.LogInfo("[Locomotion] Flashlight (middle mouse)");
@@ -778,7 +771,6 @@ internal sealed class LocomotionController
             // Right mouse button (game uses RMB for pick up evidence, secondary interact)
             const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
             const uint MOUSEEVENTF_RIGHTUP   = 0x0010;
-            EnsureGameFocused("MOUSEEVENTF_RIGHTDOWN");
             mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, UIntPtr.Zero);
             mouse_event(MOUSEEVENTF_RIGHTUP,   0, 0, 0, UIntPtr.Zero);
             Log.LogInfo("[Locomotion] World RMB (left grip + left controller aim)");
