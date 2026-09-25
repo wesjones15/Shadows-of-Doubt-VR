@@ -7,10 +7,10 @@ using UnityEngine.UI;
 namespace SoDVR.VR;
 
 /// <summary>
-/// The corkboard's pins and strings, driven from the RT pointer. Everything else on CaseCanvas —
-/// panning the board, its buttons, zoom — stays on RTPanelPointer's ordinary pointer-event path.
+/// The corkboard's pins, strings and panning, driven from the RT pointer. Everything else on
+/// CaseCanvas — its buttons, zoom — stays on RTPanelPointer's ordinary pointer-event path.
 ///
-/// Pins don't: the game's pin drag follows the OS mouse and its click is guarded against
+/// Pins can't: the game's pin drag follows the OS mouse and its click is guarded against
 /// simulated input (what the legacy case-board code found), so a press on a pin is taken over
 /// here and fed to the same game APIs legacy used — <c>DragCasePanel.SetPositionDirect</c> to save
 /// a move, <c>PinnedItemController.OpenEvidence</c> for a click, <c>CasePanelController</c>'s
@@ -34,6 +34,13 @@ internal sealed class CorkboardInput : IRTPointerExtension
     private Vector3 _pressWorldPoint;
     private bool _dragging;
 
+    private RectTransform? _panContent;
+    private RectTransform? _panViewport;
+    private ScrollRect? _panScroll;
+    private Vector2 _panStartLocal;
+    private Vector2 _panContentStart;
+    private GameObject? _panPressedGo;
+
     private PinnedItemController? _stringSource;
     private RectTransform? _stringFrom;
     private RectTransform? _stringPreview;
@@ -42,7 +49,39 @@ internal sealed class CorkboardInput : IRTPointerExtension
 
     public bool TryTakePress(GameObject? hitGo, in RTPointerSample sample)
     {
-        if (!TryFindPin(hitGo, sample, out var pinRT, out var pinDrag)) return false;
+        _pressWorldPoint = sample.WorldPoint;
+        _dragging = false;
+        if (TryFindPin(hitGo, sample, out var pinRT, out var pinDrag)) return TryBeginPin(pinRT, pinDrag, sample);
+        return TryBeginPan(hitGo, sample);
+    }
+
+    public void ContinuePress(in RTPointerSample sample)
+    {
+        if (!_dragging && Vector3.Distance(sample.WorldPoint, _pressWorldPoint) >= DragThresholdMeters)
+        {
+            _dragging = true;
+            if (_pinRT != null) Log.LogInfo($"[Corkboard] Pin drag begin: '{_pinRT.gameObject.name}'");
+        }
+        if (!_dragging) return;
+        if (_pinRT != null) ContinuePinDrag(sample);
+        else if (_panContent != null) ContinuePan(sample);
+    }
+
+    public void EndPress(in RTPointerSample sample)
+    {
+        try
+        {
+            if (_pinRT != null) EndPinPress();
+            else if (_panContent != null) EndPan(sample);
+        }
+        catch (Exception ex) { Log.LogWarning($"[Corkboard] Release: {ex.Message}"); }
+        ResetPress();
+    }
+
+    // ── Pins ────────────────────────────────────────────────────────────────────────────────
+
+    private bool TryBeginPin(RectTransform pinRT, DragCasePanel? pinDrag, in RTPointerSample sample)
+    {
         var parent = pinRT.parent != null ? pinRT.parent.GetComponent<RectTransform>() : null;
         if (parent == null) return false;
         if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(parent, sample.ScreenPosition, sample.EventCamera, out var local))
@@ -53,42 +92,97 @@ internal sealed class CorkboardInput : IRTPointerExtension
         _pinDrag = pinDrag;
         _pinStartLocal = pinRT.localPosition;
         _grabOffset = (Vector2)pinRT.localPosition - local;
-        _pressWorldPoint = sample.WorldPoint;
-        _dragging = false;
         return true;
     }
 
-    public void ContinuePress(in RTPointerSample sample)
+    private void ContinuePinDrag(in RTPointerSample sample)
     {
         if (_pinRT == null || _pinParent == null) return;
-        if (!_dragging && Vector3.Distance(sample.WorldPoint, _pressWorldPoint) >= DragThresholdMeters)
-        {
-            _dragging = true;
-            Log.LogInfo($"[Corkboard] Pin drag begin: '{_pinRT.gameObject.name}'");
-        }
-        if (_dragging && RectTransformUtility.ScreenPointToLocalPointInRectangle(_pinParent, sample.ScreenPosition, sample.EventCamera, out var local))
-        {
-            var target = local + _grabOffset;
-            _pinRT.localPosition = new Vector3(target.x, target.y, _pinRT.localPosition.z);
-            UpdateConnectedStrings(_pinRT);
-        }
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(_pinParent, sample.ScreenPosition, sample.EventCamera, out var local)) return;
+        var target = local + _grabOffset;
+        _pinRT.localPosition = new Vector3(target.x, target.y, _pinRT.localPosition.z);
+        UpdateConnectedStrings(_pinRT);
     }
 
-    public void EndPress(in RTPointerSample sample)
+    private void EndPinPress()
     {
         if (_pinRT == null) return;
-        try
+        if (!_dragging)
         {
-            if (_dragging)
-            {
-                var final = new Vector2(_pinRT.localPosition.x, _pinRT.localPosition.y);
-                _pinDrag?.SetPositionDirect(final);
-                Log.LogInfo($"[Corkboard] Pin drag end: '{_pinRT.gameObject.name}' SetPositionDirect({final.x:F0},{final.y:F0})");
-            }
-            else ClickPin(_pinRT.gameObject);
+            ClickPin(_pinRT.gameObject);
+            return;
         }
-        catch (Exception ex) { Log.LogWarning($"[Corkboard] Pin release: {ex.Message}"); }
-        ResetPress();
+        var final = new Vector2(_pinRT.localPosition.x, _pinRT.localPosition.y);
+        _pinDrag?.SetPositionDirect(final);
+        Log.LogInfo($"[Corkboard] Pin drag end: '{_pinRT.gameObject.name}' SetPositionDirect({final.x:F0},{final.y:F0})");
+    }
+
+    // ── Panning (trigger held on empty board) ──────────────────────────────────────────────
+
+    /// <summary>A press on empty board pans it: the board's content is moved so the point grabbed
+    /// stays under the laser. The game's scroll area doesn't pan from pointer events alone (drag
+    /// events reach it and it doesn't move), so its content position is driven directly; the scroll
+    /// area still applies its own bounds. Buttons and strings on the board keep the ordinary path.</summary>
+    private bool TryBeginPan(GameObject? hitGo, in RTPointerSample sample)
+    {
+        if (hitGo != null && (HasSelectableAncestor(hitGo.transform) || StringControllerOf(hitGo.transform) != null)) return false;
+        RectTransform? content = null;
+        try { content = CasePanelController.Instance?.corkBoard; }
+        catch (Exception ex) { Log.LogWarning($"[Corkboard] Board lookup: {ex.Message}"); }
+        var viewport = content != null && content.parent != null ? content.parent.GetComponent<RectTransform>() : null;
+        if (content == null || viewport == null) return false;
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(viewport, sample.ScreenPosition, sample.EventCamera, out var local))
+            return false;
+
+        _panContent = content;
+        _panViewport = viewport;
+        _panScroll = ScrollRectAbove(content);
+        _panStartLocal = local;
+        _panContentStart = content.anchoredPosition;
+        _panPressedGo = hitGo;
+        return true;
+    }
+
+    private void ContinuePan(in RTPointerSample sample)
+    {
+        if (_panContent == null || _panViewport == null) return;
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(_panViewport, sample.ScreenPosition, sample.EventCamera, out var local)) return;
+        _panContent.anchoredPosition = _panContentStart + (local - _panStartLocal);
+        if (_panScroll != null) _panScroll.velocity = Vector2.zero;
+    }
+
+    private void EndPan(in RTPointerSample sample)
+    {
+        if (_panContent == null) return;
+        if (_dragging)
+        {
+            Log.LogInfo($"[Corkboard] Board pan: content {_panContentStart} → {_panContent.anchoredPosition}");
+            return;
+        }
+        // Not a pan after all: a plain click on the board, as the ordinary path would have sent it.
+        var es = EventSystem.current;
+        if (_panPressedGo == null || es == null) return;
+        var ped = new PointerEventData(es) { button = PointerEventData.InputButton.Left, position = sample.ScreenPosition, pressPosition = sample.ScreenPosition };
+        ExecuteEvents.ExecuteHierarchy(_panPressedGo, ped, ExecuteEvents.pointerDownHandler);
+        ExecuteEvents.ExecuteHierarchy(_panPressedGo, ped, ExecuteEvents.pointerUpHandler);
+        ExecuteEvents.ExecuteHierarchy(_panPressedGo, ped, ExecuteEvents.pointerClickHandler);
+    }
+
+    private static ScrollRect? ScrollRectAbove(Transform t)
+    {
+        for (var tr = t.parent; tr != null; tr = tr.parent)
+        {
+            var scroll = tr.GetComponent<ScrollRect>();
+            if (scroll != null) return scroll;
+        }
+        return null;
+    }
+
+    private static bool HasSelectableAncestor(Transform t)
+    {
+        for (var tr = t; tr != null; tr = tr.parent)
+            if (tr.GetComponent<Selectable>() != null) return true;
+        return false;
     }
 
     public void OnAltButton(bool press, bool held, bool release, GameObject? hitGo, in RTPointerSample sample)
@@ -135,7 +229,7 @@ internal sealed class CorkboardInput : IRTPointerExtension
         if (_stringSource != null) CancelString();
     }
 
-    // ── Pins ────────────────────────────────────────────────────────────────────────────────
+    // ── Finding pins and strings ────────────────────────────────────────────────────────────
 
     /// <summary>The pin under the pointer: the raycast hit's own DragCasePanel ancestor, or else a
     /// direct rect test against every pin (topmost first), since not every pin graphic is a
@@ -237,6 +331,10 @@ internal sealed class CorkboardInput : IRTPointerExtension
         _pinRT = null;
         _pinParent = null;
         _pinDrag = null;
+        _panContent = null;
+        _panViewport = null;
+        _panScroll = null;
+        _panPressedGo = null;
         _dragging = false;
     }
 
