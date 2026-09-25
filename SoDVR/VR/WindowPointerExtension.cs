@@ -77,13 +77,15 @@ internal sealed class WindowPointerExtension : IRTPointerExtension
                 if (_repinFramesLeft == 0) Log.LogWarning($"[WindowPointerExtension] Re-pinned '{_window?.gameObject.name}' but found no pin for it on the board.");
                 return;
             }
+            int waited = RepinWaitFrames - _repinFramesLeft;
             _repinFramesLeft = 0;
 
             var placedAt = (Vector2)pin.localPosition;
             var target = _rememberedPinPosition ?? VisibleBoardCentreIn(pin.parent);
             if (target == null) return;
             pin.GetComponent<DragCasePanel>()?.SetPositionDirect(target.Value);
-            Log.LogInfo($"[WindowPointerExtension] Re-pinned '{_window?.gameObject.name}': game placed the pin at {placedAt}, moved to " +
+            CorkboardInput.UpdateConnectedStrings(pin);
+            Log.LogInfo($"[WindowPointerExtension] Re-pinned '{_window?.gameObject.name}' (pin found after {waited} frame(s)): game placed the pin at {placedAt}, moved to " +
                         $"{target.Value} ({(_rememberedPinPosition.HasValue ? "where it was before unpinning" : "centre of the visible board")})");
         }
         catch (Exception ex)

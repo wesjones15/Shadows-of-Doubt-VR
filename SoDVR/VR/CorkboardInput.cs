@@ -288,9 +288,9 @@ internal sealed class CorkboardInput : IRTPointerExtension
         return null;
     }
 
-    /// <summary>The game only re-lays a pin's strings when a move is saved; this keeps them on the
-    /// pin while it is being dragged.</summary>
-    private static void UpdateConnectedStrings(Transform pin)
+    /// <summary>The game only re-lays a pin's strings on its own schedule after a move; this puts them
+    /// on the pin now (every frame of a drag, or right after a re-pinned pin is moved back).</summary>
+    internal static void UpdateConnectedStrings(Transform pin)
     {
         var strings = PinControllerOf(pin)?.connectedStrings;
         if (strings == null) return;
