@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using BepInEx.Logging;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace SoDVR.VR;
 
@@ -200,6 +201,7 @@ internal sealed class CaseBoardWindows
         if (_anchor != null) w.PlaceFromLayout(_anchor);
         _grip.Register(w);
         RefreshOverlays(w);
+        WidenCloseButtonHitArea(info);
 
         var size = rect.rect.size;
         if (size.x > SlotSize || size.y > SlotSize)
@@ -246,6 +248,54 @@ internal sealed class CaseBoardWindows
     /// <summary>A window's graphics belong to its own (nested) canvas and any canvases nested
     /// further in (the Notebook's Scroll View) — WindowCanvas's raycaster never sees them, so each
     /// is registered with the view's pointer and pointed at the projector.</summary>
+    // Buttons wider than this aren't "the other buttons in its column" (a scrollbar, a tab strip).
+    private const float MaxColumnButtonWidth = 96f;
+
+    /// <summary>A note's close/minimise button is 24 px, a hard target for a laser. Its hit area (only —
+    /// nothing moves or redraws) is grown to a square as wide as the widest other button in its
+    /// column of the note.</summary>
+    private static void WidenCloseButtonHitArea(InfoWindow? info)
+    {
+        var close = info != null ? info.closeButton : null;
+        var image = close != null ? close.GetComponent<Image>() : null;
+        var closeRect = close != null ? close.GetComponent<RectTransform>() : null;
+        if (info == null || image == null || closeRect == null) return;
+
+        var window = info.transform;
+        var closeSpan = LocalXSpan(window, closeRect);
+        float width = closeRect.rect.width;
+        string widestName = "";
+        foreach (var selectable in info.GetComponentsInChildren<Selectable>(false))
+        {
+            if (selectable == null || selectable.transform.IsChildOf(close.transform)) continue;
+            var rt = selectable.GetComponent<RectTransform>();
+            if (rt == null) continue;
+            var span = LocalXSpan(window, rt);
+            float w = span.y - span.x;
+            bool sameColumn = span.x < closeSpan.y && span.y > closeSpan.x;
+            if (!sameColumn || w > MaxColumnButtonWidth || w <= width) continue;
+            width = w;
+            widestName = selectable.gameObject.name;
+        }
+
+        float pad = (width - closeRect.rect.width) * 0.5f;
+        if (pad <= 0f)
+        {
+            Log.LogInfo($"[CaseBoardWindows] '{info.gameObject.name}' close button: no wider button in its column; hit area left at {closeRect.rect.width:F0} px");
+            return;
+        }
+        image.raycastPadding = new Vector4(-pad, -pad, -pad, -pad);
+        Log.LogInfo($"[CaseBoardWindows] '{info.gameObject.name}' close button hit area grown to {width:F0} px square (as wide as '{widestName}')");
+    }
+
+    private static Vector2 LocalXSpan(Transform space, RectTransform rt)
+    {
+        var r = rt.rect;
+        float a = space.InverseTransformPoint(rt.TransformPoint(new Vector3(r.xMin, 0f, 0f))).x;
+        float b = space.InverseTransformPoint(rt.TransformPoint(new Vector3(r.xMax, 0f, 0f))).x;
+        return new Vector2(Mathf.Min(a, b), Mathf.Max(a, b));
+    }
+
     private void RefreshOverlays(BoardWindow w)
     {
         w.OverlayRefreshCountdown = OverlayRefreshFrames;
