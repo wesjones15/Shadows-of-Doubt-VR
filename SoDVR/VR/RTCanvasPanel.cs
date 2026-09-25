@@ -58,7 +58,7 @@ internal sealed class RTCanvasPanel
         // projector's pixel size, which is the screen size, so the game's layout is untouched.
         // (Legacy disabled it only because WorldSpace canvases are sized by transform instead.)
         var size = ScreenSize();
-        AttachCore(canvas, size, screenWorldWidth / size.x, sharedScreen: true);
+        AttachCore(canvas, size, screenWorldWidth / size.x);
     }
 
     /// <summary>Sheet layout: the canvas becomes a <paramref name="sheetSize"/> sheet of
@@ -69,10 +69,10 @@ internal sealed class RTCanvasPanel
         var scaler = canvas.GetComponent<CanvasScaler>();
         if (scaler != null) { try { scaler.enabled = false; } catch { } }
         if (Math.Abs(canvas.scaleFactor - 1f) > 0.001f) canvas.scaleFactor = 1f;
-        AttachCore(canvas, sheetSize, metersPerUnit, sharedScreen: false);
+        AttachCore(canvas, sheetSize, metersPerUnit);
     }
 
-    private void AttachCore(Canvas canvas, Vector2Int size, float metersPerPixel, bool sharedScreen)
+    private void AttachCore(Canvas canvas, Vector2Int size, float metersPerPixel)
     {
         Detach();
 
@@ -86,7 +86,7 @@ internal sealed class RTCanvasPanel
         }
 
         Texture = CameraRig.CreateRTPanelTexture(size.x, size.y, $"SoDVR_{_logTag}_RT");
-        ProjectorCamera = CameraRig.SetupRTPanelProjectorCamera(_logTag, canvas.gameObject.layer, sharedScreen);
+        ProjectorCamera = CameraRig.SetupRTPanelProjectorCamera(_logTag, canvas.gameObject.layer);
         ProjectorCamera.targetTexture = Texture;
 
         canvas.renderMode = RenderMode.ScreenSpaceCamera;
