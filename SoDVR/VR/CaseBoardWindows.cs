@@ -137,6 +137,13 @@ internal sealed class CaseBoardWindows
     }
 
     /// <summary>Re-applies every window's slot (the game may have moved it since Tick), then renders.</summary>
+    /// <summary>Right before any case-board panel renders: a pin the game created this frame for a
+    /// re-pinned note is moved back before the corkboard draws it far off the board.</summary>
+    public void BeforeRender()
+    {
+        foreach (var w in _windows.Values) w.Controls?.Tick();
+    }
+
     public void Render()
     {
         foreach (var w in _windows.Values) ApplySlot(w);

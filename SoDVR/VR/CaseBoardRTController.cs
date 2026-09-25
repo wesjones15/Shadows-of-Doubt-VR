@@ -110,6 +110,7 @@ internal sealed class CaseBoardRTController
 
     public void Render()
     {
+        _windows.BeforeRender();
         foreach (var panel in _panels) panel.Render();
         _windows.Render();
     }
