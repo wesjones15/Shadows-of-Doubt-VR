@@ -213,9 +213,15 @@ internal sealed class RTCanvasPanel
             Mathf.Min(Texture.width, union.xMax + marginPixels), Mathf.Min(Texture.height, union.yMax + marginPixels));
     }
 
+    // The renderer's own alpha counts too: the game fades some panels (the inventory) by setting
+    // it on each element, leaving colour and CanvasGroup alpha untouched.
     private static bool IsVisiblyDrawn(Graphic g)
     {
-        try { return g.color.a * g.canvasRenderer.GetInheritedAlpha() > 0.01f; }
+        try
+        {
+            var cr = g.canvasRenderer;
+            return g.color.a * cr.GetAlpha() * cr.GetInheritedAlpha() > 0.01f;
+        }
         catch { return g.color.a > 0.01f; }
     }
 
