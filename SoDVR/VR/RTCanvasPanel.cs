@@ -279,10 +279,9 @@ internal sealed class RTCanvasPanel
     /// game (the pin quick-menu takes its pin's position). Here each canvas has its own projector, so
     /// such a copy lands on another panel's canvas plane: this finds that panel and returns the same
     /// screen point on this panel's plane — where the flat game would have drawn it.</summary>
-    public bool TryMapFromOtherScreen(Vector3 world, out Vector3 mapped, out string sourceName)
+    public bool TryMapFromOtherScreen(Vector3 world, out Vector3 mapped)
     {
         mapped = world;
-        sourceName = "";
         if (Canvas == null || ProjectorCamera == null) return false;
         foreach (var other in s_attached)
         {
@@ -291,7 +290,6 @@ internal sealed class RTCanvasPanel
             if (Mathf.Abs(vp.z - other.Canvas.planeDistance) > PlaneDepthTolerance) continue;
             if (vp.x < 0f || vp.x > 1f || vp.y < 0f || vp.y > 1f) continue;
             mapped = ProjectorCamera.ViewportToWorldPoint(new Vector3(vp.x, vp.y, Canvas.planeDistance));
-            sourceName = other.Canvas.gameObject.name;
             return true;
         }
         return false;

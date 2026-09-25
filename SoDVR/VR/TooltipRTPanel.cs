@@ -30,7 +30,6 @@ internal sealed class TooltipRTPanel
     private const int OverlayRefreshFrames = 6;
     private const float ContentMarginPixels = 4f;
     private const float GripMargin = 1.3f;
-    private const int NeverVisibleLogFrames = 30;
 
     // The corkboard's scale (2.5 m across the screen), so menus and tooltips keep their flat-game
     // size relative to the pins they belong to.
@@ -103,12 +102,7 @@ internal sealed class TooltipRTPanel
                 e.ApplyPose();
                 if (--e.OverlayRefreshCountdown <= 0) RefreshOverlays(e);
             }
-            else
-            {
-                e.Placed = false;
-                if (!e.EverVisible && ++e.InvisibleFrames == NeverVisibleLogFrames) LogNeverVisible(e);
-            }
-            e.EverVisible |= visible;
+            else e.Placed = false;
             e.View.Visible = visible && e.Placed;
             // Tooltips sit beside the laser and must never take it from what they describe.
             if (e.Kind is Kind.Tooltip or Kind.Cutscene) e.View.Pointer.Enabled = false;
@@ -139,13 +133,6 @@ internal sealed class TooltipRTPanel
         if (e.Root == null) return;
         var s = e.Root.localScale;
         if (s.z == 0f) e.Root.localScale = new Vector3(s.x, s.y, 1f);
-        if (e.CheckedDepthScale) return;
-        e.CheckedDepthScale = true;
-        int flatTexts = 0;
-        foreach (var text in e.Root.GetComponentsInChildren<TMPro.TMP_Text>(true))
-            if (text != null && text.transform.lossyScale.z == 0f) flatTexts++;
-        Log.LogInfo($"[TooltipRTPanel] {e.Kind} '{e.Root.gameObject.name}' scale={s}{(s.z == 0f ? " → z restored to 1" : "")}; " +
-                    $"texts still flat in z: {flatTexts}");
     }
 
     /// <summary>Menus and tooltips the game draws off this texture are moved onto it. One positioned
@@ -156,17 +143,9 @@ internal sealed class TooltipRTPanel
     private void BringOnTexture(Element e)
     {
         if (e.Root == null || e.Kind is not (Kind.Menu or Kind.Tooltip)) return;
-        var before = _panel.UnclampedPixelRectOf(e.Root);
-        string how = "";
-        if (!_panel.OverlapsTexture(before) && _panel.TryMapFromOtherScreen(e.Root.position, out var mapped, out string source))
-        {
+        if (!_panel.OverlapsTexture(_panel.UnclampedPixelRectOf(e.Root)) && _panel.TryMapFromOtherScreen(e.Root.position, out var mapped))
             e.Root.position = mapped;
-            how = $"remapped from '{source}'";
-        }
-        if (_panel.MoveOntoTexture(e.Root)) how += how.Length > 0 ? " and slid onto the texture" : "slid onto the texture";
-        if (how.Length == 0 || e.LoggedMove) return;
-        e.LoggedMove = true;
-        Log.LogInfo($"[TooltipRTPanel] {e.Kind} '{e.Root.gameObject.name}' {how}: {before} → {_panel.UnclampedPixelRectOf(e.Root)}");
+        _panel.MoveOntoTexture(e.Root);
     }
 
     public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay, onTop: true);
@@ -345,25 +324,6 @@ internal sealed class TooltipRTPanel
         return false;
     }
 
-    // Diagnostic: the pin quick-menu opens but has never been shown — where the game puts it and
-    // whether anything in it is drawn.
-    private void LogNeverVisible(Element e)
-    {
-        int active = 0;
-        float maxAlpha = 0f, maxRendererAlpha = 0f;
-        foreach (var g in e.Root.GetComponentsInChildren<Graphic>(false))
-        {
-            if (g == null || !g.enabled) continue;
-            active++;
-            maxAlpha = Mathf.Max(maxAlpha, g.color.a * g.canvasRenderer.GetInheritedAlpha());
-            maxRendererAlpha = Mathf.Max(maxRendererAlpha, g.canvasRenderer.GetAlpha());
-        }
-        var texture = _panel.Texture;
-        Log.LogInfo($"[TooltipRTPanel] {e.Kind} '{e.Root.gameObject.name}' never visible after {NeverVisibleLogFrames} frames: " +
-                    $"rawRect={_panel.UnclampedPixelRectOf(e.Root)} texture={texture?.width}x{texture?.height} activeGraphics={active} " +
-                    $"maxAlpha={maxAlpha:F2} maxRendererAlpha={maxRendererAlpha:F2} localPos={e.Root.localPosition} scale={e.Root.localScale}");
-    }
-
     private void LogUnknownOnce(Transform child)
     {
         string name = child.gameObject.name ?? "";
@@ -432,10 +392,6 @@ internal sealed class TooltipRTPanel
         public Quaternion Rotation = Quaternion.identity;
         public Vector2 Pivot;
         public bool IsContextMenu;
-        public bool EverVisible;
-        public bool LoggedMove;
-        public bool CheckedDepthScale;
-        public int InvisibleFrames;
         public int OverlayRefreshCountdown;
 
         public void ApplyPose() => View.SetPose(Anchor + Rotation * PivotToCentre(), Rotation);

@@ -227,8 +227,6 @@ internal sealed class RTPanelPointer
         _dragRejected = false;
         _pressWorldPoint = worldPoint;
 
-        LogPressCandidates();
-
         if (_extension != null && _extension.TryTakePress(hitGo, sample))
         {
             _pressed = hitGo ?? sample.Canvas.gameObject;
@@ -315,7 +313,7 @@ internal sealed class RTPanelPointer
         _ped.clickTime = Time.unscaledTime;
         var handler = ExecuteEvents.ExecuteHierarchy(go, _ped, ExecuteEvents.pointerClickHandler);
         _ped.pointerClick = handler!;
-        LogClick(go, handler);
+        Log.LogInfo($"[{_logTag}] Click: '{go.name}' handledBy='{handler?.name ?? "none"}'");
         ctx.RequestForceScan();
 
         var walker = go.transform;
@@ -330,31 +328,6 @@ internal sealed class RTPanelPointer
             }
             walker = walker.parent;
         }
-    }
-
-    // Diagnostic: who took the click, whether the game's mouse-input guard was open, and the
-    // Button's persistent listeners (target, method, state at rest) — shows any double fire.
-    private void LogClick(GameObject go, GameObject? handler)
-    {
-        var sb = new System.Text.StringBuilder($"[{_logTag}] Click: '{go.name}' handledBy='{handler?.name ?? "none"}'");
-        try { sb.Append($" mouseInputMode={InputController.Instance?.mouseInputMode}"); } catch { }
-        try
-        {
-            var btn = handler != null ? handler.GetComponent<Button>() : null;
-            if (btn != null)
-            {
-                int count = btn.onClick.GetPersistentEventCount();
-                sb.Append($" persistent={count}");
-                for (int i = 0; i < count; i++)
-                {
-                    var target = btn.onClick.GetPersistentTarget(i);
-                    sb.Append($" [{target?.GetIl2CppType().Name ?? "null"}.{btn.onClick.GetPersistentMethodName(i)} {btn.onClick.GetPersistentListenerState(i)}]");
-                }
-            }
-            if (handler != null && handler.GetComponent<ButtonController>() is { } bc) sb.Append($" buttonController={bc.GetIl2CppType().Name}");
-        }
-        catch (Exception ex) { sb.Append($" (listener read failed: {ex.Message})"); }
-        Log.LogInfo(sb.ToString());
     }
 
     /// <summary>A complete right-button press/release/click on whatever is under the pointer, on
@@ -398,9 +371,7 @@ internal sealed class RTPanelPointer
             if (menu != null && menu.enabled && !menu.useLeftButton)
             {
                 menu.OpenMenu();
-                bool? mouseMode = null;
-                try { mouseMode = InputController.Instance?.mouseInputMode; } catch { }
-                Log.LogInfo($"[{_logTag}] Context menu opened directly on '{t.gameObject.name}' (the right-click didn't open it; mouseInputMode={mouseMode})");
+                Log.LogInfo($"[{_logTag}] Context menu opened directly on '{t.gameObject.name}'");
                 return;
             }
             if (t.gameObject == clickHandler) return;
@@ -478,76 +449,6 @@ internal sealed class RTPanelPointer
             return SortingLayer.GetLayerValueFromID(a.sortingLayer) > SortingLayer.GetLayerValueFromID(b.sortingLayer);
         if (a.sortingOrder != b.sortingOrder) return a.sortingOrder > b.sortingOrder;
         return a.depth > b.depth;
-    }
-
-    // Diagnostic: every canvas's top hit under a press, to check which one should have won.
-    private void LogPressCandidates()
-    {
-        if (_ped == null || _canvas == null) return;
-        var sb = new System.Text.StringBuilder();
-        for (int i = _overlayCanvases.Count - 1; i >= -1; i--)
-        {
-            var c = i >= 0 ? _overlayCanvases[i] : _canvas;
-            if (c == null) continue;
-            if (TryRaycastCanvas(c, _ped, out var r))
-                sb.Append($" '{r.gameObject.name}'@'{c.gameObject.name}'(layer={r.sortingLayer} order={r.sortingOrder} depth={r.depth})");
-            AppendRejectedUnderPoint(sb, c, _ped.position);
-        }
-        Log.LogInfo($"[{_logTag}] Press candidates at pixel ({_ped.position.x:F0},{_ped.position.y:F0}):{(sb.Length > 0 ? sb.ToString() : " none")}");
-    }
-
-    private const float NearMissPixels = 40f;
-
-    private static Canvas? NearestCanvas(Transform t)
-    {
-        for (var tr = t; tr != null; tr = tr.parent)
-        {
-            var c = tr.GetComponent<Canvas>();
-            if (c != null) return c;
-        }
-        return null;
-    }
-
-    private static Rect ScreenRectOf(RectTransform rt, Camera? cam)
-    {
-        var r = rt.rect;
-        Vector2 a = RectTransformUtility.WorldToScreenPoint(cam, rt.TransformPoint(new Vector3(r.xMin, r.yMin, 0f)));
-        Vector2 b = RectTransformUtility.WorldToScreenPoint(cam, rt.TransformPoint(new Vector3(r.xMax, r.yMax, 0f)));
-        return Rect.MinMaxRect(Mathf.Min(a.x, b.x), Mathf.Min(a.y, b.y), Mathf.Max(a.x, b.x), Mathf.Max(a.y, b.y));
-    }
-
-    // Diagnostic: raycast targets of this canvas whose rect contains the point but whose own
-    // raycast filter (an Image's alpha hit test, say) turned the hit down.
-    private static void AppendRejectedUnderPoint(System.Text.StringBuilder sb, Canvas canvas, Vector2 point)
-    {
-        var cam = canvas.worldCamera;
-        var gr = canvas.GetComponent<GraphicRaycaster>();
-        sb.Append($" [{canvas.gameObject.name}: worldCamera='{cam?.name}' raycasterCamera='{gr?.eventCamera?.name}']");
-        foreach (var g in canvas.GetComponentsInChildren<Graphic>(false))
-        {
-            // Graphics are grouped by the canvas they sit under in the hierarchy (a nested canvas's
-            // own graphics are covered on its own pass), then checked against the canvas the
-            // graphic is registered to: a raycaster only ever returns graphics registered to it.
-            if (g == null || !g.enabled || !g.raycastTarget || NearestCanvas(g.transform) != canvas) continue;
-            if (g.canvas != canvas)
-            {
-                if (RectTransformUtility.RectangleContainsScreenPoint(g.rectTransform, point, cam))
-                    sb.Append($" [under the point but registered to canvas '{g.canvas?.gameObject.name}', not '{canvas.gameObject.name}': '{g.gameObject.name}']");
-                continue;
-            }
-            if (!RectTransformUtility.RectangleContainsScreenPoint(g.rectTransform, point, cam))
-            {
-                var r = ScreenRectOf(g.rectTransform, cam);
-                float dx = Mathf.Max(r.xMin - point.x, 0f, point.x - r.xMax), dy = Mathf.Max(r.yMin - point.y, 0f, point.y - r.yMax);
-                if (dx * dx + dy * dy <= NearMissPixels * NearMissPixels && r.width < 200f)
-                    sb.Append($" [near miss: '{g.gameObject.name}'@'{canvas.gameObject.name}' screenRect=({r.xMin:F0},{r.yMin:F0},{r.width:F0},{r.height:F0})]");
-                continue;
-            }
-            if (cam != null && Vector3.Dot(cam.transform.forward, g.transform.forward) <= 0f)
-                sb.Append($" [skipped as facing away from the camera: '{g.gameObject.name}'@'{canvas.gameObject.name}']");
-            else if (!g.Raycast(point, cam))
-                sb.Append($" [rejected by its raycast filter: '{g.gameObject.name}'@'{canvas.gameObject.name}' depth={g.depth}]");
-        }
     }
 
     private static bool TryRaycastCanvas(Canvas canvas, PointerEventData ped, out RaycastResult result)
