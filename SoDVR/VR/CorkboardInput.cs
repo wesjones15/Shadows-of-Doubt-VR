@@ -47,11 +47,19 @@ internal sealed class CorkboardInput : IRTPointerExtension
     private PinnedItemController? _stringSource;
     private RectTransform? _stringFrom;
     private RectTransform? _stringPreview;
+    // Started from the quick-menu rather than by holding B: the string follows the laser with no
+    // button held, and the next trigger press picks the other end.
+    private bool _linkFollowsLaser;
 
     public bool AltGestureActive => _stringSource != null;
 
     public bool TryTakePress(GameObject? hitGo, in RTPointerSample sample)
     {
+        if (_linkFollowsLaser)
+        {
+            EndString(hitGo, sample);
+            return true;
+        }
         _pressWorldPoint = sample.WorldPoint;
         _dragging = false;
         if (TryFindPin(hitGo, sample, out var pinRT, out var pinDrag)) return TryBeginPin(pinRT, pinDrag, sample);
@@ -238,6 +246,16 @@ internal sealed class CorkboardInput : IRTPointerExtension
     {
         try
         {
+            if (_linkFollowsLaser)
+            {
+                if (press)
+                {
+                    Log.LogInfo("[Corkboard] String link cancelled by B");
+                    CancelString();
+                }
+                else UpdateStringPreview(sample);
+                return;
+            }
             if (press && _stringSource == null) BeginString(hitGo, sample);
             else if (_stringSource != null && held) UpdateStringPreview(sample);
             if (release && _stringSource != null) EndString(hitGo, sample);
@@ -387,14 +405,37 @@ internal sealed class CorkboardInput : IRTPointerExtension
         _dragging = false;
     }
 
-    // ── String link (B held from one pin to another) ─────────────────────────────────────────
+    // ── String link (B held from one pin to another, or quick-menu then trigger) ────────────
+
+    /// <summary>The quick-menu's "new link": the game's own version stretches its preview to the OS
+    /// mouse, so the link is run here instead, with the string following the laser.</summary>
+    public void BeginLinkFrom(PinnedItemController source)
+    {
+        try
+        {
+            if (_stringSource != null) CancelString();
+            if (!StartLink(source)) return;
+            _linkFollowsLaser = true;
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning($"[Corkboard] String link from quick-menu: {ex.Message}");
+            CancelString();
+        }
+    }
 
     private void BeginString(GameObject? hitGo, in RTPointerSample sample)
     {
         if (!TryFindPin(hitGo, sample, out var pinRT, out _)) return;
         var source = PinControllerOf(pinRT);
+        if (source == null || !StartLink(source)) return;
+        UpdateStringPreview(sample);
+    }
+
+    private bool StartLink(PinnedItemController source)
+    {
         var cpc = CasePanelController.Instance;
-        if (source == null || cpc == null) return;
+        if (cpc == null) return false;
 
         cpc.customStringLinkSelection = source;
         cpc.customLinkSelectionMode = true;
@@ -407,8 +448,15 @@ internal sealed class CorkboardInput : IRTPointerExtension
         }
         _stringSource = source;
         _stringFrom = source.pinButtonController?.rect;
+        // Zero length at the pin until the laser gives it an end.
+        if (_stringPreview != null && _stringFrom != null && _stringPreview.parent != null)
+        {
+            Vector2 from = _stringPreview.parent.InverseTransformPoint(_stringFrom.position);
+            _stringPreview.sizeDelta = new Vector2(0f, _stringPreview.sizeDelta.y);
+            _stringPreview.localPosition = new Vector3(from.x, from.y, _stringPreview.localPosition.z);
+        }
         Log.LogInfo($"[Corkboard] String link start: '{source.name}' preview={_stringPreview != null}");
-        UpdateStringPreview(sample);
+        return true;
     }
 
     /// <summary>Stretches the preview from the source pin to the pointer, in the preview's own
@@ -440,6 +488,7 @@ internal sealed class CorkboardInput : IRTPointerExtension
             _stringSource = null;
             _stringFrom = null;
             _stringPreview = null;
+            _linkFollowsLaser = false;
             return;
         }
         Log.LogInfo("[Corkboard] String link cancelled (no other pin under the pointer)");
@@ -456,5 +505,6 @@ internal sealed class CorkboardInput : IRTPointerExtension
         _stringSource = null;
         _stringFrom = null;
         _stringPreview = null;
+        _linkFollowsLaser = false;
     }
 }

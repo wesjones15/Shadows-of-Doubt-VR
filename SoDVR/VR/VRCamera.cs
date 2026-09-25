@@ -227,7 +227,8 @@ public class VRCamera : MonoBehaviour
         // Stop the background frame thread; we take over the frame loop from here.
         OpenXRManager.StopFrameThread();
         _menuRTPanel = new MenuRTPanel(UILayer, _rtPanelInput, OnSaveLoadButtonClicked);
-        _tooltipRTPanel = new TooltipRTPanel(UILayer, _rtPanelInput, _rtPanelGrip, OnSaveLoadButtonClicked);
+        _tooltipRTPanel = new TooltipRTPanel(UILayer, _rtPanelInput, _rtPanelGrip, OnSaveLoadButtonClicked,
+            pin => _caseBoardRT.BeginLinkFrom(pin));
         _caseBoardRT = new CaseBoardRTController(UILayer, _rtPanelInput, _rtPanelGrip);
         Log.LogInfo("[VRCamera] Awake — polling for SYNCHRONIZED state before swapchain setup.");
     }

@@ -52,6 +52,7 @@ internal sealed class TooltipRTPanel
     private readonly RTCanvasPanel _panel;
     private readonly RTPanelGrip _grip;
     private readonly Action _onSaveLoadButtonClicked;
+    private readonly Action<PinnedItemController> _onNewLink;
     private readonly Dictionary<int, Element> _elements = new();
     private readonly List<int> _gone = new();
     private readonly HashSet<string> _loggedUnknown = new();
@@ -59,11 +60,15 @@ internal sealed class TooltipRTPanel
     private Transform? _contextMenus;
     private Transform? _tooltips;
 
-    public TooltipRTPanel(int quadLayer, RTPanelInput input, RTPanelGrip grip, Action onSaveLoadButtonClicked)
+    /// <param name="onNewLink">Runs the pin quick-menu's "new link" from the given pin in place of
+    /// the game's, whose string follows the OS mouse.</param>
+    public TooltipRTPanel(int quadLayer, RTPanelInput input, RTPanelGrip grip, Action onSaveLoadButtonClicked,
+        Action<PinnedItemController> onNewLink)
     {
         _panel = new RTCanvasPanel("TooltipRTPanel", quadLayer, input);
         _grip = grip;
         _onSaveLoadButtonClicked = onSaveLoadButtonClicked;
+        _onNewLink = onNewLink;
         input.Pressed += OnPointerPressed;
     }
 
@@ -174,7 +179,13 @@ internal sealed class TooltipRTPanel
         if (root == null) return;
 
         string name = t.gameObject.name ?? "";
-        var view = _panel.CreateView(name, kind == Kind.Dialog ? OnBeforeDialogClick : null);
+        Func<GameObject, bool>? onBeforeClick = kind switch
+        {
+            Kind.Dialog => OnBeforeDialogClick,
+            Kind.Menu => OnBeforeMenuClick,
+            _ => null,
+        };
+        var view = _panel.CreateView(name, onBeforeClick);
         bool isContextMenu = kind == Kind.Menu && name.StartsWith(ContextMenuPrefix, StringComparison.Ordinal);
         bool draggable = kind == Kind.Dialog || isContextMenu;
         var e = new Element(kind, root, view, draggable) { IsContextMenu = isContextMenu };
@@ -285,6 +296,22 @@ internal sealed class TooltipRTPanel
                 _onSaveLoadButtonClicked();
                 break;
             }
+        }
+        return false;
+    }
+
+    private bool OnBeforeMenuClick(GameObject go)
+    {
+        for (var t = go.transform; t != null; t = t.parent)
+        {
+            var quickMenu = t.GetComponent<PinnedQuickMenuController>();
+            if (quickMenu == null) continue;
+            var newLink = quickMenu.newLinkButton;
+            var pin = quickMenu.parentPinned;
+            if (newLink == null || pin == null || !go.transform.IsChildOf(newLink.transform)) return false;
+            Log.LogInfo($"[TooltipRTPanel] Quick-menu new link from '{pin.name}' — string follows the laser");
+            _onNewLink(pin);
+            return true;
         }
         return false;
     }

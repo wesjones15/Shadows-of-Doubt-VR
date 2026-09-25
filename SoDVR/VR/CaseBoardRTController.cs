@@ -31,6 +31,7 @@ internal sealed class CaseBoardRTController
     private readonly CaseBoardPanel _navbar;
     private readonly CaseBoardPanel[] _panels;
     private readonly CaseBoardWindows _windows;
+    private readonly CorkboardInput _corkboardInput = new();
     private readonly Transform _anchor;
     private bool _wasOpen;
     private bool _anchorPlaced;
@@ -45,7 +46,7 @@ internal sealed class CaseBoardRTController
     {
         _navbar = new CaseBoardPanel("ActionPanelCanvas", PanelWorldWidth, 0f, draggable: false, quadLayer, input, grip);
         var corkboard = new CaseBoardPanel("CaseCanvas", CaseBoardWorldWidth, CorkboardDistanceInFront, draggable: false, quadLayer, input, grip,
-            new CorkboardInput(), wholeCanvas: true);
+            _corkboardInput, wholeCanvas: true);
         _panels = new[]
         {
             _navbar,
@@ -62,6 +63,10 @@ internal sealed class CaseBoardRTController
         Object.DontDestroyOnLoad(anchorGO);
         _anchor = anchorGO.transform;
     }
+
+    /// <summary>Starts a string link from <paramref name="source"/> that follows the laser until the
+    /// trigger picks the other pin — the pin quick-menu's "new link".</summary>
+    public void BeginLinkFrom(PinnedItemController source) => _corkboardInput.BeginLinkFrom(source);
 
     /// <summary>True while the case board is open.</summary>
     public bool IsOpen => _navbar.Canvas != null && _navbar.Canvas.gameObject.activeInHierarchy;
