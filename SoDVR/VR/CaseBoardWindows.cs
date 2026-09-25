@@ -102,6 +102,11 @@ internal sealed class CaseBoardWindows
             var closeRect = close != null ? close.GetComponent<RectTransform>() : null;
             if (closeRect != null)
                 Log.LogInfo($"[CaseBoardWindows] '{name}' close button pixelRect={_panel.UnclampedPixelRectOf(closeRect)} viewPixelRect={w.View.PixelRect}");
+            // The visible minus/X glyph is a separate element; presses on it land ~10-20 px above the button.
+            var icon = w.Info != null && w.Info.closeButtonIcon != null ? w.Info.closeButtonIcon.rectTransform : null;
+            CanvasDump.DumpButton($"open-note close icon '{name}'", icon);
+            if (icon != null)
+                Log.LogInfo($"[CaseBoardWindows] '{name}' close icon pixelRect={_panel.UnclampedPixelRectOf(icon)}");
         }
 
         if (w.ScrollLogFramesLeft > 0 && Time.frameCount >= w.DiagnosticFrame)

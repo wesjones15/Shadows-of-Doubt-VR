@@ -102,10 +102,53 @@ internal static class CanvasDump
             if (bio == null) { Log.LogInfo("[CanvasDump] BioScreenController.Instance=null"); return; }
             Log.LogInfo($"[CanvasDump] BioScreenController isOpen={bio.isOpen} openedFromPause={bio.openedFromPause} " +
                         $"inventoryDisplayProgress={bio.inventoryDisplayProgress:F2}");
-            DumpButton("inventory X", bio.closeButton != null ? bio.closeButton.transform : null);
+            DumpButton("inventory deselect X (BioScreenController.closeButton)", bio.closeButton != null ? bio.closeButton.transform : null);
+            DumpCloseStyleButtons();
         }
         catch (Exception ex) { Log.LogWarning($"[CanvasDump] Inventory close button: {ex.Message}"); }
     }
+
+    /// <summary>Every active button that looks like a close/exit control, and every active button on a
+    /// canvas the RT panels don't render, with its canvas and rect — to find which canvas owns the
+    /// inventory's close (wart) X, which isn't under BioDisplayCanvas.</summary>
+    private static void DumpCloseStyleButtons()
+    {
+        int count = 0;
+        foreach (var button in Resources.FindObjectsOfTypeAll<ButtonController>())
+        {
+            if (button == null || !button.gameObject.activeInHierarchy) continue;
+            string name = button.gameObject.name ?? "";
+            string sprite = "";
+            try { sprite = button.icon != null && button.icon.sprite != null ? button.icon.sprite.name : ""; } catch { }
+            var root = RootCanvasOf(button.transform);
+            bool outsideCaseBoard = root == null || !RTOwnedCanvases.IsOwned(root.gameObject.name);
+            if (!LooksLikeClose(name) && !LooksLikeClose(sprite) && !outsideCaseBoard) continue;
+            if (count++ >= MaxCloseStyleButtonsLogged) continue;
+            var rt = button.GetComponent<RectTransform>();
+            var path = new StringBuilder(name);
+            for (var tr = button.transform.parent; tr != null; tr = tr.parent) path.Insert(0, tr.gameObject.name + "/");
+            Log.LogInfo($"[CanvasDump] close-style button '{path}' icon='{sprite}' rootCanvas='{root?.gameObject.name}' " +
+                        $"rectInRoot={(root != null && rt != null ? CanvasLocalRect(root, rt) : "n/a")}");
+        }
+        Log.LogInfo($"[CanvasDump] close-style or non-case-board buttons active: {count}");
+    }
+
+    private const int MaxCloseStyleButtonsLogged = 40;
+
+    private static Canvas? RootCanvasOf(Transform t)
+    {
+        Canvas? found = null;
+        for (var tr = t; tr != null; tr = tr.parent)
+        {
+            var c = tr.GetComponent<Canvas>();
+            if (c != null) found = c;
+        }
+        return found;
+    }
+
+    private static bool LooksLikeClose(string s) =>
+        s.IndexOf("close", StringComparison.OrdinalIgnoreCase) >= 0 || s.IndexOf("exit", StringComparison.OrdinalIgnoreCase) >= 0
+        || s.IndexOf("cross", StringComparison.OrdinalIgnoreCase) >= 0;
 
     /// <summary>
     /// Everything that decides whether a button is seen and hit in its RT panel: where it sits
