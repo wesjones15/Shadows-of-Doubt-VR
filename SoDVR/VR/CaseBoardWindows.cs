@@ -101,6 +101,7 @@ internal sealed class CaseBoardWindows
         {
             var close = w.Info != null && w.Info.closeButton != null ? w.Info.closeButton.transform : null;
             CanvasDump.DumpButton($"open-note close '{name}'", close);
+            LogHighlights(w);
             var closeRect = close != null ? close.GetComponent<RectTransform>() : null;
             if (closeRect != null)
                 Log.LogInfo($"[CaseBoardWindows] '{name}' close button pixelRect={_panel.UnclampedPixelRectOf(closeRect)} viewPixelRect={w.View.PixelRect}");
@@ -248,6 +249,26 @@ internal sealed class CaseBoardWindows
     /// <summary>A window's graphics belong to its own (nested) canvas and any canvases nested
     /// further in (the Notebook's Scroll View) — WindowCanvas's raycaster never sees them, so each
     /// is registered with the view's pointer and pointed at the projector.</summary>
+    // Diagnostic: how ButtonController's hover corners (its "additional highlight") are sized from
+    // the button and additionalHighlightRectModifier, before growing the close button's to its hit area.
+    private static void LogHighlights(BoardWindow w)
+    {
+        if (w.Info == null) return;
+        foreach (var bc in w.Info.GetComponentsInChildren<ButtonController>(false))
+        {
+            if (bc == null) continue;
+            try
+            {
+                var own = bc.GetComponent<RectTransform>();
+                var hl = bc.additionalHighlightRect;
+                Log.LogInfo($"[CaseBoardWindows] highlight '{bc.gameObject.name}' use={bc.useAdditionalHighlight} modifier={bc.additionalHighlightRectModifier} " +
+                            $"atFront={bc.additionalHighlightAtFront} button={own?.rect.size} " +
+                            $"highlight={(hl == null ? "none" : $"size={hl.rect.size} anchorMin={hl.anchorMin} anchorMax={hl.anchorMax} offsetMin={hl.offsetMin} offsetMax={hl.offsetMax} parent='{hl.parent?.name}'")}");
+            }
+            catch (Exception ex) { Log.LogWarning($"[CaseBoardWindows] highlight '{bc.gameObject.name}': {ex.Message}"); }
+        }
+    }
+
     // Buttons wider than this aren't "the other buttons in its column" (a scrollbar, a tab strip).
     private const float MaxColumnButtonWidth = 96f;
 
