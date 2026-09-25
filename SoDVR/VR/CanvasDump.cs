@@ -108,32 +108,48 @@ internal static class CanvasDump
         catch (Exception ex) { Log.LogWarning($"[CanvasDump] Inventory close button: {ex.Message}"); }
     }
 
-    /// <summary>Every active button that looks like a close/exit control, and every active button on a
-    /// canvas the RT panels don't render, with its canvas and rect — to find which canvas owns the
+    /// <summary>Every button that looks like a close/exit control (active or not), and every active
+    /// button on a canvas the RT panels don't render, with its canvas and rect — to find which canvas owns the
     /// inventory's close (wart) X, which isn't under BioDisplayCanvas.</summary>
     private static void DumpCloseStyleButtons()
     {
+        // Any Selectable (plain Unity Buttons too, not only the game's ButtonController), active or
+        // not: the X may only be switched on in the pause version of the inventory.
         int count = 0;
-        foreach (var button in Resources.FindObjectsOfTypeAll<ButtonController>())
+        foreach (var selectable in Resources.FindObjectsOfTypeAll<Selectable>())
         {
-            if (button == null || !button.gameObject.activeInHierarchy) continue;
-            string name = button.gameObject.name ?? "";
-            string sprite = "";
-            try { sprite = button.icon != null && button.icon.sprite != null ? button.icon.sprite.name : ""; } catch { }
-            var root = RootCanvasOf(button.transform);
-            bool outsideCaseBoard = root == null || !RTOwnedCanvases.IsOwned(root.gameObject.name);
-            if (!LooksLikeClose(name) && !LooksLikeClose(sprite) && !outsideCaseBoard) continue;
+            if (selectable == null || !selectable.gameObject.scene.IsValid()) continue;
+            var go = selectable.gameObject;
+            string name = go.name ?? "";
+            string sprites = SpriteNamesOf(go.transform);
+            var root = RootCanvasOf(go.transform);
+            bool activeOutsideCaseBoard = go.activeInHierarchy && (root == null || !RTOwnedCanvases.IsOwned(root.gameObject.name));
+            if (!LooksLikeClose(name) && !LooksLikeClose(sprites) && !activeOutsideCaseBoard) continue;
             if (count++ >= MaxCloseStyleButtonsLogged) continue;
-            var rt = button.GetComponent<RectTransform>();
+            var rt = go.GetComponent<RectTransform>();
             var path = new StringBuilder(name);
-            for (var tr = button.transform.parent; tr != null; tr = tr.parent) path.Insert(0, tr.gameObject.name + "/");
-            Log.LogInfo($"[CanvasDump] close-style button '{path}' icon='{sprite}' rootCanvas='{root?.gameObject.name}' " +
+            for (var tr = go.transform.parent; tr != null; tr = tr.parent) path.Insert(0, tr.gameObject.name + "/");
+            Log.LogInfo($"[CanvasDump] close-style button '{path}' type={selectable.GetIl2CppType().Name} activeSelf={go.activeSelf} " +
+                        $"activeInHierarchy={go.activeInHierarchy} sprites='{sprites}' rootCanvas='{root?.gameObject.name}' " +
                         $"rectInRoot={(root != null && rt != null ? CanvasLocalRect(root, rt) : "n/a")}");
         }
-        Log.LogInfo($"[CanvasDump] close-style or non-case-board buttons active: {count}");
+        Log.LogInfo($"[CanvasDump] close-style buttons (any state) or active non-case-board buttons: {count}");
     }
 
     private const int MaxCloseStyleButtonsLogged = 40;
+
+    private static string SpriteNamesOf(Transform t)
+    {
+        var names = new StringBuilder();
+        foreach (var image in t.GetComponentsInChildren<Image>(true))
+        {
+            var sprite = image != null ? image.sprite : null;
+            if (sprite == null) continue;
+            if (names.Length > 0) names.Append(',');
+            names.Append(sprite.name);
+        }
+        return names.ToString();
+    }
 
     private static Canvas? RootCanvasOf(Transform t)
     {
