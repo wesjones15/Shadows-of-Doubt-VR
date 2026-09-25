@@ -71,3 +71,15 @@ leaving focus (state 5 → 4) when the VD menu opened; the return wasn't capture
 reproduced afterwards. If it recurs, copy `BepInEx/LogOutput.log` and Player.log before relaunching
 and check how `VRCamera`/`OpenXRManager` handle the VISIBLE → FOCUSED transition and whether frame
 submission resumes.
+
+## 7. Pin quick-menu never shows — step 6's fix reverted
+
+The game puts the pin quick-menu (and right-click context menus) at a world position copied from
+another canvas, which in the flat game is the same screen. Each RT canvas has its own projector at
+its own spot, so the copy lands tens of metres off the TooltipCanvas texture (logged x ≈ 93,228)
+and the menu is never visible. Sharing one projector pose between the screen-sized panels fixed
+that (`6fedc16`), but after loading a save the pause menu and case board then took a long time to
+open; reverting it (`e821ed0`) made them instant again, confirmed by the user. The mechanism behind
+that delay is unknown. Fix the quick-menu another way — e.g. move a tracked TooltipCanvas element
+that lands off its texture back inside it (its view is placed at the laser anyway, so only its
+canvas position needs correcting).
