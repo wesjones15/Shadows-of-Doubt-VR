@@ -57,7 +57,7 @@ public class VRCamera : MonoBehaviour
     private readonly HudController _hud = new();
     private readonly LocomotionController _locomotion = new();
     private readonly ControllerInteraction _controllerInteraction = new();
-    private readonly CaseBoardInteraction _caseBoard = new();
+    private readonly LegacyCanvasInteraction _legacyCanvases = new();
     private readonly CanvasMaterialPatcher _materialPatcher = new();
     private readonly CanvasPlacement _canvasPlacement = new();
     private readonly RTPanelInput _rtPanelInput = new();
@@ -1041,7 +1041,6 @@ public class VRCamera : MonoBehaviour
                 _managedCanvases, _nestedCanvasIds,
                 _canvasWasActive, _positionedCanvases,
                 _lastRescanFrame,
-                _caseBoard,
                 _gripDragAnchorOffsets,
                 _gripDragEnforce,
                 _caseBoardRT.IsOpen, _caseBoardRT.JustOpened, _caseBoardRT.Anchor, _caseBoardRT.AnchorPlaced,
@@ -1094,11 +1093,11 @@ public class VRCamera : MonoBehaviour
 
                 // Re-apply grip-drag position for top-level canvas.
                 // Game scripts / Canvas layout may reset position between Update and LateUpdate.
-                var gripDragCanvas = _caseBoard.GripDragCanvas;
+                var gripDragCanvas = _legacyCanvases.GripDragCanvas;
                 if (gripDragCanvas != null)
                 {
-                    gripDragCanvas.transform.position = _caseBoard.GripDragDesiredPos;
-                    gripDragCanvas.transform.rotation = _caseBoard.GripDragDesiredRot;
+                    gripDragCanvas.transform.position = _legacyCanvases.GripDragDesiredPos;
+                    gripDragCanvas.transform.rotation = _legacyCanvases.GripDragDesiredRot;
                 }
 
                 // Enforce stored positions for ALL previously grip-dragged top-level canvases.
@@ -1203,7 +1202,7 @@ public class VRCamera : MonoBehaviour
                 _cursorRect, _cursorCanvas, _managedCanvases))
             return;
 
-        _caseBoard.SetFrameContext(
+        _legacyCanvases.SetFrameContext(
             _managedCanvases, _noGroupInteractable,
             _lastRescanFrame, () => _forceScanFrames = 30,
             _leftCam, _gameCamRef, _rightControllerGO, _leftControllerGO,
@@ -1217,13 +1216,13 @@ public class VRCamera : MonoBehaviour
         bool rtOwnsGrip = false;
         try { rtOwnsGrip = _rtPanelGrip.Update(_rightControllerGO, _leftControllerGO, _rtPanelInput.ActiveHandIsRight, _lastLegacyHitDistance); }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] RTPanelGrip.Update: {ex.Message}"); }
-        _caseBoard.UpdateGripDrag(rtOwnsGrip);
-        (_minimapBBtnLocalOffset, _minimapBBtnLocalRot, _minimapBBtnHasOffset) = _caseBoard.MinimapBBtnResult;
+        _legacyCanvases.UpdateGripDrag(rtOwnsGrip);
+        (_minimapBBtnLocalOffset, _minimapBBtnLocalRot, _minimapBBtnHasOffset) = _legacyCanvases.MinimapBBtnResult;
 
         _controllerInteraction.UpdateLeftInteractMarker(_leftControllerGO, _menuRTPanel.Canvas, _gameCamRef,
             _leftCam, _interactionLayerMask, _baseInteractionRange);
 
-        _caseBoard.PreAimScan();
+        _legacyCanvases.PreAimScan();
 
         // Legacy depth scan first, so RTPanelInput can tell whether a legacy WorldSpace canvas sits
         // in front of the nearest RT panel. The whole void-room period (_gameCam == null) has no
@@ -1235,7 +1234,7 @@ public class VRCamera : MonoBehaviour
             : _controllerInteraction.ScanAndRenderAimDots(_rightControllerGO, _leftCam,
                 _managedCanvases, _cursorCanvas, _nestedCanvasIds, _noGroupInteractable);
 
-        float legacyHitDistance = _caseBoard.HasActiveGesture ? 0f
+        float legacyHitDistance = _legacyCanvases.HasActiveGesture ? 0f
                                 : aim.HasTarget ? _controllerInteraction.NearestLegacyUIHitDistance(_rightControllerGO.transform.position)
                                 : float.PositiveInfinity;
         _lastLegacyHitDistance = legacyHitDistance;
@@ -1270,7 +1269,7 @@ public class VRCamera : MonoBehaviour
         _cursorTargetPos    = aim.TargetPos;
         _cursorTargetRot    = aim.TargetRot;
 
-        _caseBoard.Tick(rtOwnsPointer);
+        _legacyCanvases.Tick(rtOwnsPointer);
 
         _controllerInteraction.UpdateVrSettingsScroll();
         _controllerInteraction.UpdateLeftPose(displayTime, transform, _leftControllerGO);

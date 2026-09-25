@@ -17,7 +17,7 @@ namespace SoDVR.VR;
 /// already-positioned skip → default), sharing locals across every branch and
 /// mutating cross-cutting VRCamera dictionaries throughout. It moves as one method rather than
 /// being split further — fine-grained sub-extraction would need the same kind of
-/// SetFrameContext-style redesign CaseBoardInteraction's Tick() needed, and this method doesn't
+/// SetFrameContext-style redesign LegacyCanvasInteraction's Tick() needed, and this method doesn't
 /// warrant that investment any more than Tick()'s dispatch did.
 /// </summary>
 internal sealed class CanvasPlacement
@@ -36,7 +36,6 @@ internal sealed class CanvasPlacement
         Dictionary<int, Canvas> managedCanvases, HashSet<int> nestedCanvasIds,
         Dictionary<int, bool> canvasWasActive, HashSet<int> positionedCanvases,
         Dictionary<int, int> lastRescanFrame,
-        CaseBoardInteraction caseBoard,
         Dictionary<int, (Vector3 offset, Quaternion rot)> gripDragAnchorOffsets,
         Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
         bool caseBoardOpen, bool caseBoardJustOpened, Transform caseBoardAnchor, bool caseBoardAnchorPlaced,

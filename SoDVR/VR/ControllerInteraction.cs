@@ -12,7 +12,7 @@ namespace SoDVR.VR;
 /// laser beams, the left-hand world-interact marker, and the ray→canvas depth scan that finds
 /// what the right controller is aiming at. None of this is case-board or menu-click specific;
 /// it's the plumbing any future interaction system still needs (a controller ray, a cursor,
-/// visual aim feedback), which is why it's split out separately from CaseBoardInteraction/
+/// visual aim feedback), which is why it's split out separately from LegacyCanvasInteraction/
 /// CanvasClickRouter rather than bundled with the code that's slated for replacement.
 /// </summary>
 internal sealed class ControllerInteraction

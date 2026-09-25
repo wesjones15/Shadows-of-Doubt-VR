@@ -11,13 +11,12 @@ namespace SoDVR.VR;
 /// Generic canvas-click routing: cast a ray against every managed WorldSpace canvas, resolve the
 /// UI element under the nearest hit via GraphicRaycaster, and fire it (Button persistent
 /// listeners, or an ExecuteEvents fallback for non-Button IPointerClickHandlers). Canvas-agnostic
-/// — none of this depends on case-board or any other specific canvas's mechanics, which is why
-/// it's split apart from CaseBoardInteraction rather than bundled with it.
+/// — none of this depends on any specific canvas's mechanics.
 ///
 /// Minimap-specific behavior (its hidden-overlay-button skip, map-node click and map context menu)
-/// is reached through <see cref="ICanvasClickExtensions"/> rather than being inline here — <c>ext</c> is null until
-/// CaseBoardInteraction (a later step in this split) implements it, and stays null forever if a
-/// future menu rewrite bypasses this router entirely for that surface.
+/// is reached through <see cref="ICanvasClickExtensions"/>, implemented by
+/// <see cref="LegacyCanvasInteraction"/>. RT panels don't come through here: they send clicks
+/// the way a mouse does (RTPanelPointer).
 /// </summary>
 internal static class CanvasClickRouter
 {
@@ -389,8 +388,8 @@ internal static class CanvasClickRouter
 }
 
 /// <summary>
-/// Hook surface for case-board/minimap-specific click behavior — implemented by
-/// CaseBoardInteraction, null until that class exists. See CanvasClickRouter's class doc.
+/// Hook surface for minimap-specific click behavior — implemented by LegacyCanvasInteraction.
+/// See CanvasClickRouter's class doc.
 /// </summary>
 internal interface ICanvasClickExtensions
 {

@@ -9,30 +9,18 @@ using static SoDVR.VR.NativeInput;
 namespace SoDVR.VR;
 
 /// <summary>
-/// CURRENT IMPLEMENTATION, NOT PERMANENT ARCHITECTURE — replace wholesale when case-board/
-/// menu-click interaction gets its ground-up rewrite (per CLAUDE.md and v1_findings.md, the
-/// whole menu/panel/interaction layer built on world-space canvas conversion is disqualified
-/// and slated for replacement, likely with RenderTexture-projected panels). Everything in this
-/// file is the pin-drag/string-link/context-menu mechanics of THAT disqualified approach,
-/// relocated here mechanically rather than redesigned — effort spent polishing it would be
-/// wasted, since the goal is a clean deletion target for that future rewrite, not a nicer
-/// version of code that's going away. Minimap-specific logic lives here too (marked with
-/// "── Minimap: ... ──" region comments) rather than in its own file — it's threaded through
-/// the same physical blocks as case-board logic throughout, and is just as much a casualty of
-/// that rewrite.
+/// Controller input for the canvases still on the legacy WorldSpace pipeline — the minimap and
+/// every canvas no RT panel owns yet (dialogue, computers, keyboard, fingerprints, ...): trigger
+/// clicks through <see cref="CanvasClickRouter"/>, A right-click, B minimap pan / middle-drag,
+/// grip-drag, and the per-frame pose re-enforcement those canvases need. The case board, pause
+/// menu and tooltips are RT panels and never reach here. A deletion target: each canvas that
+/// moves to an RT panel takes its handling with it, and the file goes when the last one does.
 ///
-/// Implements <see cref="ICanvasClickExtensions"/> so <see cref="CanvasClickRouter"/> — the
-/// generic layer that's expected to survive the rewrite — can reach case-board/minimap-specific
-/// click behavior through a narrow interface instead of having it inline. A future replacement
-/// only needs a new <see cref="ICanvasClickExtensions"/> implementer (or none, if the new menu
-/// system bypasses the router entirely) — CanvasClickRouter itself never changes.
-///
-/// Cross-cutting VRCamera state this needs every frame (managed canvases, grip-drag
-/// persistence dictionaries, etc.) is passed once via
-/// <see cref="SetFrameContext"/> rather than threaded through every method's parameter list —
-/// simplest option for a file this size that's not meant to last.
+/// Implements <see cref="ICanvasClickExtensions"/> for the minimap's special cases (its hidden
+/// overlay button, map-node click and map context menu). Cross-cutting VRCamera state is passed
+/// once per frame via <see cref="SetFrameContext"/>.
 /// </summary>
-internal sealed class CaseBoardInteraction : ICanvasClickExtensions
+internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
 {
     private static ManualLogSource Log => Plugin.Log;
 
@@ -229,7 +217,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 _gripDragHitLocalOffset = Quaternion.Inverse(grabCanvasRot) * (hitPoint - bestGripCanvas.transform.position);
                 // Canvas rotation relative to controller (unchanged from before).
                 _gripDragRotOffset = Quaternion.Inverse(grabCtrlRot) * grabCanvasRot;
-                Log.LogInfo($"[CaseBoard] GripDrag start: '{bestGripCanvas.gameObject.name}' dist={bestGripDist:F2}");
+                Log.LogInfo($"[LegacyCanvas] GripDrag start: '{bestGripCanvas.gameObject.name}' dist={bestGripDist:F2}");
             }
         }
 
@@ -288,7 +276,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 );
             }
 
-            Log.LogInfo($"[CaseBoard] GripDrag end: '{_gripDragCanvas.gameObject.name}'");
+            Log.LogInfo($"[LegacyCanvas] GripDrag end: '{_gripDragCanvas.gameObject.name}'");
             _gripDragCanvas = null;
         }
     }
@@ -474,7 +462,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                     CanvasClickRouter.TryRightClick(rPos, rFwd, rmbTarget, _ctxLeftCam, this);
                     _cbANeedsRelease = true;
                     _cbACooldownUntil = Time.realtimeSinceStartup + 1.0f;
-                    Log.LogInfo($"[CaseBoard] Right-click on '{rmbTarget.gameObject.name}'");
+                    Log.LogInfo($"[LegacyCanvas] Right-click on '{rmbTarget.gameObject.name}'");
                 }
             }
         }
@@ -496,7 +484,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 OpenXRManager.GetButtonBState(out bool bNow);
                 if (!bNow)
                 {
-                    Log.LogInfo("[CaseBoard] MinimapPan end");
+                    Log.LogInfo("[LegacyCanvas] MinimapPan end");
                     _minimapPanActive = false;
                     _cbBNeedsRelease = true;
                     _cbBCooldownUntil = Time.realtimeSinceStartup + 0.3f;
@@ -562,7 +550,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                             mouse_event(MOUSEEVENTF_MIDDLEUP, 0, 0, 0, UIntPtr.Zero);
                         }
                     }
-                    catch (Exception ex) { Log.LogWarning($"[CaseBoard] Mid-drag end: {ex.Message}"); }
+                    catch (Exception ex) { Log.LogWarning($"[LegacyCanvas] Mid-drag end: {ex.Message}"); }
                     _cbMidDragActive = false; _cbMidDragStarted = false;
                     _cbMidDragGO = null; _cbMidDragPED = null;
                     _cbBNeedsRelease = true;
@@ -585,7 +573,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                     if (!_cbMidDragStarted)
                     {
                         _cbMidDragStarted = true;
-                        Log.LogInfo($"[CaseBoard] Mid-drag start on '{mmbTarget?.gameObject.name}'");
+                        Log.LogInfo($"[LegacyCanvas] Mid-drag start on '{mmbTarget?.gameObject.name}'");
                     }
                 }
             }
@@ -611,11 +599,11 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                                     Vector2 sp2 = (Vector2)_ctxLeftCam.WorldToScreenPoint(wp2);
                                     _minimapPanActive = true;
                                     _minimapPanLastScreenPos = sp2;
-                                    Log.LogInfo($"[CaseBoard] MinimapPan start at {sp2.ToString("F0")} SR='{_minimapScrollRect.gameObject.name}'");
+                                    Log.LogInfo($"[LegacyCanvas] MinimapPan start at {sp2.ToString("F0")} SR='{_minimapScrollRect.gameObject.name}'");
                                 }
                             }
                         }
-                        catch (Exception ex) { Log.LogWarning($"[CaseBoard] MinimapPan start: {ex.Message}"); }
+                        catch (Exception ex) { Log.LogWarning($"[LegacyCanvas] MinimapPan start: {ex.Message}"); }
                     }
                     else
                     {
@@ -635,7 +623,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                                 try { ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, mmbPed, ExecuteEvents.beginDragHandler); } catch { }
                             }
                         }
-                        catch (Exception ex) { Log.LogWarning($"[CaseBoard] Mid-press: {ex.Message}"); }
+                        catch (Exception ex) { Log.LogWarning($"[LegacyCanvas] Mid-press: {ex.Message}"); }
                         _cbMidDragActive = true;
                         _cbMidDragStarted = false;
                     }
@@ -661,7 +649,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             }
             if (_minimapPanActive)
             {
-                Log.LogInfo("[CaseBoard] MinimapPan cancelled (no target)");
+                Log.LogInfo("[LegacyCanvas] MinimapPan cancelled (no target)");
                 _minimapPanActive = false;
             }
         }
@@ -698,11 +686,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         if (bNow) _cbBNeedsRelease = true;
     }
 
-    // ── ICanvasClickExtensions: case-board/minimap-specific hooks for CanvasClickRouter ────────
-    // Ported verbatim from the pre-split TryClickCanvas/TryRightClickCanvas bodies (see the
-    // "Extract generic canvas-click routing into CanvasClickRouter.cs" commit for the original
-    // inline form) — only the field references changed, to _ctx* equivalents or VRCamera.-
-    // qualified statics.
+    // ── ICanvasClickExtensions: minimap-specific hooks for CanvasClickRouter ────────────────
 
     public int SelectBestResult(Canvas hitCanvas, Il2CppSystem.Collections.Generic.List<RaycastResult> results)
     {
@@ -770,14 +754,14 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 InterfaceController.Instance.SpawnWindow(node.gameLocation.evidenceEntry, Evidence.DataKey.location);
                 minimapHandled = true;
                 _ctxRequestForceScan();
-                Log.LogInfo($"[CaseBoard] MinimapClick: SpawnWindow node='{node.gameLocation.name}'");
+                Log.LogInfo($"[LegacyCanvas] MinimapClick: SpawnWindow node='{node.gameLocation.name}'");
             }
             else
             {
-                Log.LogInfo($"[CaseBoard] MinimapClick: mapCursorNode={(node == null ? "null" : "noGameLocation")}");
+                Log.LogInfo($"[LegacyCanvas] MinimapClick: mapCursorNode={(node == null ? "null" : "noGameLocation")}");
             }
         }
-        catch (Exception mmex) { Log.LogWarning($"[CaseBoard] MinimapClick: {mmex.Message}"); }
+        catch (Exception mmex) { Log.LogWarning($"[LegacyCanvas] MinimapClick: {mmex.Message}"); }
         return minimapHandled;
     }
 
@@ -813,19 +797,19 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                     mapCtrl.mapCursorNode = rcNode; // freeze correct node for menu item callbacks
                     mapCtrl.mapContextMenu.OpenMenu();
                     rcHandled = true;
-                    Log.LogInfo($"[CaseBoard] TryRightClick: OpenMenu for node='{rcNode.gameLocation?.name}'");
+                    Log.LogInfo($"[LegacyCanvas] TryRightClick: OpenMenu for node='{rcNode.gameLocation?.name}'");
                 }
                 else
                 {
-                    Log.LogInfo($"[CaseBoard] TryRightClick: minimap skip — node={(rcNode == null ? "null" : "ok")} menu={(mapCtrl?.mapContextMenu == null ? "null" : "ok")}");
+                    Log.LogInfo($"[LegacyCanvas] TryRightClick: minimap skip — node={(rcNode == null ? "null" : "ok")} menu={(mapCtrl?.mapContextMenu == null ? "null" : "ok")}");
                 }
             }
-            catch (Exception rcEx) { Log.LogWarning($"[CaseBoard] TryRightClick MinimapRC: {rcEx.Message}"); }
+            catch (Exception rcEx) { Log.LogWarning($"[LegacyCanvas] TryRightClick MinimapRC: {rcEx.Message}"); }
         }
         return rcHandled;
     }
 
-    // ── Private helpers (moved verbatim from VRCamera, field refs updated to _ctx* equivalents) ─
+    // ── Private helpers ─────────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Raycasts the controller ray against a legacy canvas's plane and returns the screen-space
