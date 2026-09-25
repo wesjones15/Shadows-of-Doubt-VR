@@ -40,6 +40,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     private readonly IRTPointerExtension? _pointerExtension;
     private readonly string?[] _regionPaths;
     private readonly Func<bool>? _shownWhile;
+    private readonly bool _wholeCanvas;
     private bool _wasShownWhile;
     private readonly List<Region> _regions = new();
 
@@ -58,12 +59,17 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     /// <param name="pointerExtension">Panel-specific input handling (the corkboard's pins).</param>
     /// <param name="regions">Paths (from the canvas) of the parts to show as separate views, in
     /// left-to-right order; null shows the whole canvas as one view.</param>
+    /// <param name="wholeCanvas">Always show the whole canvas while it is up, whatever is in view — for a
+    /// canvas that fills the screen (the corkboard: panned to empty cork it has almost nothing drawn,
+    /// and hiding it then would leave nothing to pan back with).</param>
     /// <param name="shownWhile">The game's own "this is open" state, for a panel that fades out after
     /// closing: the panel hides the moment it turns false instead of waiting out the fade.</param>
     public CaseBoardPanel(string canvasName, float screenWorldWidth, float distanceInFrontOfAnchor,
         bool draggable, int quadLayer, RTPanelInput input, RTPanelGrip grip,
-        IRTPointerExtension? pointerExtension = null, string[]? regions = null, Func<bool>? shownWhile = null)
+        IRTPointerExtension? pointerExtension = null, string[]? regions = null, Func<bool>? shownWhile = null,
+        bool wholeCanvas = false)
     {
+        _wholeCanvas = wholeCanvas;
         _shownWhile = shownWhile;
         _pointerExtension = pointerExtension;
         _canvasName = canvasName;
@@ -125,7 +131,13 @@ internal sealed class CaseBoardPanel : IRTGripTarget
         {
             Rect rect;
             int graphicCount;
-            if (region.Path == null)
+            if (region.Path == null && _wholeCanvas)
+            {
+                var texture = _panel.Texture!;
+                rect = new Rect(0f, 0f, texture.width, texture.height);
+                region.HasContent = true;
+            }
+            else if (region.Path == null)
             {
                 rect = _panel.ContentPixelRect(ContentMarginPixels, out graphicCount);
                 region.HasContent = graphicCount >= MinContentGraphics;

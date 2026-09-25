@@ -45,7 +45,7 @@ internal sealed class CaseBoardRTController
     {
         _navbar = new CaseBoardPanel("ActionPanelCanvas", PanelWorldWidth, 0f, draggable: false, quadLayer, input, grip);
         var corkboard = new CaseBoardPanel("CaseCanvas", CaseBoardWorldWidth, CorkboardDistanceInFront, draggable: false, quadLayer, input, grip,
-            new CorkboardInput());
+            new CorkboardInput(), wholeCanvas: true);
         _panels = new[]
         {
             _navbar,
