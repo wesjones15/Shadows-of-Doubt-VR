@@ -49,3 +49,16 @@ MinimapCanvas is still on the legacy WorldSpace pipeline and behaves like the ba
 the rest of the case-board migration, rework it to behave more like the vanilla game's map rather
 than porting the legacy map hacks (`CaseBoardInteraction`'s manual `mapCursorNode` driving, hidden
 overlay-button skip, ScrollRect-based panning) onto an RT panel as-is.
+
+Update (2026-09-25): the panel is now centred on the screen centre (inventory in the middle, XP bar
+on the right). The close button is still under investigation: legacy showed a working X in the
+case-board inventory, and its state (active, alphas, masks, owning canvas, rect) is now logged
+automatically about a second after the inventory opens (`[CanvasDump] closeButton ...`).
+
+## 5. Inventory status cards — deferred to a HUD refactor
+
+The status cards shown to the left of the flat game's inventory (Bruised, Wet, Cold, ...) are not
+inventory content: they're the HUD status display (`StatusController`), visible behind the pause
+inventory. The mod hides the HUD while the case board is open, so they don't appear beside the
+case-board inventory. Bring them in (or show the HUD status alongside the board) as part of a HUD
+refactor; the centred Bio panel leaves room on the left for them.
