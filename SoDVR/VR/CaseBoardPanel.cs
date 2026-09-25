@@ -69,9 +69,6 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     public Canvas? Canvas => _panel.Canvas;
     public bool IsVisible => _view != null && _view.Visible;
 
-    /// <summary>The panel's view, while it is showing.</summary>
-    public RTPanelView? View => IsVisible ? _view : null;
-
     /// <param name="relayout">The anchor just moved (board opened, or recentred): re-place from
     /// the remembered layout.</param>
     public void Tick(bool boardOpen, bool relayout, Transform anchor)

@@ -84,7 +84,6 @@ internal sealed class RTPanelPointer
     private bool _dragging;
     private bool _dragRejected;
     private bool _extensionOwnsPress;
-    private PointerEventData? _externalDragPed;
 
     /// <param name="onBeforeClick">Called with the clicked object before the generic click
     /// dispatch; return true to fully handle the click there (e.g. a Settings-button intercept).</param>
@@ -206,72 +205,6 @@ internal sealed class RTPanelPointer
         }
     }
 
-    /// <summary>
-    /// A left-button drag of <paramref name="target"/> driven by a ray other than the laser's (the
-    /// grip hand panning the corkboard), on its own event data so it never disturbs the laser's
-    /// press or hover. Positions are where the ray meets the panel's plane, so the drag carries on
-    /// past the panel's edge.
-    /// </summary>
-    public bool BeginExternalDrag(GameObject target, Ray ray)
-    {
-        EndExternalDrag();
-        var es = EventSystem.current;
-        if (es == null || _canvas == null || _quadCollider == null || !TryRaycastPlane(ray, out _, out var point)) return false;
-
-        Vector2 position = PixelAt(point);
-        var ped = new PointerEventData(es)
-        {
-            button = PointerEventData.InputButton.Left,
-            position = position,
-            pressPosition = position,
-            useDragThreshold = false,
-        };
-        // A real hit from the canvas's own raycaster, as a press would carry: the target reads the
-        // press camera from it (pressEventCamera) to map positions onto itself.
-        if (RaycastUI(ped, out var pressRaycast) == null)
-        {
-            Log.LogInfo($"[{_logTag}] External drag of '{target.name}' not started: nothing under the ray to take the press camera from");
-            return false;
-        }
-        ped.pointerPressRaycast = pressRaycast;
-        ped.pointerCurrentRaycast = pressRaycast;
-        Log.LogInfo($"[{_logTag}] External drag of '{target.name}' from '{pressRaycast.gameObject?.name}' pressEventCamera='{ped.pressEventCamera?.name}'");
-        try
-        {
-            ExecuteEvents.Execute(target, ped, ExecuteEvents.initializePotentialDrag);
-            ExecuteEvents.Execute(target, ped, ExecuteEvents.beginDragHandler);
-            ped.dragging = true;
-            ped.pointerDrag = target;
-        }
-        catch (Exception ex)
-        {
-            Log.LogWarning($"[{_logTag}] External drag begin: {ex.Message}");
-            return false;
-        }
-        _externalDragPed = ped;
-        return true;
-    }
-
-    public void UpdateExternalDrag(Ray ray)
-    {
-        var ped = _externalDragPed;
-        if (ped == null || ped.pointerDrag == null || !TryRaycastPlane(ray, out _, out var point)) return;
-        Vector2 position = PixelAt(point);
-        ped.delta = position - ped.position;
-        ped.position = position;
-        try { ExecuteEvents.Execute(ped.pointerDrag, ped, ExecuteEvents.dragHandler); }
-        catch (Exception ex) { Log.LogWarning($"[{_logTag}] External drag: {ex.Message}"); }
-    }
-
-    public void EndExternalDrag()
-    {
-        var ped = _externalDragPed;
-        _externalDragPed = null;
-        if (ped?.pointerDrag == null) return;
-        try { ExecuteEvents.Execute(ped.pointerDrag, ped, ExecuteEvents.endDragHandler); }
-        catch (Exception ex) { Log.LogWarning($"[{_logTag}] External drag end: {ex.Message}"); }
-    }
-
     /// <summary>Focus moved elsewhere: drop hover. An in-progress press is kept — RTPanelInput
     /// keeps a pressed panel captured until release.</summary>
     internal void LoseFocus() => UpdateHover(null);
@@ -281,7 +214,6 @@ internal sealed class RTPanelPointer
     {
         UpdateHover(null);
         _extension?.Cancel();
-        EndExternalDrag();
         if (_pressed == null || _ped == null || _extensionOwnsPress) { ResetPress(); return; }
         try
         {
