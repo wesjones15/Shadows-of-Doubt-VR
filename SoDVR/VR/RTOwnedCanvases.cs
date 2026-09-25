@@ -24,6 +24,7 @@ internal static class RTOwnedCanvases
         "CaseCanvas",
         "TooltipCanvas",
         "DialogCanvas",
+        ConversationSpeechPanel.CanvasName,
     };
 
     public static bool IsOwned(string canvasName) => s_names.Contains(canvasName);

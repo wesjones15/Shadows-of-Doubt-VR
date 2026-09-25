@@ -11,7 +11,8 @@ namespace SoDVR.VR;
 /// itself — the game draws it near the bottom of its screen). Input is the flat game's: an option
 /// is selected (pointing at it, or the right stick from anywhere, which also pages past the four
 /// shown) and said with the citizen's own "Say" action (trigger); B runs "End Conversation" from
-/// anywhere. The game binds those to left- and right-click.
+/// anywhere. The game binds those to left- and right-click. The citizen's replies show just above
+/// the window (<see cref="ConversationSpeechPanel"/>).
 /// </summary>
 internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
 {
@@ -37,6 +38,7 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
 
     private readonly RTCanvasPanel _panel;
     private readonly RTPanelGrip _grip;
+    private readonly ConversationSpeechPanel _speech;
     private RTPanelView? _view;
 
     private int _discoveryCooldown;
@@ -59,11 +61,18 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
     {
         _grip = grip;
         _panel = new RTCanvasPanel("DialogueRTPanel", quadLayer, input);
+        _speech = new ConversationSpeechPanel(quadLayer, input, ScreenWorldWidth);
     }
 
     public bool IsOpen => _view != null && _view.Visible;
 
     public void Tick(Camera? head)
+    {
+        TickWindow(head);
+        _speech.Tick(IsOpen ? _view : null, () => PoseInFrontOf(head != null ? head.transform : null));
+    }
+
+    private void TickWindow(Camera? head)
     {
         if (!_panel.IsAttached)
         {
@@ -94,8 +103,17 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
         else _stickDirection = 0;
     }
 
-    public void Render() => _panel.Render();
-    public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay);
+    public void Render()
+    {
+        _panel.Render();
+        _speech.Render();
+    }
+
+    public void AppendOverlay(PostFXOverlayCompositor overlay)
+    {
+        _panel.AppendOverlay(overlay);
+        _speech.AppendOverlay(overlay);
+    }
 
     private static bool InConversation()
     {
@@ -107,8 +125,15 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
     {
         _headYawPosition = head.position;
         _headYaw = Quaternion.Euler(0f, head.eulerAngles.y, 0f);
-        _posePosition = _headYawPosition + _headYaw * _headLocalLayout.offset;
-        _poseRotation = _headYaw * _headLocalLayout.rotation;
+        (_posePosition, _poseRotation) = PoseInFrontOf(head);
+    }
+
+    /// <summary>Where the dialogue window goes for this head pose.</summary>
+    private (Vector3 position, Quaternion rotation) PoseInFrontOf(Transform? head)
+    {
+        if (head == null) return (_posePosition, _poseRotation);
+        var yaw = Quaternion.Euler(0f, head.eulerAngles.y, 0f);
+        return (head.position + yaw * _headLocalLayout.offset, yaw * _headLocalLayout.rotation);
     }
 
     /// <summary>Runs one of the talked-to citizen's own actions, exactly as its mouse button does
