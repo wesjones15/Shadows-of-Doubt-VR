@@ -72,8 +72,8 @@ internal sealed class RTPanelPointer
 
     // Nested content canvases (e.g. a dialog box nested inside a bigger panel canvas) that also
     // need hit-testing — Unity's GraphicRaycaster only resolves Graphics belonging to its OWN
-    // canvas, never a nested child canvas's. Tried most-recently-added first, falling back to the
-    // root canvas bound via Bind().
+    // canvas, never a nested child canvas's. Each is tested alongside the root canvas bound via
+    // Bind(), and the hit drawn on top wins.
     private readonly List<Canvas> _overlayCanvases = new();
 
     private PointerEventData? _ped;
@@ -408,13 +408,30 @@ internal sealed class RTPanelPointer
     private GameObject? RaycastUI(PointerEventData ped, out RaycastResult result)
     {
         result = new RaycastResult();
-        for (int i = _overlayCanvases.Count - 1; i >= 0; i--)
+        bool found = false;
+        for (int i = _overlayCanvases.Count - 1; i >= -1; i--)
         {
-            var overlay = _overlayCanvases[i];
-            if (overlay == null) { _overlayCanvases.RemoveAt(i); continue; }
-            if (TryRaycastCanvas(overlay, ped, out result)) return result.gameObject;
+            var canvas = i >= 0 ? _overlayCanvases[i] : _canvas;
+            if (canvas == null)
+            {
+                if (i >= 0) _overlayCanvases.RemoveAt(i);
+                continue;
+            }
+            if (!TryRaycastCanvas(canvas, ped, out var hit)) continue;
+            if (!found || DrawnAbove(hit, result)) { result = hit; found = true; }
         }
-        return _canvas != null && TryRaycastCanvas(_canvas, ped, out result) ? result.gameObject : null;
+        return found ? result.gameObject : null;
+    }
+
+    /// <summary>Unity's EventSystem order for hits from different raycasters: sorting layer, then
+    /// sorting order, then draw depth (absolute within the root canvas, which every canvas one
+    /// pointer tests shares) — whatever is drawn on top gets the pointer.</summary>
+    private static bool DrawnAbove(RaycastResult a, RaycastResult b)
+    {
+        if (a.sortingLayer != b.sortingLayer)
+            return SortingLayer.GetLayerValueFromID(a.sortingLayer) > SortingLayer.GetLayerValueFromID(b.sortingLayer);
+        if (a.sortingOrder != b.sortingOrder) return a.sortingOrder > b.sortingOrder;
+        return a.depth > b.depth;
     }
 
     // Diagnostic: every canvas's top hit under a press, to check which one should have won.
