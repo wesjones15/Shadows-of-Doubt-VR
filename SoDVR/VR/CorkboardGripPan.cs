@@ -1,6 +1,7 @@
 using System;
 using BepInEx.Logging;
 using UnityEngine;
+using UnityEngine.EventSystems;
 
 namespace SoDVR.VR;
 
@@ -30,9 +31,15 @@ internal sealed class CorkboardGripPan : IRTGripPanTarget
     public void BeginPan(Ray ray)
     {
         _view = _corkboard.View;
+        // CasePanelController.corkBoard is the board's content (ContentContainer); the scroll area
+        // that pans it is further up, found the way Unity's input module picks a drag target.
         GameObject? board = null;
-        try { board = CasePanelController.Instance?.corkBoard?.gameObject; }
-        catch (Exception ex) { Log.LogWarning($"[CorkboardGripPan] corkBoard lookup: {ex.Message}"); }
+        try
+        {
+            var content = CasePanelController.Instance?.corkBoard?.gameObject;
+            if (content != null) board = ExecuteEvents.GetEventHandler<IDragHandler>(content);
+        }
+        catch (Exception ex) { Log.LogWarning($"[CorkboardGripPan] Board lookup: {ex.Message}"); }
         if (_view == null || board == null) { _view = null; return; }
         if (!_view.Pointer.BeginExternalDrag(board, ray)) _view = null;
         else Log.LogInfo($"[CorkboardGripPan] Panning '{board.name}'");
