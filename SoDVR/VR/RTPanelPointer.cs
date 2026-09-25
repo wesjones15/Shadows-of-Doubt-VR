@@ -537,7 +537,7 @@ internal sealed class RTPanelPointer
             if (c == null || !TryRaycastCanvas(c, _ped, out var r)) continue;
             sb.Append($" '{r.gameObject.name}'@'{c.gameObject.name}'(layer={r.sortingLayer} order={r.sortingOrder} depth={r.depth})");
         }
-        Log.LogInfo($"[{_logTag}] Press candidates:{(sb.Length > 0 ? sb.ToString() : " none")}");
+        Log.LogInfo($"[{_logTag}] Press candidates at pixel ({_ped.position.x:F0},{_ped.position.y:F0}):{(sb.Length > 0 ? sb.ToString() : " none")}");
     }
 
     private static bool TryRaycastCanvas(Canvas canvas, PointerEventData ped, out RaycastResult result)
