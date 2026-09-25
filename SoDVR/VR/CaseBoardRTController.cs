@@ -24,9 +24,9 @@ internal sealed class CaseBoardRTController
     private const float PanelWorldWidth = 2.0f;
     private const float CaseBoardWorldWidth = 2.5f;
 
-    // Content panels sit in front of the navbar (and the corkboard 0.15 m behind it), matching
-    // the legacy front-to-back order.
+    // Legacy front-to-back order: content panels in front of the navbar, the corkboard behind it.
     private const float ContentPanelDistanceInFront = 0.15f;
+    private const float CorkboardDistanceInFront = -0.15f;
 
     private readonly CaseBoardPanel _navbar;
     private readonly CaseBoardPanel[] _panels;
@@ -45,6 +45,8 @@ internal sealed class CaseBoardRTController
         _panels = new[]
         {
             _navbar,
+            new CaseBoardPanel("CaseCanvas", CaseBoardWorldWidth, CorkboardDistanceInFront, draggable: false, quadLayer, input, grip,
+                new CorkboardInput()),
             new CaseBoardPanel("BioDisplayCanvas", CaseBoardWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip),
             new CaseBoardPanel("LocationDetailsCanvas", CaseBoardWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip),
             new CaseBoardPanel("UpgradesDisplayCanvas", PanelWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip),

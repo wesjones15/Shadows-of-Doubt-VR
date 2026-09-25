@@ -21,6 +21,7 @@ internal static class RTOwnedCanvases
         "LocationDetailsCanvas",
         "UpgradesDisplayCanvas",
         "WindowCanvas",
+        "CaseCanvas",
     };
 
     public static bool IsOwned(string canvasName) => s_names.Contains(canvasName);
