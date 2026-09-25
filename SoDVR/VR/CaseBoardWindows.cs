@@ -126,7 +126,7 @@ internal sealed class CaseBoardWindows
             return;
         }
 
-        var view = _panel.CreateView(canvas.gameObject.name);
+        var view = _panel.CreateView(canvas.gameObject.name, extension: new WindowPointerExtension(canvas.GetComponent<InfoWindow>()));
         var w = new BoardWindow(canvas, rect, view, slot, _anchor);
         _slots[slot] = w;
         _windows[id] = w;
