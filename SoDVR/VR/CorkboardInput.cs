@@ -70,6 +70,7 @@ internal sealed class CorkboardInput : IRTPointerExtension
         {
             var target = local + _grabOffset;
             _pinRT.localPosition = new Vector3(target.x, target.y, _pinRT.localPosition.z);
+            UpdateConnectedStrings(_pinRT);
         }
     }
 
@@ -191,6 +192,19 @@ internal sealed class CorkboardInput : IRTPointerExtension
             if (pic != null) return pic;
         }
         return null;
+    }
+
+    /// <summary>The game only re-lays a pin's strings when a move is saved; this keeps them on the
+    /// pin while it is being dragged.</summary>
+    private static void UpdateConnectedStrings(Transform pin)
+    {
+        var strings = PinControllerOf(pin)?.connectedStrings;
+        if (strings == null) return;
+        for (int i = 0; i < strings.Count; i++)
+        {
+            try { strings[i]?.UpdatePosition(); }
+            catch (Exception ex) { Log.LogWarning($"[Corkboard] String update: {ex.Message}"); return; }
+        }
     }
 
     private static StringController? StringControllerOf(Transform t)
