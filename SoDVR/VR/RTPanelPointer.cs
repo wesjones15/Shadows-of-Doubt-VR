@@ -18,11 +18,16 @@ internal readonly struct RTPointerInput
     public readonly bool SecondaryClick;
     public readonly float Scroll;
     public readonly bool RightHand;
+    public readonly bool AltPress;
+    public readonly bool AltHeld;
+    public readonly bool AltRelease;
 
-    public RTPointerInput(Ray ray, bool press, bool held, bool release, bool secondaryClick, float scroll, bool rightHand)
+    public RTPointerInput(Ray ray, bool press, bool held, bool release, bool secondaryClick, float scroll, bool rightHand,
+        bool altPress, bool altHeld, bool altRelease)
     {
         Ray = ray; Press = press; Held = held; Release = release;
         SecondaryClick = secondaryClick; Scroll = scroll; RightHand = rightHand;
+        AltPress = altPress; AltHeld = altHeld; AltRelease = altRelease;
     }
 }
 
@@ -58,6 +63,7 @@ internal sealed class RTPanelPointer
 
     private readonly string _logTag;
     private readonly Func<GameObject, bool>? _onBeforeClick;
+    private readonly IRTPointerExtension? _extension;
 
     private Canvas? _canvas;
     private Collider? _quadCollider;
@@ -77,20 +83,27 @@ internal sealed class RTPanelPointer
     private Vector3 _pressWorldPoint;
     private bool _dragging;
     private bool _dragRejected;
+    private bool _extensionOwnsPress;
 
     /// <param name="onBeforeClick">Called with the clicked object before the generic click
     /// dispatch; return true to fully handle the click there (e.g. a Settings-button intercept).</param>
-    public RTPanelPointer(string logTag, Func<GameObject, bool>? onBeforeClick = null)
+    /// <param name="extension">Panel-specific handling for presses and the alt button that the
+    /// game's own handlers can't take from pointer events.</param>
+    public RTPanelPointer(string logTag, Func<GameObject, bool>? onBeforeClick = null, IRTPointerExtension? extension = null)
     {
         _logTag = logTag;
         _onBeforeClick = onBeforeClick;
+        _extension = extension;
     }
 
     /// <summary>Set by the owning panel every tick: whether this panel can currently take focus.</summary>
     public bool Enabled { get; set; }
 
     public string LogTag => _logTag;
-    public bool IsPressed => _pressed != null;
+
+    /// <summary>A press or alt-button gesture is in progress — RTPanelInput keeps this panel
+    /// captured until it ends.</summary>
+    public bool IsPressed => _pressed != null || (_extension?.AltGestureActive ?? false);
 
     /// <summary>(Re)binds the panel this pointer aims at. Call whenever the panel's canvas,
     /// collider or RenderTexture change.</summary>
@@ -166,9 +179,21 @@ internal sealed class RTPanelPointer
         if (hitGo != null && _ped.delta.sqrMagnitude > 0f)
             ExecuteEvents.ExecuteHierarchy(hitGo, _ped, ExecuteEvents.pointerMoveHandler);
 
-        if (input.Press) BeginPress(hitGo, hitResult, worldPoint);
-        if (input.Held && _pressed != null) ContinuePress(worldPoint);
-        if (input.Release && _pressed != null) EndPress(hitGo, ctx);
+        var sample = new RTPointerSample(screenPt, worldPoint, _canvas.worldCamera, _canvas);
+        if (input.Press) BeginPress(hitGo, hitResult, worldPoint, sample);
+        if (input.Held && _pressed != null)
+        {
+            if (_extensionOwnsPress) _extension!.ContinuePress(sample);
+            else ContinuePress(worldPoint);
+        }
+        if (input.Release && _pressed != null)
+        {
+            if (_extensionOwnsPress) { _extension!.EndPress(sample); ResetPress(); }
+            else EndPress(hitGo, ctx);
+        }
+
+        if (_extension != null && (input.AltPress || input.AltRelease || _extension.AltGestureActive))
+            _extension.OnAltButton(input.AltPress, input.AltHeld, input.AltRelease, hitGo, sample);
 
         if (input.SecondaryClick && hitGo != null) SecondaryClick(hitGo, hitResult);
         if (Mathf.Abs(input.Scroll) > 0f && hitGo != null)
@@ -187,7 +212,8 @@ internal sealed class RTPanelPointer
     public void Clear()
     {
         UpdateHover(null);
-        if (_pressed == null || _ped == null) { ResetPress(); return; }
+        _extension?.Cancel();
+        if (_pressed == null || _ped == null || _extensionOwnsPress) { ResetPress(); return; }
         try
         {
             ExecuteEvents.Execute(_ped.pointerPress ?? _pressed, _ped, ExecuteEvents.pointerUpHandler);
@@ -198,13 +224,22 @@ internal sealed class RTPanelPointer
         ResetPress();
     }
 
-    private void BeginPress(GameObject? hitGo, RaycastResult hitResult, Vector3 worldPoint)
+    private void BeginPress(GameObject? hitGo, RaycastResult hitResult, Vector3 worldPoint, in RTPointerSample sample)
     {
-        if (hitGo == null || _ped == null) return;
-        _pressed = hitGo;
-        _pressWorldPoint = worldPoint;
+        if (_ped == null) return;
         _dragging = false;
         _dragRejected = false;
+        _pressWorldPoint = worldPoint;
+
+        if (_extension != null && _extension.TryTakePress(hitGo, sample))
+        {
+            _pressed = hitGo ?? sample.Canvas.gameObject;
+            _extensionOwnsPress = true;
+            return;
+        }
+
+        if (hitGo == null) return;
+        _pressed = hitGo;
 
         _ped.button = PointerEventData.InputButton.Left;
         _ped.eligibleForClick = true;
@@ -406,6 +441,7 @@ internal sealed class RTPanelPointer
         _pressed = null;
         _dragging = false;
         _dragRejected = false;
+        _extensionOwnsPress = false;
         if (_ped != null)
         {
             _ped.pointerPress = null!;

@@ -31,6 +31,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     private readonly bool _draggable;
     private readonly RTPanelGrip _grip;
     private readonly RTCanvasPanel _panel;
+    private readonly IRTPointerExtension? _pointerExtension;
 
     private RTPanelView? _view;
     private int _discoveryCooldown;
@@ -46,9 +47,12 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     /// <param name="screenWorldWidth">World width of the full screen width — the legacy category
     /// width, so the panel reads at the size it always has.</param>
     /// <param name="distanceInFrontOfAnchor">Default placement, towards the player from the anchor.</param>
+    /// <param name="pointerExtension">Panel-specific input handling (the corkboard's pins).</param>
     public CaseBoardPanel(string canvasName, float screenWorldWidth, float distanceInFrontOfAnchor,
-        bool draggable, int quadLayer, RTPanelInput input, RTPanelGrip grip)
+        bool draggable, int quadLayer, RTPanelInput input, RTPanelGrip grip,
+        IRTPointerExtension? pointerExtension = null)
     {
+        _pointerExtension = pointerExtension;
         _canvasName = canvasName;
         _screenWorldWidth = screenWorldWidth;
         _distanceInFrontOfAnchor = distanceInFrontOfAnchor;
@@ -167,7 +171,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
             try
             {
                 _panel.Attach(canvas, _screenWorldWidth);
-                _view = _panel.CreateView("Content");
+                _view = _panel.CreateView("Content", extension: _pointerExtension);
                 _wasShowing = false;
                 _hasContent = false;
                 if (_draggable) _grip.Register(this);

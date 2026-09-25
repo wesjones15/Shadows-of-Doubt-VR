@@ -32,6 +32,7 @@ internal sealed class RTPanelInput
     private bool _prevRightTrigger;
     private bool _prevLeftTrigger;
     private bool _prevA;
+    private bool _prevB;
 
     private RTPanelPointer? _focus;
     private RTPanelPointer? _captured;
@@ -69,14 +70,18 @@ internal sealed class RTPanelInput
         OpenXRManager.GetTriggerState(true, out bool rightTrigger);
         OpenXRManager.GetTriggerState(false, out bool leftTrigger);
         OpenXRManager.GetButtonAState(out bool aNow);
+        OpenXRManager.GetButtonBState(out bool bNow);
         bool rightEdge = rightTrigger && !_prevRightTrigger;
         bool leftEdge = leftTrigger && !_prevLeftTrigger;
         bool rightRelease = !rightTrigger && _prevRightTrigger;
         bool leftRelease = !leftTrigger && _prevLeftTrigger;
         bool aEdge = aNow && !_prevA;
+        bool bEdge = bNow && !_prevB;
+        bool bRelease = !bNow && _prevB;
         _prevRightTrigger = rightTrigger;
         _prevLeftTrigger = leftTrigger;
         _prevA = aNow;
+        _prevB = bNow;
 
         if (!AnyPointerEnabled() && _captured == null) { DropFocus(); return; }
 
@@ -100,7 +105,10 @@ internal sealed class RTPanelInput
             release: _useRightHand ? rightRelease : leftRelease,
             secondaryClick: _useRightHand && aEdge,
             scroll: ReadScroll(),
-            rightHand: _useRightHand);
+            rightHand: _useRightHand,
+            altPress: _useRightHand && bEdge,
+            altHeld: _useRightHand && bNow,
+            altRelease: _useRightHand && bRelease);
 
         if (_captured != null)
         {

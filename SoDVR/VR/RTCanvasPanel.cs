@@ -104,10 +104,10 @@ internal sealed class RTCanvasPanel
                     $"scaler={(scaler == null ? "none" : $"{scaler.uiScaleMode} enabled={scaler.enabled}")} layer={canvas.gameObject.layer}");
     }
 
-    public RTPanelView CreateView(string name, Func<GameObject, bool>? onBeforeClick = null)
+    public RTPanelView CreateView(string name, Func<GameObject, bool>? onBeforeClick = null, IRTPointerExtension? extension = null)
     {
         if (Canvas == null || Texture == null) throw new InvalidOperationException($"[{_logTag}] CreateView before Attach");
-        var view = new RTPanelView($"{_logTag}/{name}", _quadLayer, Canvas, Texture, MetersPerPixel, onBeforeClick);
+        var view = new RTPanelView($"{_logTag}/{name}", _quadLayer, Canvas, Texture, MetersPerPixel, onBeforeClick, extension);
         _input.Register(view.Pointer);
         _views.Add(view);
         return view;
@@ -314,13 +314,13 @@ internal sealed class RTPanelView
     private readonly float _metersPerPixel;
 
     public RTPanelView(string logTag, int layer, Canvas canvas, RenderTexture texture, float metersPerPixel,
-        Func<GameObject, bool>? onBeforeClick)
+        Func<GameObject, bool>? onBeforeClick, IRTPointerExtension? extension)
     {
         _texture = texture;
         _metersPerPixel = metersPerPixel;
         Collider collider;
         (_quad, collider, _material, _mesh) = CameraRig.CreateRTPanelViewQuad(logTag.Replace('/', '_'), layer, texture);
-        Pointer = new RTPanelPointer(logTag, onBeforeClick);
+        Pointer = new RTPanelPointer(logTag, onBeforeClick, extension);
         Pointer.Bind(canvas, collider, texture);
         SetPixelRect(new Rect(0f, 0f, texture.width, texture.height));
     }
