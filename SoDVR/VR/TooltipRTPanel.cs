@@ -91,7 +91,7 @@ internal sealed class TooltipRTPanel
 
         foreach (var e in _elements.Values)
         {
-            BringOnTexture(e);
+            PrepareForRender(e);
             var rect = _panel.ContentPixelRect(e.Root, ContentMarginPixels, out int graphicCount);
             bool visible = canvasShowing && e.Root.gameObject.activeInHierarchy && graphicCount > 0;
             if (visible)
@@ -120,8 +120,32 @@ internal sealed class TooltipRTPanel
     public void Render()
     {
         if (!_panel.IsAttached) return;
-        foreach (var e in _elements.Values) BringOnTexture(e);
+        foreach (var e in _elements.Values) PrepareForRender(e);
         _panel.Render();
+    }
+
+    private void PrepareForRender(Element e)
+    {
+        RestoreDepthScale(e);
+        BringOnTexture(e);
+    }
+
+    /// <summary>The game scales some elements with z = 0 (the pin context menu), harmless on its
+    /// overlay canvas. Under our perspective projector, TextMeshPro's SDF shader corrects each glyph
+    /// by its surface normal, which a zero z-scale flattens to nothing — the glyphs draw as solid
+    /// blocks. z has no other effect on a flat canvas, so it's put back to 1.</summary>
+    private static void RestoreDepthScale(Element e)
+    {
+        if (e.Root == null) return;
+        var s = e.Root.localScale;
+        if (s.z == 0f) e.Root.localScale = new Vector3(s.x, s.y, 1f);
+        if (e.CheckedDepthScale) return;
+        e.CheckedDepthScale = true;
+        int flatTexts = 0;
+        foreach (var text in e.Root.GetComponentsInChildren<TMPro.TMP_Text>(true))
+            if (text != null && text.transform.lossyScale.z == 0f) flatTexts++;
+        Log.LogInfo($"[TooltipRTPanel] {e.Kind} '{e.Root.gameObject.name}' scale={s}{(s.z == 0f ? " → z restored to 1" : "")}; " +
+                    $"texts still flat in z: {flatTexts}");
     }
 
     /// <summary>Menus and tooltips the game draws off this texture are moved onto it. One positioned
@@ -410,6 +434,7 @@ internal sealed class TooltipRTPanel
         public bool IsContextMenu;
         public bool EverVisible;
         public bool LoggedMove;
+        public bool CheckedDepthScale;
         public int InvisibleFrames;
         public int OverlayRefreshCountdown;
 
