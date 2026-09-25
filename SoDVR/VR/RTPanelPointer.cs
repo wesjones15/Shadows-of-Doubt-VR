@@ -474,15 +474,53 @@ internal sealed class RTPanelPointer
         Log.LogInfo($"[{_logTag}] Press candidates at pixel ({_ped.position.x:F0},{_ped.position.y:F0}):{(sb.Length > 0 ? sb.ToString() : " none")}");
     }
 
+    private const float NearMissPixels = 40f;
+
+    private static Canvas? NearestCanvas(Transform t)
+    {
+        for (var tr = t; tr != null; tr = tr.parent)
+        {
+            var c = tr.GetComponent<Canvas>();
+            if (c != null) return c;
+        }
+        return null;
+    }
+
+    private static Rect ScreenRectOf(RectTransform rt, Camera? cam)
+    {
+        var r = rt.rect;
+        Vector2 a = RectTransformUtility.WorldToScreenPoint(cam, rt.TransformPoint(new Vector3(r.xMin, r.yMin, 0f)));
+        Vector2 b = RectTransformUtility.WorldToScreenPoint(cam, rt.TransformPoint(new Vector3(r.xMax, r.yMax, 0f)));
+        return Rect.MinMaxRect(Mathf.Min(a.x, b.x), Mathf.Min(a.y, b.y), Mathf.Max(a.x, b.x), Mathf.Max(a.y, b.y));
+    }
+
     // Diagnostic: raycast targets of this canvas whose rect contains the point but whose own
     // raycast filter (an Image's alpha hit test, say) turned the hit down.
     private static void AppendRejectedUnderPoint(System.Text.StringBuilder sb, Canvas canvas, Vector2 point)
     {
         var cam = canvas.worldCamera;
+        var gr = canvas.GetComponent<GraphicRaycaster>();
+        sb.Append($" [{canvas.gameObject.name}: worldCamera='{cam?.name}' raycasterCamera='{gr?.eventCamera?.name}']");
         foreach (var g in canvas.GetComponentsInChildren<Graphic>(false))
         {
-            if (g == null || !g.enabled || !g.raycastTarget || g.canvas != canvas) continue;
-            if (!RectTransformUtility.RectangleContainsScreenPoint(g.rectTransform, point, cam)) continue;
+            // Graphics are grouped by the canvas they sit under in the hierarchy (a nested canvas's
+            // own graphics are covered on its own pass), then checked against the canvas the
+            // graphic is registered to: a raycaster only ever returns graphics registered to it.
+            if (g == null || !g.enabled || !g.raycastTarget || NearestCanvas(g.transform) != canvas) continue;
+            if (g.canvas != canvas)
+            {
+                if (RectTransformUtility.RectangleContainsScreenPoint(g.rectTransform, point, cam))
+                    sb.Append($" [under the point but registered to canvas '{g.canvas?.gameObject.name}', not '{canvas.gameObject.name}': '{g.gameObject.name}']");
+                continue;
+            }
+            if (!RectTransformUtility.RectangleContainsScreenPoint(g.rectTransform, point, cam))
+            {
+                var r = ScreenRectOf(g.rectTransform, cam);
+                float dx = Mathf.Max(r.xMin - point.x, 0f, point.x - r.xMax), dy = Mathf.Max(r.yMin - point.y, 0f, point.y - r.yMax);
+                if (dx * dx + dy * dy <= NearMissPixels * NearMissPixels && r.width < 200f)
+                    sb.Append($" [near miss: '{g.gameObject.name}'@'{canvas.gameObject.name}' screenRect=({r.xMin:F0},{r.yMin:F0},{r.width:F0},{r.height:F0})]");
+                continue;
+            }
             if (cam != null && Vector3.Dot(cam.transform.forward, g.transform.forward) <= 0f)
                 sb.Append($" [skipped as facing away from the camera: '{g.gameObject.name}'@'{canvas.gameObject.name}']");
             else if (!g.Raycast(point, cam))
