@@ -306,7 +306,11 @@ internal sealed class CaseBoardWindows
             return;
         }
         image.raycastPadding = new Vector4(-pad, -pad, -pad, -pad);
-        Log.LogInfo($"[CaseBoardWindows] '{info.gameObject.name}' close button hit area grown to {width:F0} px square (as wide as '{widestName}')");
+        // Same (left, bottom, right, top) order and sign as raycastPadding, so the hover corners
+        // frame exactly what the laser can hit.
+        var buttonController = close.GetComponent<ButtonController>();
+        if (buttonController != null) buttonController.additionalHighlightRectModifier = image.raycastPadding;
+        Log.LogInfo($"[CaseBoardWindows] '{info.gameObject.name}' close button hit area and highlight grown to {width:F0} px square (as wide as '{widestName}')");
     }
 
     private static Vector2 LocalXSpan(Transform space, RectTransform rt)
