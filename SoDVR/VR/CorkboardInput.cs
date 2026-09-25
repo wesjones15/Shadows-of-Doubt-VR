@@ -8,8 +8,7 @@ namespace SoDVR.VR;
 
 /// <summary>
 /// The corkboard's pins and strings, driven from the RT pointer. Everything else on CaseCanvas —
-/// panning the board, its buttons, zoom, and A's right-click (the game's own ContextMenuController)
-/// — stays on RTPanelPointer's ordinary pointer-event path.
+/// panning the board, its buttons, zoom — stays on RTPanelPointer's ordinary pointer-event path.
 ///
 /// Pins don't: the game's pin drag follows the OS mouse and its click is guarded against
 /// simulated input (what the legacy case-board code found), so a press on a pin is taken over
@@ -17,6 +16,7 @@ namespace SoDVR.VR;
 /// a move, <c>PinnedItemController.OpenEvidence</c> for a click, <c>CasePanelController</c>'s
 /// custom-string-link calls for B — but with exact coordinates: the canvas's own screen position
 /// and event camera, so there is no visual-offset correction and no nearest-pin search.
+/// A on a pin or string opens its context menu through its own controller, for the same reason.
 /// </summary>
 internal sealed class CorkboardInput : IRTPointerExtension
 {
@@ -105,6 +105,28 @@ internal sealed class CorkboardInput : IRTPointerExtension
         }
     }
 
+    /// <summary>A on a pin or a string opens its context menu. Their menus aren't on the objects a
+    /// right-click lands on (the pin's photo takes the click itself), so they're opened through
+    /// the pin's or string's own controller.</summary>
+    public bool TryTakeSecondaryClick(GameObject? hitGo, in RTPointerSample sample)
+    {
+        ContextMenuController? menu = null;
+        string owner = "";
+        var pin = hitGo != null ? PinControllerOf(hitGo.transform) : null;
+        if (pin == null && TryFindPin(null, sample, out var pinRT, out _)) pin = PinControllerOf(pinRT);
+        if (pin != null) { menu = pin.contextMenu; owner = $"pin '{pin.name}'"; }
+        else if (hitGo != null && StringControllerOf(hitGo.transform) is { } str) { menu = str.contextMenu; owner = $"string '{str.name}'"; }
+        if (menu == null) return false;
+
+        try
+        {
+            menu.OpenMenu();
+            Log.LogInfo($"[Corkboard] Context menu opened for {owner}");
+        }
+        catch (Exception ex) { Log.LogWarning($"[Corkboard] Context menu for {owner}: {ex.Message}"); }
+        return true;
+    }
+
     public void Cancel()
     {
         if (_pinRT != null && _dragging) _pinRT.localPosition = _pinStartLocal;
@@ -167,6 +189,16 @@ internal sealed class CorkboardInput : IRTPointerExtension
         {
             var pic = tr.GetComponent<PinnedItemController>();
             if (pic != null) return pic;
+        }
+        return null;
+    }
+
+    private static StringController? StringControllerOf(Transform t)
+    {
+        for (var tr = t; tr != null; tr = tr.parent)
+        {
+            var sc = tr.GetComponent<StringController>();
+            if (sc != null) return sc;
         }
         return null;
     }

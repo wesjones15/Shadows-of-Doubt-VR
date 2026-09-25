@@ -195,7 +195,8 @@ internal sealed class RTPanelPointer
         if (_extension != null && (input.AltPress || input.AltRelease || _extension.AltGestureActive))
             _extension.OnAltButton(input.AltPress, input.AltHeld, input.AltRelease, hitGo, sample);
 
-        if (input.SecondaryClick && hitGo != null) SecondaryClick(hitGo, hitResult);
+        if (input.SecondaryClick && !(_extension?.TryTakeSecondaryClick(hitGo, sample) ?? false) && hitGo != null)
+            SecondaryClick(hitGo, hitResult);
         if (Mathf.Abs(input.Scroll) > 0f && hitGo != null)
         {
             _ped.scrollDelta = new Vector2(0f, input.Scroll);
@@ -352,13 +353,36 @@ internal sealed class RTPanelPointer
         };
         try
         {
+            var menuBefore = ContextMenuController.activeMenu;
             var downHandler = ExecuteEvents.ExecuteHierarchy(hitGo, ped, ExecuteEvents.pointerDownHandler);
             ped.pointerPress = downHandler ?? hitGo;
             ExecuteEvents.Execute(ped.pointerPress, ped, ExecuteEvents.pointerUpHandler);
             var clickHandler = ExecuteEvents.ExecuteHierarchy(hitGo, ped, ExecuteEvents.pointerClickHandler);
             Log.LogInfo($"[{_logTag}] Secondary click: '{hitGo.name}' handledBy='{clickHandler?.name ?? "none"}'");
+            if (clickHandler != null && ContextMenuController.activeMenu == menuBefore) OpenContextMenuOf(hitGo, clickHandler);
         }
         catch (Exception ex) { Log.LogWarning($"[{_logTag}] Secondary click: {ex.Message}"); }
+    }
+
+    /// <summary>The game's click handlers ignore clicks that don't come from the mouse (its
+    /// mouse-input-mode guard), so a right-click reaches a ContextMenuController without opening
+    /// it. Opens the right-click menu belonging to what took the click — on the handler itself or
+    /// between it and the hit, never one further up the hierarchy.</summary>
+    private void OpenContextMenuOf(GameObject hitGo, GameObject clickHandler)
+    {
+        for (var t = hitGo.transform; t != null; t = t.parent)
+        {
+            var menu = t.GetComponent<ContextMenuController>();
+            if (menu != null && menu.enabled && !menu.useLeftButton)
+            {
+                menu.OpenMenu();
+                bool? mouseMode = null;
+                try { mouseMode = InputController.Instance?.mouseInputMode; } catch { }
+                Log.LogInfo($"[{_logTag}] Context menu opened directly on '{t.gameObject.name}' (the right-click didn't open it; mouseInputMode={mouseMode})");
+                return;
+            }
+            if (t.gameObject == clickHandler) return;
+        }
     }
 
     /// <summary>Unity's own hover semantics: exit is sent up the old hierarchy and enter up the new

@@ -33,6 +33,10 @@ internal interface IRTPointerExtension
     void ContinuePress(in RTPointerSample sample);
     void EndPress(in RTPointerSample sample);
 
+    /// <summary>A (secondary click) over <paramref name="hitGo"/>. Return true if handled here — the
+    /// right-button click is then not sent.</summary>
+    bool TryTakeSecondaryClick(GameObject? hitGo, in RTPointerSample sample);
+
     /// <summary>The panel's alternate button (B) this frame, with whatever is under the pointer.</summary>
     void OnAltButton(bool press, bool held, bool release, GameObject? hitGo, in RTPointerSample sample);
 
