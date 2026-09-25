@@ -8,10 +8,10 @@ namespace SoDVR.VR;
 /// <summary>
 /// DialogCanvas (talking to a citizen, or on the phone) on the RT pipeline: one view tight to the
 /// dialogue window, centred at eye level at arm's length when the conversation starts (the window
-/// itself — the game draws it near the bottom of its screen). Trigger on an option says it (the game's own click
-/// handler); stick moves the selection, which is how the game pages through more options than fit;
-/// B ends the conversation from anywhere — the game's own "End Conversation" action, which it binds
-/// to right-click.
+/// itself — the game draws it near the bottom of its screen). Input is the flat game's: an option
+/// is selected (pointing at it, or the right stick from anywhere, which also pages past the four
+/// shown) and said with the citizen's own "Say" action (trigger); B runs "End Conversation" from
+/// anywhere. The game binds those to left- and right-click.
 /// </summary>
 internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
 {
@@ -20,14 +20,16 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
     private const string CanvasName = "DialogCanvas";
     private const string WindowPath = "Dialog";
     private const string EndConversationAction = "Return";
+    private const string SayAction = "Say";
     private const int DiscoveryRetryFrames = 90;
     private const int ContentRefreshFrames = 6;
     private const float ContentMarginPixels = 8f;
     private const float GripMargin = 1.3f;
     // Full screen width in the world; the dialogue window is a little over half of it.
     private const float ScreenWorldWidth = 1.2f;
-    // Stick deflection accumulates in RTPanelInput's scroll units; one option step per unit.
-    private const float ScrollPerOption = 1f;
+    private const float StickThreshold = 0.5f;
+    private const float StickFirstRepeatSeconds = 0.45f;
+    private const float StickRepeatSeconds = 0.2f;
 
     private static readonly Vector3 DefaultHeadOffset = new(0f, 0f, 0.75f);
     private static readonly InteractionKey[] ActionKeys =
@@ -41,7 +43,9 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
     private int _refreshCountdown;
     private bool _wasOpen;
     private bool _prevB;
-    private float _scrollAccumulated;
+    private int _stickDirection;
+    private float _stickRepeatAt;
+    private int _pressedOption = -1;
 
     private Vector3 _posePosition;
     private Quaternion _poseRotation = Quaternion.identity;
@@ -78,15 +82,16 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
             var rect = _panel.ContentPixelRect(_panel.Canvas!.transform.Find(WindowPath), ContentMarginPixels, out int count);
             if (count > 0) _view!.SetPixelRect(rect);
         }
-        if (!open) _scrollAccumulated = 0f;
         _wasOpen = open;
 
         _view!.Visible = open;
         if (open) _view.SetPose(_posePosition, _poseRotation);
 
         OpenXRManager.GetButtonBState(out bool b);
-        if (open && b && !_prevB) EndConversation();
+        if (open && b && !_prevB) RunCitizenAction(EndConversationAction, "B");
         _prevB = b;
+        if (open) StepWithStick();
+        else _stickDirection = 0;
     }
 
     public void Render() => _panel.Render();
@@ -106,14 +111,15 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
         _poseRotation = _headYaw * _headLocalLayout.rotation;
     }
 
-    /// <summary>Runs the talked-to citizen's own "End Conversation" action, exactly as right-click does.</summary>
-    private static void EndConversation()
+    /// <summary>Runs one of the talked-to citizen's own actions, exactly as its mouse button does
+    /// ("Say" is left-click on the selected option, "End Conversation" right-click).</summary>
+    private static void RunCitizenAction(string actionName, string trigger)
     {
         try
         {
             var talkingTo = InteractionController.Instance?.talkingTo;
             var player = Player.Instance;
-            if (talkingTo == null || player == null) { Log.LogWarning("[DialogueRTPanel] End: no conversation partner"); return; }
+            if (talkingTo == null || player == null) { Log.LogWarning($"[DialogueRTPanel] {actionName}: no conversation partner"); return; }
 
             var actions = talkingTo.currentActions;
             string available = "";
@@ -122,42 +128,83 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
                 if (actions == null || !actions.TryGetValue(key, out var current) || current == null) continue;
                 var action = current.currentAction?.action;
                 available += $" {key}={action?.name ?? "none"}(enabled={current.enabled})";
-                if (action == null || action.name != EndConversationAction || !current.enabled) continue;
+                if (action == null || action.name != actionName || !current.enabled) continue;
                 talkingTo.OnInteraction(key, player);
-                Log.LogInfo($"[DialogueRTPanel] End conversation (B) via {key}");
+                Log.LogInfo($"[DialogueRTPanel] {actionName} ({trigger}) via {key}");
                 return;
             }
-            Log.LogWarning($"[DialogueRTPanel] End: no enabled '{EndConversationAction}' action; available:{available}");
+            Log.LogWarning($"[DialogueRTPanel] {actionName}: no enabled action by that name; available:{available}");
         }
-        catch (Exception ex) { Log.LogWarning($"[DialogueRTPanel] End: {ex.Message}"); }
+        catch (Exception ex) { Log.LogWarning($"[DialogueRTPanel] {actionName}: {ex.Message}"); }
     }
 
-    // ── IRTPointerExtension: only the stick is ours; trigger and A stay on pointer events ──────
+    /// <summary>Right stick up/down steps the selection from anywhere, repeating while held.</summary>
+    private void StepWithStick()
+    {
+        OpenXRManager.GetThumbstickState(true, out float _, out float y);
+        // Stick up moves up the list.
+        int direction = y > StickThreshold ? -1 : y < -StickThreshold ? 1 : 0;
+        if (direction == 0) { _stickDirection = 0; return; }
+        bool repeating = direction == _stickDirection;
+        if (repeating && Time.unscaledTime < _stickRepeatAt) return;
+        _stickRepeatAt = Time.unscaledTime + (repeating ? StickRepeatSeconds : StickFirstRepeatSeconds);
+        _stickDirection = direction;
 
-    public bool TryTakeScroll(float delta, GameObject? hitGo, in RTPointerSample sample)
+        var ic = InteractionController.Instance;
+        int count = ic?.dialogOptions?.Count ?? 0;
+        if (count == 0) return;
+        int selection = Mathf.Clamp(ic!.dialogSelection + direction, 0, count - 1);
+        if (selection != ic.dialogSelection) ic.SetDialogSelection(selection);
+    }
+
+    /// <summary>Index of the option under the pointer, or -1. The game turns raycasts off on the
+    /// whole canvas while talking (options are chosen by selection, not clicked), so the hit test
+    /// is ours.</summary>
+    private static int OptionAt(in RTPointerSample sample)
+    {
+        var options = InteractionController.Instance?.dialogOptions;
+        if (options == null) return -1;
+        for (int i = 0; i < options.Count; i++)
+        {
+            var option = options[i];
+            if (option == null || !option.gameObject.activeInHierarchy) continue;
+            var rt = option.GetComponent<RectTransform>();
+            if (rt != null && RectTransformUtility.RectangleContainsScreenPoint(rt, sample.ScreenPosition, sample.EventCamera))
+                return i;
+        }
+        return -1;
+    }
+
+    // ── IRTPointerExtension: pointing selects, trigger says — what the wheel and left-click do ──
+
+    public void OnPointer(GameObject? hitGo, in RTPointerSample sample)
     {
         var ic = InteractionController.Instance;
-        if (ic == null) return true;
-        _scrollAccumulated += delta;
-        int steps = (int)(_scrollAccumulated / ScrollPerOption);
-        if (steps == 0) return true;
-        _scrollAccumulated -= steps * ScrollPerOption;
-
-        int count = ic.dialogOptions?.Count ?? 0;
-        if (count == 0) return true;
-        // Stick up (positive) moves up the list.
-        int selection = Mathf.Clamp(ic.dialogSelection - steps, 0, count - 1);
-        if (selection != ic.dialogSelection) ic.SetDialogSelection(selection);
-        return true;
+        int option = OptionAt(sample);
+        if (ic != null && option >= 0 && option != ic.dialogSelection) ic.SetDialogSelection(option);
     }
 
-    public bool TryTakePress(GameObject? hitGo, in RTPointerSample sample) => false;
+    public bool TryTakePress(GameObject? hitGo, in RTPointerSample sample)
+    {
+        _pressedOption = OptionAt(sample);
+        return _pressedOption >= 0;
+    }
+
     public void ContinuePress(in RTPointerSample sample) { }
-    public void EndPress(in RTPointerSample sample) { }
+
+    public void EndPress(in RTPointerSample sample)
+    {
+        if (_pressedOption >= 0 && OptionAt(sample) == _pressedOption) RunCitizenAction(SayAction, "trigger");
+        _pressedOption = -1;
+    }
+
+    // The stick is read directly in Tick, whichever hand has the laser.
+    public bool TryTakeScroll(float delta, GameObject? hitGo, in RTPointerSample sample) => true;
+
     public bool TryTakeSecondaryClick(GameObject? hitGo, in RTPointerSample sample) => false;
     public void OnAltButton(bool press, bool held, bool release, GameObject? hitGo, in RTPointerSample sample) { }
     public bool AltGestureActive => false;
-    public void Cancel() => _scrollAccumulated = 0f;
+    public void Cancel() => _pressedOption = -1;
 
     // ── IRTGripTarget ─────────────────────────────────────────────────────────────────────
 

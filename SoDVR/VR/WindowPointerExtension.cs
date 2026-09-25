@@ -99,6 +99,8 @@ internal sealed class WindowPointerExtension : IRTPointerExtension
 
     public bool TryTakeScroll(float delta, GameObject? hitGo, in RTPointerSample sample) => false;
 
+    public void OnPointer(GameObject? hitGo, in RTPointerSample sample) { }
+
     public void OnAltButton(bool press, bool held, bool release, GameObject? hitGo, in RTPointerSample sample) { }
 
     public void Cancel() => _pressedPinButton = null;

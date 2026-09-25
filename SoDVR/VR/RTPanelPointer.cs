@@ -175,6 +175,7 @@ internal sealed class RTPanelPointer
             ExecuteEvents.ExecuteHierarchy(hitGo, _ped, ExecuteEvents.pointerMoveHandler);
 
         var sample = new RTPointerSample(screenPt, worldPoint, _canvas.worldCamera, _canvas);
+        _extension?.OnPointer(hitGo, sample);
         if (input.Press) BeginPress(hitGo, hitResult, worldPoint, sample);
         if (input.Held && _pressed != null)
         {

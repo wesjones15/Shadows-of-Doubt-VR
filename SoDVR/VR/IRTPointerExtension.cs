@@ -27,6 +27,9 @@ internal readonly struct RTPointerSample
 /// </summary>
 internal interface IRTPointerExtension
 {
+    /// <summary>Every frame the pointer is on the panel, before any press or scroll is delivered.</summary>
+    void OnPointer(GameObject? hitGo, in RTPointerSample sample);
+
     /// <summary>Trigger pressed over <paramref name="hitGo"/> (null over empty panel). Return true
     /// to own the whole press — no pointer events are sent for it then.</summary>
     bool TryTakePress(GameObject? hitGo, in RTPointerSample sample);

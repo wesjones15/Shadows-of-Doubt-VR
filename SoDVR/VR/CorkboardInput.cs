@@ -261,6 +261,8 @@ internal sealed class CorkboardInput : IRTPointerExtension
 
     public bool TryTakeScroll(float delta, GameObject? hitGo, in RTPointerSample sample) => false;
 
+    public void OnPointer(GameObject? hitGo, in RTPointerSample sample) { }
+
     public void Cancel()
     {
         if (_pinRT != null && _dragging) _pinRT.localPosition = _pinStartLocal;
