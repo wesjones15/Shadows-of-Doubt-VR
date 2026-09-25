@@ -44,6 +44,7 @@ internal sealed class PostFXOverlayCompositor
     private static readonly Color LaserColor = new(0f, 1f, 1f, 1f);
 
     private readonly List<OverlayDraw> _panels = new();
+    private readonly List<OverlayDraw> _topPanels = new();
     private readonly List<Matrix4x4> _lasers = new();
     private CommandBuffer? _cb;
     private Mesh? _laserMesh;
@@ -53,11 +54,16 @@ internal sealed class PostFXOverlayCompositor
     public void BeginFrame()
     {
         _panels.Clear();
+        _topPanels.Clear();
         _lasers.Clear();
     }
 
-    public void AddPanel(Mesh mesh, Matrix4x4 localToWorld, Material material) =>
-        _panels.Add(new OverlayDraw(mesh, localToWorld, material));
+    /// <param name="onTop">Drawn after every other panel, as the flat game draws its topmost canvas
+    /// (tooltips, menus). Sorting by centre distance alone can't be trusted for these: a small
+    /// tooltip in front of a large panel's edge is often farther from the eye than that panel's
+    /// centre.</param>
+    public void AddPanel(Mesh mesh, Matrix4x4 localToWorld, Material material, bool onTop = false) =>
+        (onTop ? _topPanels : _panels).Add(new OverlayDraw(mesh, localToWorld, material));
 
     public void AddLaser(Vector3 origin, Vector3 end)
     {
@@ -69,7 +75,7 @@ internal sealed class PostFXOverlayCompositor
 
     public void Composite(Camera eye, RenderTexture target)
     {
-        if (_panels.Count == 0 && _lasers.Count == 0) return;
+        if (_panels.Count == 0 && _topPanels.Count == 0 && _lasers.Count == 0) return;
 
         _cb ??= new CommandBuffer { name = "SoDVR_PostFXOverlay" };
         _cb.Clear();
@@ -79,7 +85,10 @@ internal sealed class PostFXOverlayCompositor
 
         _sortEyePos = eye.transform.position;
         _panels.Sort(FarthestFirst);
+        _topPanels.Sort(FarthestFirst);
         foreach (var draw in _panels)
+            _cb.DrawMesh(draw.Mesh, draw.LocalToWorld, draw.Material, 0, 0);
+        foreach (var draw in _topPanels)
             _cb.DrawMesh(draw.Mesh, draw.LocalToWorld, draw.Material, 0, 0);
 
         if (_lasers.Count > 0 && EnsureLaserResources())

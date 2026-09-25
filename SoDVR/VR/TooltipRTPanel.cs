@@ -140,7 +140,7 @@ internal sealed class TooltipRTPanel
         e.LoggedRemap = true;
     }
 
-    public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay);
+    public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay, onTop: true);
 
     private void TrackElements(Transform canvas)
     {

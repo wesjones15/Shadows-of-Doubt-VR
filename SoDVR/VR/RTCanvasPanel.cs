@@ -148,9 +148,10 @@ internal sealed class RTCanvasPanel
         catch (Exception ex) { Log.LogWarning($"[{_logTag}] Render: {ex.Message}"); }
     }
 
-    public void AppendOverlay(PostFXOverlayCompositor overlay)
+    /// <param name="onTop">See <see cref="PostFXOverlayCompositor.AddPanel"/>.</param>
+    public void AppendOverlay(PostFXOverlayCompositor overlay, bool onTop = false)
     {
-        foreach (var view in _views) view.AppendOverlay(overlay);
+        foreach (var view in _views) view.AppendOverlay(overlay, onTop);
     }
 
     /// <summary>A RectTransform's on-screen rect within this panel's texture, in RT pixels
@@ -440,9 +441,9 @@ internal sealed class RTPanelView
         return Mathf.Abs(local.x) <= half && Mathf.Abs(local.y) <= half;
     }
 
-    public void AppendOverlay(PostFXOverlayCompositor overlay)
+    public void AppendOverlay(PostFXOverlayCompositor overlay, bool onTop)
     {
-        if (Visible) overlay.AddPanel(_mesh, _quad.transform.localToWorldMatrix, _material);
+        if (Visible) overlay.AddPanel(_mesh, _quad.transform.localToWorldMatrix, _material, onTop);
     }
 
     public void Destroy()
