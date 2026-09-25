@@ -110,17 +110,12 @@ public class VRCamera : MonoBehaviour
     // Tracks the last-known active state of each managed canvas (by instance ID).
     // When a canvas transitions false→true AND its name is in s_recentreOnActivate,
     // we clear it from _positionedCanvases so it gets repositioned at the current head.
-    // HUD canvases (ActionPanelCanvas, CaseCanvas, …) are NOT in the whitelist and are
+    // HUD canvases (StatusDisplayCanvas, …) are NOT in the whitelist and are
     // never auto-repositioned, regardless of how long they were inactive.
     private readonly Dictionary<int,bool> _canvasWasActive = new();
     // Nested canvas IDs: these live inside a parent canvas and must not be independently
     // positioned (their transform is driven by the parent canvas hierarchy).
     private readonly HashSet<int>         _nestedCanvasIds = new();
-    // CaseCanvas content canvases: Content, Strings, Lines are nested under GameCanvas but
-    // must follow CaseCanvas's transform (they hold the actual corkboard elements).
-    private readonly HashSet<int>         _caseContentIds = new();
-    private Canvas?                       _casePanelCanvas;
-    private int                           _casePanelId = -1;
     private Canvas?                       _minimapCanvasRef;     // cached reference to MinimapCanvas
 
     // PopupMessage / TutorialMessage: nested dialog canvases under TooltipCanvas.
@@ -347,10 +342,9 @@ public class VRCamera : MonoBehaviour
                 CanvasConversionScanner.ScanAndConvertCanvases(
                     _materialPatcher, _ownedCanvasIds,
                     _managedCanvases, _positionedCanvases, _canvasWasActive, _nestedCanvasIds,
-                    _caseContentIds, _gripDragEnforce,
-                    ref _casePanelCanvas, ref _casePanelId,
+                    _gripDragEnforce,
                     _frameCount, _lastRescanFrame,
-                    _managedFades, _gameCamRef, _leftCam,
+                    _managedFades, _leftCam,
                     ref _minimapCanvasRef,
                     ref _popupMessageGO, ref _popupMessageCanvas,
                     ref _tutorialMessageGO, ref _tutorialMessageCanvas,
@@ -980,41 +974,8 @@ public class VRCamera : MonoBehaviour
                 DontDestroyOnLoad(adGO);
                 _aimDotPool.Add(adGO);
             }
-            // Dedicated CaseCanvas (pin board) aim dot — slightly larger, distinct from pool
-            var caseBoardDot = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            caseBoardDot.name = "VRAimDot_CaseBoard";
-            caseBoardDot.layer = UILayer;
-            caseBoardDot.transform.localScale = Vector3.one * 0.02f; // 2cm
-            // DEBUG: red dot showing where the system thinks the nearest pin is
-            var caseBoardPinDot = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            caseBoardPinDot.name = "VRPinDot_Debug";
-            caseBoardPinDot.layer = UILayer;
-            caseBoardPinDot.transform.localScale = Vector3.one * 0.03f; // 3cm red dot
-            var pinDotCol = caseBoardPinDot.GetComponent<Collider>();
-            if (pinDotCol != null) UnityEngine.Object.Destroy(pinDotCol);
-            var pinDotMr = caseBoardPinDot.GetComponent<MeshRenderer>();
-            if (pinDotMr != null && dotShader != null)
-            {
-                pinDotMr.material = new Material(dotShader);
-                pinDotMr.material.color = new Color(1f, 0.1f, 0.1f, 0.95f); // RED
-                pinDotMr.material.renderQueue = 4001;
-            }
-            caseBoardPinDot.SetActive(false);
-            DontDestroyOnLoad(caseBoardPinDot);
-            var cbCol = caseBoardDot.GetComponent<Collider>();
-            if (cbCol != null) UnityEngine.Object.Destroy(cbCol);
-            var cbMr = caseBoardDot.GetComponent<MeshRenderer>();
-            if (cbMr != null && dotShader != null)
-            {
-                cbMr.material = new Material(dotShader);
-                cbMr.material.color = new Color(1f, 0.9f, 0.5f, 0.95f); // warm yellow tint for pin board
-                cbMr.material.renderQueue = 4000;
-            }
-            caseBoardDot.SetActive(false);
-            DontDestroyOnLoad(caseBoardDot);
-            _caseBoard.Discover(caseBoardDot, caseBoardPinDot);
 
-            Log.LogInfo($"[VRCamera] Aim dot pool created: {_aimDotPool.Count} dots + 1 CaseBoard dot");
+            Log.LogInfo($"[VRCamera] Aim dot pool created: {_aimDotPool.Count} dots");
         }
         catch (Exception ex)
         {
@@ -1089,7 +1050,7 @@ public class VRCamera : MonoBehaviour
                 _managedFades, _frameCount,
                 _menuRTPanel.Canvas,
                 _leftCam, _posesValid,
-                _casePanelCanvas, _casePanelId, _cursorCanvas,
+                _cursorCanvas,
                 _managedCanvases, _nestedCanvasIds,
                 _canvasWasActive, _positionedCanvases,
                 _lastRescanFrame,
@@ -1101,8 +1062,7 @@ public class VRCamera : MonoBehaviour
                 ref _contextMenuFreezePos, ref _contextMenuFreezeRot,
                 _locomotion,
                 ref _minimapBBtnHasOffset, ref _minimapBBtnLocalOffset, ref _minimapBBtnLocalRot,
-                _cursorHasTarget, _cursorTargetPos, _cursorTargetRot, _cursorAimDepth,
-                _caseContentIds);
+                _cursorHasTarget, _cursorTargetPos, _cursorTargetRot, _cursorAimDepth);
         }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] PositionCanvases exception: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}"); }
 
@@ -1146,11 +1106,6 @@ public class VRCamera : MonoBehaviour
                 // which overrides our LateUpdate position writes on LagPivot.
                 ForceItemPositionPreRender();
 
-                // Force CaseCanvas to follow the case-board anchor every frame.
-                // The game continuously repositions CaseCanvas to Camera.main-relative coords,
-                // so we must override it every frame to keep it near the VR player.
-                EnforceCaseCanvasPosition();
-                FixStringRotations();
 
                 // Re-apply grip-drag position for top-level canvas.
                 // Game scripts / Canvas layout may reset position between Update and LateUpdate.
@@ -1268,7 +1223,7 @@ public class VRCamera : MonoBehaviour
             _lastRescanFrame, () => _forceScanFrames = 30, OnSaveLoadButtonClicked,
             _menuRTPanel.SettingsBtnId, _menuRTPanel.Canvas,
             _leftCam, _gameCamRef, _rightControllerGO, _leftControllerGO,
-            _caseBoardRT.IsOpen, _caseBoardRT.Anchor, _casePanelCanvas, _minimapCanvasRef,
+            _caseBoardRT.IsOpen, _caseBoardRT.Anchor, _minimapCanvasRef,
             _popupMessageGO, _tutorialMessageGO,
             _popupMessageCanvas, _tutorialMessageCanvas, _tooltipRTPanel.IsOwned,
             _gripDragEnforce, _gripDragAnchorOffsets,
@@ -1338,53 +1293,6 @@ public class VRCamera : MonoBehaviour
     }
 
     private void UpdateHeldItemTracking() => _heldItem.Tick(_interactionController, _rightControllerGO, _leftControllerGO);
-
-    /// <summary>Force CaseCanvas to follow the case-board anchor. Called every frame because the
-    /// game continuously repositions CaseCanvas to Camera.main-relative world coords.</summary>
-    private void EnforceCaseCanvasPosition()
-    {
-        if (_casePanelCanvas == null || !_caseBoardRT.IsOpen) return;
-        try
-        {
-            // 0.15m behind the navbar (further from the player, along the anchor's forward) so
-            // the corkboard doesn't block navbar button clicks.
-            var anchor = _caseBoardRT.Anchor;
-            _casePanelCanvas.transform.position = anchor.position + anchor.forward * 0.15f;
-            _casePanelCanvas.transform.rotation = anchor.rotation;
-        }
-        catch { }
-    }
-
-    /// <summary>
-    /// Fixes string rotation for all spawned case board strings.
-    /// The game's StringController.UpdatePosition() sets rect.rotation (world space),
-    /// which is wrong in WorldSpace canvases — the string rotates off the canvas plane.
-    /// We recalculate the angle and apply it as localRotation (canvas-local XY plane).
-    /// Also fixes the preview string during VR string drag.
-    /// </summary>
-    private void FixStringRotations()
-    {
-        try
-        {
-            var cpc = CasePanelController.Instance;
-            if (cpc == null) return;
-            var strings = cpc.spawnedStrings;
-            if (strings != null)
-            {
-                for (int i = 0; i < strings.Count; i++)
-                {
-                    var sc = strings[i];
-                    if (sc == null || sc.rect == null || sc.fromRect == null || sc.toRect == null) continue;
-                    Vector3 delta = sc.toRect.localPosition - sc.fromRect.localPosition;
-                    float angle = Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg;
-                    sc.rect.localRotation = Quaternion.Euler(0f, 0f, angle);
-                }
-            }
-            // Also fix preview string during VR string drag
-            _caseBoard.FixPreviewStringRotation();
-        }
-        catch { }
-    }
 
     /// <summary>Called right before each VR eye camera renders — last chance to position items + arms.</summary>
     private void ForceItemPositionPreRender()
@@ -1718,8 +1626,6 @@ public class VRCamera : MonoBehaviour
         _canvasWasActive.Clear();
         _canvasVRPose.Clear();
         _nestedCanvasIds.Clear();
-        _caseContentIds.Clear();
-        _casePanelCanvas = null; _casePanelId = -1;
         _managedFades.Clear();
 
         Log.LogInfo("[VRCamera] Destroyed.");

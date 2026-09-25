@@ -47,7 +47,7 @@ internal sealed class CanvasMaterialPatcher
         // Panel/Menu canvases: force raycastTarget=true on all Graphic children so the
         // VR controller ray can hit them (the game defaults many to false).
         var canvasCat = CanvasCategoryInfo.GetCanvasCategory(canvasName);
-        bool forceRaycastTarget = canvasCat == CanvasCategory.Panel || canvasCat == CanvasCategory.Menu || canvasCat == CanvasCategory.CaseBoard;
+        bool forceRaycastTarget = canvasCat == CanvasCategory.Panel || canvasCat == CanvasCategory.Menu;
         try
         {
             RelaxMenuCanvasClipping(canvas);
@@ -258,7 +258,7 @@ internal sealed class CanvasMaterialPatcher
                             {
                                 // HDR boost for ALL text — compensate HDRP auto-exposure.
                                 // Previously only applied via RelaxMenuTextMaterials for
-                                // Menu/Panel/CaseBoard canvases; now covers Default etc.
+                                // Menu/Panel canvases; now covers Default etc.
                                 TextMaterialPatcher.StrengthenMenuTextMaterial(mat);
                             }
                             else
@@ -915,6 +915,6 @@ internal sealed class CanvasMaterialPatcher
         // Relax stencil/clip masking for Menu and Panel canvases.
         // Panel canvases (e.g. CaseCanvas) use ScrollRect Viewports with Mask components
         // which break in WorldSpace — must be disabled so their content is visible.
-        return cat == CanvasCategory.Menu || cat == CanvasCategory.Panel || cat == CanvasCategory.CaseBoard;
+        return cat == CanvasCategory.Menu || cat == CanvasCategory.Panel;
     }
 }

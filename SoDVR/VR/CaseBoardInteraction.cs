@@ -36,17 +36,12 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
 {
     private static ManualLogSource Log => Plugin.Log;
 
-    // ── Consts (unchanged from the original) ────────────────────────────────
-    private const int CbDragFrameThreshold = 2; // frames before drag kicks in
-    private const float ClickMaxCanvasUnits = 350f; // dead zone: aim must move this far before pin starts tracking
-    private const float PinFixedOffsetX = -0.50f; // world-space pin visual-position correction
-
     // ── Trigger edge state ──────────────────────────────────────────────────
     private bool _prevTrigger;
     private bool _triggerNeedsRelease;
     private int _triggerFireFrame;
     // Left-trigger generic click fallback: independent of the right-trigger state above.
-    // Case board's pin-drag/string-drag/minimap-pan mechanics stay right-hand-only (unaffected by
+    // Minimap pan and middle-drag stay right-hand-only (unaffected by
     // this), but a legacy WorldSpace canvas — e.g. the save-and-exit confirm popup — needs to be
     // reachable when the player is on their left hand (RTPanelPointer lets them swap there for RT
     // panels; the legacy click router had no equivalent left-hand path at all before this).
@@ -54,41 +49,9 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private bool _leftTriggerNeedsRelease;
     private int _leftTriggerFireFrame;
 
-    // ── Case board pin drag (trigger) ───────────────────────────────────────
-    private bool _cbDragActive;
-    private bool _cbDragStarted;
-    private GameObject? _cbDragGO;
-    private Canvas? _cbDragCanvas;
-    private PointerEventData? _cbDragPED;
-    private int _cbDragPressFrame;
-    private bool _cbDragIsNative;
-    private float _cbCursorPauseUntil;
-
-    private bool _cbDirectDrag;
-    private RectTransform? _cbDirectDragRT;
-    private RectTransform? _cbDirectDragParentRT;
-    private DragCasePanel? _cbDirectDragDCP;
-    private Vector2 _cbDirectDragGrabOffset;
-    private Vector2 _cbDirectDragStartLocal;
-    private Vector2 _cbDirectDragStartHitLocal;
-    private bool _cbDirectDragPastDeadZone;
-
-    private bool _cbMouseOnlyDrag;
-
-    private RectTransform? _cbCursorRbRT;
-    private RectTransform? _cbContentContainerRT;
-    private bool _cbCursorRbSearched;
-
-    // ── String drag (Right B on a pin) ──────────────────────────────────────
-    private bool _stringDragActive;
-    private PinnedItemController? _stringDragSourcePin;
-    private RectTransform? _stringDragFromRect;
-    private RectTransform? _stringDragPreviewRT;
-
-    // ── Non-case-board mid-drag (B on other canvases) ───────────────────────
+    // ── Generic middle-click drag (B on a legacy canvas) ────────────────────
     private bool _cbMidDragActive;
     private bool _cbMidDragStarted;
-    private bool _cbMidDragCaseBoard;
     private GameObject? _cbMidDragGO;
     private PointerEventData? _cbMidDragPED;
 
@@ -108,7 +71,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private Vector3 _contextMenuWorldOffset;
     private bool _prevContextMenuActive;
 
-
     // ── Regular canvas grip-drag ─────────────────────────────────────────────
     private bool _gripWasPressed;
     private Canvas? _gripDragCanvas;
@@ -117,10 +79,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private Vector3 _gripDragOffset;
     private Vector3 _gripDragHitLocalOffset;
     private Quaternion _gripDragRotOffset;
-
-    // ── Dedicated aim/debug dots (created in BuildCameraRig, handed in via Discover) ──
-    private GameObject? _caseBoardDot;
-    private GameObject? _caseBoardPinDot;
 
     // ── Exposed to VRCamera: written here, read by the still-deferred canvas-positioning
     // code (PositionCanvases / ForceItemPositionPreRender). Public because those call sites
@@ -131,33 +89,14 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     /// needed by VRCamera's ScanAndRenderAimDots call between PreAimScan and PostAimScan.</summary>
     public bool ContextMenuActive => _prevContextMenuActive;
 
-    /// <summary>Re-derives the string-drag preview's localRotation from its own current
-    /// localEulerAngles.z — called from VRCamera's FixStringRotations (a LateUpdate pass that
-    /// also fixes the game's own spawnedStrings, which stays there since it doesn't touch
-    /// case-board state otherwise).</summary>
-    public void FixPreviewStringRotation()
-    {
-        if (_stringDragActive && _stringDragPreviewRT != null)
-            _stringDragPreviewRT.localRotation = Quaternion.Euler(0f, 0f, _stringDragPreviewRT.localEulerAngles.z);
-    }
-
     public bool GripDragActive => _gripDragCanvas != null;
 
     /// <summary>A legacy press/drag/grip is mid-gesture — RTPanelInput must not take the pointer
     /// until it ends, or the gesture would never see its release.</summary>
-    public bool HasActiveGesture =>
-        _cbDragActive || _stringDragActive || _cbMidDragActive || _minimapPanActive
-        || _gripDragCanvas != null;
+    public bool HasActiveGesture => _cbMidDragActive || _minimapPanActive || _gripDragCanvas != null;
     public Canvas? GripDragCanvas => _gripDragCanvas;
     public Vector3 GripDragDesiredPos => _gripDragDesiredPos;
     public Quaternion GripDragDesiredRot => _gripDragDesiredRot;
-
-    /// <summary>Called once from BuildCameraRig after the two debug/aim dots are constructed.</summary>
-    public void Discover(GameObject? caseBoardDot, GameObject? caseBoardPinDot)
-    {
-        _caseBoardDot = caseBoardDot;
-        _caseBoardPinDot = caseBoardPinDot;
-    }
 
     // ── Per-frame context (stashed by SetFrameContext, read by every method below) ─────────
     private Dictionary<int, Canvas> _ctxManagedCanvases = null!;
@@ -173,7 +112,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private GameObject? _ctxLeftControllerGO;
     private bool _ctxCaseBoardOpen;
     private Transform _ctxCaseBoardAnchor = null!;
-    private Canvas? _ctxCasePanelCanvas;
     private Canvas? _ctxMinimapCanvasRef;
     private GameObject? _ctxPopupMessageGO;
     private GameObject? _ctxTutorialMessageGO;
@@ -204,7 +142,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         Dictionary<int, int> lastRescanFrame, Action requestForceScan, Action onSaveLoadButtonClicked,
         int menuSettingsBtnId, Canvas? menuCanvasRef,
         Camera? leftCam, Camera? gameCamRef, GameObject? rightControllerGO, GameObject? leftControllerGO,
-        bool caseBoardOpen, Transform caseBoardAnchor, Canvas? casePanelCanvas, Canvas? minimapCanvasRef,
+        bool caseBoardOpen, Transform caseBoardAnchor, Canvas? minimapCanvasRef,
         GameObject? popupMessageGO, GameObject? tutorialMessageGO,
         Canvas? popupMessageCanvas, Canvas? tutorialMessageCanvas, bool tooltipRTPanelOwnsDialog,
         Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
@@ -227,7 +165,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         _ctxLeftControllerGO = leftControllerGO;
         _ctxCaseBoardOpen = caseBoardOpen;
         _ctxCaseBoardAnchor = caseBoardAnchor;
-        _ctxCasePanelCanvas = casePanelCanvas;
         _ctxMinimapCanvasRef = minimapCanvasRef;
         _ctxPopupMessageGO = popupMessageGO;
         _ctxTutorialMessageGO = tutorialMessageGO;
@@ -331,12 +268,11 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 var c = kvp.Value;
                 if (c == null || !CanvasCategoryInfo.IsCanvasVisible(c)) continue;
                 var dragCat = CanvasCategoryInfo.GetCanvasCategory(c.gameObject.name);
-                // Allow grip-drag on CaseBoard, Panel, and Menu canvases.
+                // Allow grip-drag on Panel and Menu canvases.
                 // Also allow Tooltip canvas when a popup dialog or context menu is active.
                 bool isGrabbableTooltip = dragCat == CanvasCategory.Tooltip && (dialogNowActive || contextMenuNowActive);
-                if (!isGrabbableTooltip && dragCat != CanvasCategory.CaseBoard && dragCat != CanvasCategory.Panel && dragCat != CanvasCategory.Menu) continue;
+                if (!isGrabbableTooltip && dragCat != CanvasCategory.Panel && dragCat != CanvasCategory.Menu) continue;
                 string cName = c.gameObject.name ?? "";
-                if (cName.Equals("CaseCanvas",            StringComparison.OrdinalIgnoreCase)) continue;
                 if (cName.Equals("MenuCanvas",             StringComparison.OrdinalIgnoreCase)) continue;  // ESC menu: not draggable
 
                 var pl = new Plane(-c.transform.forward, c.transform.position);
@@ -572,8 +508,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
 
     /// <summary>
     /// Everything that has to run AFTER ControllerInteraction.ScanAndRenderAimDots(): undo the
-    /// visual-center shifts PreAimScan applied, then position the dedicated case-board aim dot,
-    /// the debug pin dot, and the continuous CursorRigidbody tracking.
+    /// visual-center shift PreAimScan applied.
     /// </summary>
     public void PostAimScan()
     {
@@ -589,236 +524,13 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             }
             _contextMenuWorldOffset = Vector3.zero;
         }
-
-        // Dedicated CaseCanvas (pin board) aim dot — raycasts against the CaseCanvas plane
-        // WITHOUT bounds checking.  CaseCanvas's sizeDelta doesn't match its visual extent,
-        // so the standard bounds check always fails.  This dot only shows when the case board
-        // is open.
-        if (_caseBoardDot != null)
-        {
-            bool showCaseDot = false;
-            try
-            {
-                if (_ctxCasePanelCanvas != null
-                    && _ctxCaseBoardOpen
-                    && _ctxCasePanelCanvas.gameObject.activeSelf
-                    && _ctxRightControllerGO != null
-                    && _ctxLeftCam != null)
-                {
-                    Vector3 ctrlPos = _ctxRightControllerGO.transform.position;
-                    Vector3 ctrlFwd = _ctxRightControllerGO.transform.forward;
-                    Vector3 dotPlaneOrigin = (_cbContentContainerRT != null)
-                        ? _cbContentContainerRT.transform.position
-                        : _ctxCasePanelCanvas.transform.position;
-                    var casePlane = new Plane(-(_cbContentContainerRT != null ? _cbContentContainerRT.transform.forward : _ctxCasePanelCanvas.transform.forward), dotPlaneOrigin);
-                    if (casePlane.Raycast(new Ray(ctrlPos, ctrlFwd), out float caseDist) && caseDist > 0f)
-                    {
-                        Vector3 caseHit = ctrlPos + ctrlFwd * caseDist;
-                        Vector3 toHead = (_ctxLeftCam.transform.position - caseHit).normalized;
-                        _caseBoardDot.transform.position = caseHit + toHead * 0.005f;
-                        _caseBoardDot.transform.rotation = Quaternion.LookRotation(-toHead);
-                        showCaseDot = true;
-                        // DIAG: canvas-space position of dot (should match cursor RB position)
-                        if (_cbContentContainerRT != null && Time.frameCount % 90 == 0)
-                        {
-                            Vector3 dotCanvasPos = _cbContentContainerRT.InverseTransformPoint(caseHit);
-                            // Log Pinned container offset to diagnose systematic aim bias
-                            var pinnedTr = _cbContentContainerRT.transform.Find("Pinned");
-                            string pinnedInfo = "null";
-                            if (pinnedTr != null)
-                            {
-                                var pinnedRT = pinnedTr.GetComponent<RectTransform>();
-                                if (pinnedRT != null)
-                                    pinnedInfo = $"localPos={pinnedRT.localPosition.ToString("F1")} ancPos={pinnedRT.anchoredPosition.ToString("F1")} pivot={pinnedRT.pivot.ToString("F2")} size={pinnedRT.sizeDelta.ToString("F0")}";
-                            }
-                            Log.LogInfo($"[CaseBoard] DotDiag: dotCanvas=({dotCanvasPos.x:F0},{dotCanvasPos.y:F0}) ccScale={_cbContentContainerRT.lossyScale.ToString("F6")} Pinned=[{pinnedInfo}]");
-                        }
-                    }
-                }
-            }
-            catch { }
-            if (showCaseDot && !_caseBoardDot.activeSelf) _caseBoardDot.SetActive(true);
-            else if (!showCaseDot && _caseBoardDot.activeSelf) _caseBoardDot.SetActive(false);
-        }
-
-        // DEBUG: Red dot at nearest pin's world position — compare with yellow aim dot
-        if (_caseBoardPinDot != null)
-        {
-            bool showPinDot = false;
-            try
-            {
-                if (_ctxCasePanelCanvas != null
-                    && _ctxCaseBoardOpen
-                    && _ctxCasePanelCanvas.gameObject.activeSelf
-                    && _ctxRightControllerGO != null
-                    && _ctxLeftCam != null
-                    && _cbContentContainerRT != null)
-                {
-                    var pinnedContainer = _cbContentContainerRT.transform.Find("Pinned");
-                    int pinnedCount = pinnedContainer?.childCount ?? 0;
-                    if (pinnedCount > 0)
-                    {
-                        // Raycast to CC plane to get hit point in local space
-                        Vector3 ctrlPos = _ctxRightControllerGO.transform.position;
-                        Vector3 ctrlFwd = _ctxRightControllerGO.transform.forward;
-                        var ccPlane = new Plane(-_cbContentContainerRT.transform.forward, _cbContentContainerRT.transform.position);
-                        if (ccPlane.Raycast(new Ray(ctrlPos, ctrlFwd), out float pd) && pd > 0f)
-                        {
-                            Vector3 hitWp = ctrlPos + ctrlFwd * pd;
-                            Vector3 hitLocal3 = _cbContentContainerRT.InverseTransformPoint(hitWp);
-                            Vector2 hitLocal = new Vector2(hitLocal3.x, hitLocal3.y);
-
-                            // Find nearest pin by corrected visual proximity
-                            float bestDist = float.MaxValue;
-                            Transform? bestPin = null;
-                            Vector3 bestPinCorrectedPos = Vector3.zero;
-
-                            for (int pi = 0; pi < pinnedCount; pi++)
-                            {
-                                var pinTr = pinnedContainer.GetChild(pi);
-                                if (pinTr == null || !pinTr.gameObject.activeSelf) continue;
-                                Vector3 pinW = GetPinVisualWorldPos(pinTr);
-                                Vector3 toPin = pinW - ctrlPos;
-                                float t = Vector3.Dot(toPin, ctrlFwd);
-                                if (t < 0f) continue;
-                                float dist = Vector3.Distance(ctrlPos + ctrlFwd * t, pinW);
-                                if (dist < bestDist) { bestDist = dist; bestPin = pinTr; bestPinCorrectedPos = pinW; }
-                            }
-
-                            if (bestPin != null && bestDist < 0.25f)
-                            {
-                                // Red dot at CORRECTED visual position
-                                Vector3 pinWorldPos = bestPinCorrectedPos;
-                                Vector3 toHead = (_ctxLeftCam.transform.position - pinWorldPos).normalized;
-                                _caseBoardPinDot.transform.position = pinWorldPos + toHead * 0.004f;
-                                _caseBoardPinDot.transform.rotation = Quaternion.LookRotation(-toHead);
-                                showPinDot = true;
-                            }
-                        }
-                    }
-                }
-            }
-            catch { }
-            if (showPinDot && !_caseBoardPinDot.activeSelf) _caseBoardPinDot.SetActive(true);
-            else if (!showPinDot && _caseBoardPinDot.activeSelf) _caseBoardPinDot.SetActive(false);
-        }
-
-        // ── Continuous cursor tracking for case board ──────────────
-        // Directly position the game's CursorRigidbody from VR controller ray → board intersection.
-        // This bypasses the broken screen→board projection (game camera rotation mismatch).
-        {
-            bool cbOpenCursor = _ctxCaseBoardOpen;
-
-            // Discover CursorRigidbody on first open (or after scene reload)
-            if (cbOpenCursor && !_cbCursorRbSearched && _ctxCasePanelCanvas != null)
-            {
-                _cbCursorRbSearched = true;
-                try
-                {
-                    // Hierarchy: CaseCanvas → CorkBoard → Viewport → ContentContainer → CursorRigidbody
-                    var corkBoard = _ctxCasePanelCanvas.transform.Find("CorkBoard");
-                    var viewport = corkBoard?.Find("Viewport");
-                    var contentContainer = viewport?.Find("ContentContainer");
-                    if (contentContainer != null)
-                    {
-                        _cbContentContainerRT = contentContainer.GetComponent<RectTransform>();
-                        var cursorRb = contentContainer.Find("CursorRigidbody");
-                        if (cursorRb != null)
-                        {
-                            _cbCursorRbRT = cursorRb.GetComponent<RectTransform>();
-                            Log.LogInfo($"[CaseBoard] Found CursorRigidbody: anchoredPos={_cbCursorRbRT?.anchoredPosition} ContentContainer size={_cbContentContainerRT?.sizeDelta}");
-                        }
-                        else
-                            Log.LogWarning("[CaseBoard] CursorRigidbody not found under ContentContainer");
-
-                        // ── Search ENTIRE SCENE for DragCasePanel / PinnedItemController ──
-                        // Pins are NOT children of ContentContainer.Pinned — find them anywhere.
-                        try
-                        {
-                            var allGOs = Resources.FindObjectsOfTypeAll<RectTransform>();
-                            int dcpCount = 0, picCount = 0;
-                            foreach (var rt in allGOs)
-                            {
-                                if (rt == null || rt.gameObject == null) continue;
-                                try
-                                {
-                                    var comps = rt.GetComponents<Component>();
-                                    bool hasDCP = false, hasPIC = false;
-                                    foreach (var comp in comps)
-                                    {
-                                        if (comp == null) continue;
-                                        string tn = comp.GetIl2CppType().Name;
-                                        if (tn == "DragCasePanel") hasDCP = true;
-                                        if (tn == "PinnedItemController") hasPIC = true;
-                                    }
-                                    if (hasDCP && dcpCount < 5)
-                                    {
-                                        dcpCount++;
-                                        string path = rt.gameObject.name;
-                                        var p = rt.parent;
-                                        for (int pi = 0; pi < 6 && p != null; pi++) { path = p.gameObject.name + "/" + path; p = p.parent; }
-                                        Log.LogInfo($"[CaseBoard] CB PinSearch: DragCasePanel '{rt.gameObject.name}' path={path} worldPos={rt.position} anchoredPos={rt.anchoredPosition} active={rt.gameObject.activeSelf}");
-                                    }
-                                    if (hasPIC && picCount < 5)
-                                    {
-                                        picCount++;
-                                        string path = rt.gameObject.name;
-                                        var p = rt.parent;
-                                        for (int pi = 0; pi < 6 && p != null; pi++) { path = p.gameObject.name + "/" + path; p = p.parent; }
-                                        Log.LogInfo($"[CaseBoard] CB PinSearch: PinnedItemController '{rt.gameObject.name}' path={path} worldPos={rt.position} anchoredPos={rt.anchoredPosition} active={rt.gameObject.activeSelf}");
-                                    }
-                                }
-                                catch { }
-                            }
-                            Log.LogInfo($"[CaseBoard] CB PinSearch: found {dcpCount} DragCasePanel, {picCount} PinnedItemController");
-                        }
-                        catch (Exception ex) { Log.LogWarning($"[CaseBoard] CB PinSearch: {ex.Message}"); }
-                    }
-                    else
-                        Log.LogWarning("[CaseBoard] ContentContainer not found in CaseCanvas hierarchy");
-                }
-                catch (Exception ex) { Log.LogWarning($"[CaseBoard] CursorRigidbody search: {ex.Message}"); }
-            }
-            // Reset search flag when board closes
-            if (!cbOpenCursor) _cbCursorRbSearched = false;
-
-            // Position CursorRigidbody directly from VR controller ray
-            if (cbOpenCursor && _ctxRightControllerGO != null && _ctxCasePanelCanvas != null
-                && !_cbDragActive && Time.realtimeSinceStartup >= _cbCursorPauseUntil)
-            {
-                try
-                {
-                    Vector3 cPos = _ctxRightControllerGO.transform.position;
-                    Vector3 cFwd = _ctxRightControllerGO.transform.forward;
-
-                    // Still move OS cursor for backward compatibility / game systems that read Input.mousePosition
-                    if (_ctxGameCamRef != null)
-                        GetCanvasScreenPos(cPos, cFwd, _ctxCasePanelCanvas, moveCursor: true);
-
-                    // Direct CursorRigidbody positioning: VR ray → board plane → rect-local coords.
-                    if (_cbCursorRbRT != null && _cbContentContainerRT != null)
-                    {
-                        Vector3 planeOrigin = _cbContentContainerRT.transform.position;
-                        var plane = new Plane(-(_cbContentContainerRT != null ? _cbContentContainerRT.transform.forward : _ctxCasePanelCanvas.transform.forward), planeOrigin);
-                        var ray = new Ray(cPos, cFwd);
-                        if (plane.Raycast(ray, out float d) && d > 0f)
-                        {
-                            Vector3 wp = cPos + cFwd * d;
-                            PositionCursorRbAtWorldPoint(wp);
-                        }
-                    }
-                }
-                catch { }
-            }
-        }
     }
 
     /// <summary>
-    /// Trigger-edge detection through the Right-A/Right-B dispatch: the case-board pin-drag
-    /// state machine (direct-RT drag, native EventSystem drag, mouse-only fallback), the string
-    /// drag, minimap pan/right-click, and the generic canvas-click fallback dispatch. One
-    /// continuous chain sharing mutable locals across its whole length in the original code —
-    /// relocated mechanically as one method rather than split further; see this file's header.
+    /// Trigger-edge detection through the Right-A/Right-B dispatch for the canvases still on the
+    /// legacy WorldSpace pipeline: minimap cursor/pan/right-click, and the generic canvas-click,
+    /// right-click and middle-drag fallbacks. Skipped entirely on frames an RT panel owns the
+    /// pointer.
     /// </summary>
     public void Tick(bool pointerOwnedByRTPanel)
     {
@@ -826,7 +538,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
 
         OpenXRManager.GetTriggerState(true, out bool triggerNow);
         bool triggerEdge = triggerNow && !_prevTrigger;
-        bool triggerRelease = !triggerNow && _prevTrigger;
         _prevTrigger = triggerNow;
 
         if (pointerOwnedByRTPanel)
@@ -835,12 +546,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             return;
         }
 
-        bool cbOpen = _ctxCaseBoardOpen;
-        // When the pause menu OR VR Settings panel is open, force cbOpen=false so that
-        // trigger presses go through the generic click router instead of the CaseBoard drag path.
-        bool menuIsOpen     = _ctxMenuCanvasRef != null && _ctxMenuCanvasRef.isActiveAndEnabled;
-        bool vrSettingsOpen = VRSettingsPanel.RootGO?.activeSelf == true;
-        if (menuIsOpen || vrSettingsOpen) cbOpen = false;
         Vector3 rPos = _ctxRightControllerGO.transform.position;
         Vector3 rFwd = _ctxRightControllerGO.transform.forward;
 
@@ -899,384 +604,22 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             catch { }
         }
 
-        // ── Case board drag handling (left-click = trigger) ──────────────
-        if (_cbDragActive)
+        // ── Right trigger → generic canvas click ──
+        if (_triggerNeedsRelease)
         {
-            if (triggerRelease)
-            {
-                try
-                {
-                    if (_cbDirectDrag)
-                    {
-                        // Dead zone approach: if aim never crossed dead zone, it's a click.
-                        bool isClick = !_cbDirectDragPastDeadZone;
-
-                        if (isClick)
-                        {
-                            // Pin never moved (dead zone wasn't crossed) — no revert needed.
-
-                            // Direct call to PinnedItemController.OpenEvidence() — bypasses
-                            // ButtonController.OnPointerClick guard (mouseInputMode / selectedElement).
-                            // OpenEvidence() → EvidenceButtonController.OnLeftClick() → SpawnWindow().
-                            bool opened = false;
-                            if (_cbDirectDragRT != null)
-                            {
-                                try
-                                {
-                                    // Walk up from the pin RT to find PinnedItemController
-                                    Transform walk = _cbDirectDragRT.transform;
-                                    for (int wi = 0; wi < 6 && walk != null; wi++)
-                                    {
-                                        var pic = walk.GetComponent<PinnedItemController>();
-                                        if (pic != null)
-                                        {
-                                            pic.OpenEvidence();
-                                            opened = true;
-                                            Log.LogInfo($"[CaseBoard] CB pin click → OpenEvidence on '{walk.gameObject.name}'");
-                                            break;
-                                        }
-                                        walk = walk.parent;
-                                    }
-                                }
-                                catch (Exception ex) { Log.LogWarning($"[CaseBoard] CB pin OpenEvidence: {ex.Message}"); }
-                            }
-                            if (!opened)
-                                Log.LogInfo($"[CaseBoard] CB direct drag → click (no PinnedItemController): '{_cbDragGO?.name}'");
-                        }
-                        else
-                        {
-                            // Sync game's internal offsets list (for save) with the final drag position.
-                            // ForceDragController was avoided during drag (wrong coord ref), so call
-                            // SetPositionDirect once here at release to persist the position on save.
-                            if (_cbDirectDragDCP != null && _cbDirectDragRT != null)
-                            {
-                                try
-                                {
-                                    Vector2 finalPos = new Vector2(_cbDirectDragRT.localPosition.x, _cbDirectDragRT.localPosition.y);
-                                    _cbDirectDragDCP.SetPositionDirect(finalPos);
-                                    Log.LogInfo($"[CaseBoard] CB direct drag end: SetPositionDirect({finalPos.x:F0},{finalPos.y:F0}) '{_cbDragGO?.name}'");
-                                }
-                                catch (Exception ex) { Log.LogWarning($"[CaseBoard] CB SetPositionDirect: {ex.Message}"); }
-                            }
-                            else
-                                Log.LogInfo($"[CaseBoard] CB direct drag end: '{_cbDragGO?.name}'");
-                        }
-                    }
-                    else if (_cbDragStarted && _cbDragIsNative && _cbDragGO != null && _cbDragPED != null)
-                    {
-                        // CaseCanvas native drag (pin board items) — end the EventSystem drag
-                        Vector2 endPos = GetCanvasScreenPos(rPos, rFwd, _cbDragCanvas, moveCursor: true);
-                        _cbDragPED.delta = endPos - _cbDragPED.position;
-                        _cbDragPED.position = endPos;
-                        ExecuteEvents.ExecuteHierarchy(_cbDragGO, _cbDragPED, ExecuteEvents.endDragHandler);
-                        ExecuteEvents.ExecuteHierarchy(_cbDragGO, _cbDragPED, ExecuteEvents.dropHandler);
-                        ExecuteEvents.ExecuteHierarchy(_cbDragGO, _cbDragPED, ExecuteEvents.pointerUpHandler);
-                        Log.LogInfo($"[CaseBoard] CB drag end: '{_cbDragGO.name}'");
-                    }
-                    else if (_cbDragGO != null && _cbDragPED != null)
-                    {
-                        // Non-CaseCanvas items (PinButton on Note, etc.) or short press:
-                        // always treat as click — these items should be clicked, not dragged.
-                        ExecuteEvents.ExecuteHierarchy(_cbDragGO, _cbDragPED, ExecuteEvents.pointerUpHandler);
-                        FireCaseBoardClick(_cbDragGO);
-                        Log.LogInfo($"[CaseBoard] CB click: '{_cbDragGO.name}'");
-                    }
-                }
-                catch (Exception ex) { Log.LogWarning($"[CaseBoard] CB drag release: {ex.Message}"); }
-                _cbDragActive = false; _cbDragStarted = false; _cbDragGO = null; _cbDragCanvas = null; _cbDragPED = null; _cbDragIsNative = false;
-                _cbDirectDrag = false; _cbDirectDragRT = null; _cbDirectDragParentRT = null; _cbDirectDragDCP = null;
-                _cbMouseOnlyDrag = false;
-            }
-            else if (triggerNow)
-            {
-                // Direct RectTransform drag for CaseCanvas pins — ray-plane intersection.
-                // Dead zone: pin stays put until aim moves ClickMaxCanvasUnits from grab point.
-                // This prevents VR hand tremor from turning a click into a drag.
-                if (_cbDirectDrag && _cbDirectDragRT != null && _cbDirectDragParentRT != null && _ctxCasePanelCanvas != null)
-                {
-                    try
-                    {
-                        // Use fresh ITP (InverseTransformPoint) for drag tracking —
-                        // same computation as Path-2 selection and dot placement.
-                        // Do NOT use CursorRigidbody position (2D physics moves it between frames).
-                        if (_cbContentContainerRT != null)
-                        {
-                            var dragPlane = new Plane(-(_cbContentContainerRT != null ? _cbContentContainerRT.transform.forward : _ctxCasePanelCanvas.transform.forward), _cbContentContainerRT.transform.position);
-                            var dragRay = new Ray(rPos, rFwd);
-                            if (dragPlane.Raycast(dragRay, out float dragD) && dragD > 0f)
-                            {
-                                Vector3 dragWp = rPos + rFwd * dragD;
-                                Vector3 dragLocal3 = _cbContentContainerRT.InverseTransformPoint(dragWp);
-                                Vector2 hitLocal = new Vector2(dragLocal3.x, dragLocal3.y);
-                                if (!_cbDirectDragPastDeadZone)
-                                {
-                                    float aimDist = Vector2.Distance(hitLocal, _cbDirectDragStartHitLocal);
-                                    if (aimDist >= ClickMaxCanvasUnits)
-                                    {
-                                        _cbDirectDragPastDeadZone = true;
-                                        _cbDirectDragGrabOffset = _cbDirectDragStartLocal - hitLocal;
-                                        Log.LogInfo($"[CaseBoard] CB pin dead zone crossed: aimDist={aimDist:F0} grabOffset=({_cbDirectDragGrabOffset.x:F0},{_cbDirectDragGrabOffset.y:F0})");
-                                    }
-                                }
-                                if (_cbDirectDragPastDeadZone)
-                                {
-                                    Vector2 newLocal = hitLocal + _cbDirectDragGrabOffset;
-                                    if (_cbDirectDragRT != null)
-                                        _cbDirectDragRT.localPosition = new Vector3(newLocal.x, newLocal.y, _cbDirectDragRT.localPosition.z);
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex) { Log.LogWarning($"[CaseBoard] CB direct drag update: {ex.Message}"); }
-                }
-                else if (_cbMouseOnlyDrag)
-                {
-                    // Mouse-only fallback: position CursorRigidbody + update OS cursor each frame
-                    try
-                    {
-                        if (_ctxGameCamRef != null)
-                            GetCanvasScreenPos(rPos, rFwd, _ctxCasePanelCanvas, moveCursor: true);
-                        if (_cbCursorRbRT != null && _cbContentContainerRT != null && _ctxCasePanelCanvas != null)
-                        {
-                            var plane = new Plane(-(_cbContentContainerRT != null ? _cbContentContainerRT.transform.forward : _ctxCasePanelCanvas.transform.forward), _cbContentContainerRT.transform.position);
-                            var ray = new Ray(rPos, rFwd);
-                            if (plane.Raycast(ray, out float d) && d > 0f)
-                                PositionCursorRbAtWorldPoint(rPos + rFwd * d);
-                        }
-                    }
-                    catch { }
-                }
-                else if (_cbDragGO != null && _cbDragPED != null)
-                {
-                    // EventSystem-based drag for non-CaseCanvas canvases
-                    try
-                    {
-                        Vector2 newDragPos = GetCanvasScreenPos(rPos, rFwd, _cbDragCanvas, moveCursor: true);
-                        _cbDragPED.delta = newDragPos - _cbDragPED.position;
-                        _cbDragPED.position = newDragPos;
-                        if (!_cbDragStarted && (Time.frameCount - _cbDragPressFrame) >= CbDragFrameThreshold)
-                        {
-                            _cbDragStarted = true;
-                            ExecuteEvents.ExecuteHierarchy(_cbDragGO, _cbDragPED, ExecuteEvents.initializePotentialDrag);
-                            ExecuteEvents.ExecuteHierarchy(_cbDragGO, _cbDragPED, ExecuteEvents.beginDragHandler);
-                            Log.LogInfo($"[CaseBoard] CB drag start: '{_cbDragGO.name}'");
-                        }
-                        if (_cbDragStarted)
-                            ExecuteEvents.ExecuteHierarchy(_cbDragGO, _cbDragPED, ExecuteEvents.dragHandler);
-                    }
-                    catch { }
-                }
-            }
+            if (!triggerNow) _triggerNeedsRelease = false;
         }
-        else if (triggerEdge && cbOpen && (Time.frameCount - _triggerFireFrame) >= 20)
+        else if (triggerEdge && (Time.frameCount - _triggerFireFrame) >= 20)
         {
-            _cbDragGO = TryFindCaseBoardTarget(rPos, rFwd,
-                out _cbDragCanvas, out _cbDragPED, PointerEventData.InputButton.Left);
-            Log.LogInfo($"[CaseBoard] CB trigger: TryFindCBTarget → {(_cbDragGO != null ? $"'{_cbDragGO.name}' on '{_cbDragCanvas?.gameObject.name}'" : "null")} cbOpen={cbOpen}");
-            if (_cbDragGO != null)
-            {
-                _cbDragActive = true;
-                _cbDragStarted = false;
-                _cbDragPressFrame = Time.frameCount;
-                _triggerFireFrame = Time.frameCount;
-                _cbDragIsNative = (_cbDragCanvas == _ctxCasePanelCanvas);
-                _cbDirectDrag = false;
-
-                // For CaseCanvas items: try to set up direct RectTransform drag
-                if (_cbDragIsNative)
-                {
-                    try
-                    {
-                        // Walk up from hit GO to find the DragCasePanel ancestor (citizen/PlayerStickyNote)
-                        RectTransform? pinRT = null;
-                        DragCasePanel? pinDCP = null;
-                        var walker = _cbDragGO.transform;
-                        for (int wi = 0; wi < 8 && walker != null; wi++)
-                        {
-                            // DragCasePanel is the draggable pin component
-                            var dcpComp = walker.GetComponent<DragCasePanel>();
-                            if (dcpComp != null)
-                            {
-                                pinRT = walker.GetComponent<RectTransform>();
-                                pinDCP = dcpComp;
-                                break;
-                            }
-                            walker = walker.parent;
-                        }
-
-                        if (pinRT != null && pinRT.parent != null)
-                        {
-                            var parentRT = pinRT.parent.GetComponent<RectTransform>();
-                            if (parentRT != null)
-                            {
-                                // Compute grab offset: difference from ray hit to pin's localPosition.
-                                // Use the PIN's own world position as the plane origin — this is the
-                                // exact z-depth of the pin, eliminating canvas hierarchy z-depth parallax.
-                                var plane = new Plane(-parentRT.transform.forward, pinRT.transform.position);
-                                var ray = new Ray(rPos, rFwd);
-                                if (plane.Raycast(ray, out float d) && d > 0f)
-                                {
-                                    Vector3 wp = rPos + rFwd * d;
-                                    Vector3 local3 = parentRT.InverseTransformPoint(wp);
-                                    Vector2 hitLocal = new Vector2(local3.x, local3.y);
-                                    Vector2 pinLocalPos = new Vector2(pinRT.localPosition.x, pinRT.localPosition.y);
-                                    _cbDirectDragRT = pinRT;
-                                    _cbDirectDragParentRT = parentRT;
-                                    _cbDirectDragDCP = pinDCP;
-                                    _cbDirectDragGrabOffset = pinLocalPos - hitLocal;
-                                    _cbDirectDragStartLocal = pinLocalPos;
-                                    _cbDirectDragStartHitLocal = hitLocal;
-                                    _cbDirectDragPastDeadZone = false;
-                                    _cbDirectDrag = true;
-                                    _cbDragStarted = true;
-                                    Log.LogInfo($"[CaseBoard] CB direct drag setup: pin='{pinRT.gameObject.name}' parent='{parentRT.gameObject.name}' localPos={pinLocalPos} localHit=({local3.x:F1},{local3.y:F1}) grabOffset={_cbDirectDragGrabOffset} dcp={(pinDCP != null)}");
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex) { Log.LogWarning($"[CaseBoard] CB direct drag setup: {ex.Message}"); }
-                }
-
-                if (!_cbDirectDrag)
-                {
-                    // Fallback: EventSystem-based drag (no mouse_event — causes ScreenSpace warp)
-                    if (_cbDragCanvas != null && _ctxGameCamRef != null)
-                        GetCanvasScreenPos(rPos, rFwd, _cbDragCanvas, moveCursor: true);
-                    try
-                    {
-                        ExecuteEvents.ExecuteHierarchy(_cbDragGO, _cbDragPED, ExecuteEvents.pointerEnterHandler);
-                        ExecuteEvents.ExecuteHierarchy(_cbDragGO, _cbDragPED, ExecuteEvents.pointerDownHandler);
-                    }
-                    catch { }
-                }
-            }
-            else
-            {
-                // TryFindCaseBoardTarget returned null — two possibilities:
-                // (a) Ray hits CaseCanvas but no GraphicRaycaster element (pins use 2D physics)
-                //     → use mouse-only drag (simulate mouse_event, position CursorRigidbody)
-                // (b) Ray hits other canvas (ActionPanelCanvas buttons, etc.)
-                //     → fall through to the generic router for normal button handling
-                // Only use mouse-only drag when CaseCanvas is the CLOSEST canvas hit.
-                // If ActionPanelCanvas or other interactive canvases are closer, the router handles them.
-                bool hitsCaseCanvas = false;
-                if (_ctxCasePanelCanvas != null && _ctxCasePanelCanvas.gameObject.activeSelf)
-                {
-                    Vector3 cbpo = (_cbContentContainerRT != null) ? _cbContentContainerRT.transform.position : _ctxCasePanelCanvas.transform.position;
-                    var casePlane = new Plane(-(_cbContentContainerRT != null ? _cbContentContainerRT.transform.forward : _ctxCasePanelCanvas.transform.forward), cbpo);
-                    if (casePlane.Raycast(new Ray(rPos, rFwd), out float cd) && cd > 0f && cd < 5f)
-                    {
-                        hitsCaseCanvas = true;
-                    }
-                }
-                if (hitsCaseCanvas)
-                {
-                    // Path-2: find nearest pin by ray→plane→ITP→CC local space proximity.
-                    bool foundPin = false;
-                    try
-                    {
-                        var pinnedContainer = _cbContentContainerRT?.transform?.Find("Pinned");
-                        int pinnedCount = pinnedContainer?.childCount ?? 0;
-                        if (pinnedCount > 0 && _cbCursorRbRT != null && _cbContentContainerRT != null)
-                        {
-                            // Selection using corrected visual world position
-                            // (pin visuals are compressed toward board center vs transform.position)
-                            float bestDist = float.MaxValue;
-                            RectTransform? bestPinRT = null;
-
-                            for (int pi = 0; pi < pinnedCount; pi++)
-                            {
-                                var pinTr = pinnedContainer.GetChild(pi);
-                                if (pinTr == null || !pinTr.gameObject.activeSelf) continue;
-                                var pinRT = pinTr.TryCast<RectTransform>() ?? pinTr.GetComponent<RectTransform>();
-                                if (pinRT == null) continue;
-                                Vector3 pinW = GetPinVisualWorldPos(pinTr);
-                                Vector3 toPin = pinW - rPos;
-                                float t = Vector3.Dot(toPin, rFwd);
-                                if (t < 0f) continue;
-                                Vector3 closest = rPos + rFwd * t;
-                                float worldDist = Vector3.Distance(closest, pinW);
-                                if (worldDist < bestDist) { bestDist = worldDist; bestPinRT = pinRT; }
-                            }
-                            // 500 canvas units * 0.001302 m/unit ≈ 0.65m world threshold
-                            float pinThreshold = 0.25f;
-                            if (bestPinRT != null && bestDist < pinThreshold)
-                            {
-                                var parentTR = bestPinRT.parent;
-                                var parentRT = (parentTR != null ? parentTR.TryCast<RectTransform>() : null)
-                                           ?? (parentTR != null ? parentTR.GetComponent<RectTransform>() : null)
-                                           ?? _cbContentContainerRT;
-                                Vector2 bestPinLocal = new Vector2(bestPinRT.localPosition.x, bestPinRT.localPosition.y);
-                                // Raycast to parentRT plane at pin's world position for grab offset
-                                var grabPlane = new Plane(-parentRT.transform.forward, bestPinRT.transform.position);
-                                Vector2 hitLocalCC = Vector2.zero;
-                                if (grabPlane.Raycast(new Ray(rPos, rFwd), out float grabD) && grabD > 0f)
-                                {
-                                    Vector3 grabWp = rPos + rFwd * grabD;
-                                    Vector3 grabLocal3 = parentRT.InverseTransformPoint(grabWp);
-                                    hitLocalCC = new Vector2(grabLocal3.x, grabLocal3.y);
-                                }
-                                var pinDCP2 = bestPinRT.GetComponent<DragCasePanel>();
-                                _cbDragActive = true;
-                                _cbDirectDrag = true;
-                                _cbDragStarted = true;
-                                _cbDragPressFrame = Time.frameCount;
-                                _triggerFireFrame = Time.frameCount;
-                                _cbDragIsNative = true;
-                                _cbMouseOnlyDrag = false;
-                                _cbDirectDragRT = bestPinRT;
-                                _cbDirectDragParentRT = parentRT;
-                                _cbDirectDragDCP = pinDCP2;
-                                _cbDirectDragGrabOffset = bestPinLocal - hitLocalCC;
-                                _cbDirectDragStartLocal = bestPinLocal;
-                                _cbDirectDragStartHitLocal = hitLocalCC;
-                                _cbDirectDragPastDeadZone = false;
-                                _cbDragGO = bestPinRT.gameObject;
-                                foundPin = true;
-                                Log.LogInfo($"[CaseBoard] CB pin SELECTED: '{bestPinRT.gameObject.name}' worldDist={bestDist:F4}m pinLocal=({bestPinLocal.x:F0},{bestPinLocal.y:F0}) hitParent=({hitLocalCC.x:F0},{hitLocalCC.y:F0}) grabOff=({_cbDirectDragGrabOffset.x:F0},{_cbDirectDragGrabOffset.y:F0})");
-                            }
-                        }
-                    }
-                    catch (Exception ex) { Log.LogWarning($"[CaseBoard] CB Pinned scan: {ex.Message}"); }
-
-                    if (!foundPin)
-                    {
-                        _triggerNeedsRelease = true;
-                        _triggerFireFrame = Time.frameCount;
-                        CanvasClickRouter.TryClick(rPos, rFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
-                            _ctxLastRescanFrame, _ctxRequestForceScan, _ctxMenuSettingsBtnId, _ctxMenuCanvasRef,
-                            _ctxOnSaveLoadButtonClicked, this);
-                    }
-                }
-                else
-                {
-                    // Not hitting CaseCanvas — use regular click for ActionPanelCanvas buttons etc.
-                    _triggerNeedsRelease = true;
-                    _triggerFireFrame = Time.frameCount;
-                    CanvasClickRouter.TryClick(rPos, rFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
-                        _ctxLastRescanFrame, _ctxRequestForceScan, _ctxMenuSettingsBtnId, _ctxMenuCanvasRef,
-                        _ctxOnSaveLoadButtonClicked, this);
-                }
-            }
-        }
-        else if (!_cbDragActive)
-        {
-            if (_triggerNeedsRelease)
-            {
-                if (!triggerNow) _triggerNeedsRelease = false;
-            }
-            else if (triggerEdge && (Time.frameCount - _triggerFireFrame) >= 20)
-            {
-                _triggerNeedsRelease = true;
-                _triggerFireFrame = Time.frameCount;
-                CanvasClickRouter.TryClick(rPos, rFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
-                    _ctxLastRescanFrame, _ctxRequestForceScan, _ctxMenuSettingsBtnId, _ctxMenuCanvasRef,
-                    _ctxOnSaveLoadButtonClicked, this);
-            }
+            _triggerNeedsRelease = true;
+            _triggerFireFrame = Time.frameCount;
+            CanvasClickRouter.TryClick(rPos, rFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
+                _ctxLastRescanFrame, _ctxRequestForceScan, _ctxMenuSettingsBtnId, _ctxMenuCanvasRef,
+                _ctxOnSaveLoadButtonClicked, this);
         }
 
         // ── Left trigger → same generic click fallback, independent state ──
-        // Not gated on cbOpen/_cbDragActive (those are right-hand pin/string-drag concerns only);
+        // Not gated on the right hand's state;
         // a legacy dialog is either reachable from the left hand or it isn't.
         if (_ctxLeftControllerGO != null)
         {
@@ -1300,199 +643,33 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             }
         }
 
-        // ── Right A → right-click on any aimed canvas (case board, notes, etc.) ──
-        // When case board open: targets case board for CursorRigidbody positioning.
-        // When aiming at any other canvas: targets that canvas.
-        // When neither: A falls through to UpdateJump().
-        if (cbOpen || _ctxCursorHasTarget)
+        // ── Right A → right-click on the aimed canvas ──
+        // When not aiming at a canvas, A falls through to UpdateJump().
+        if (_ctxCursorHasTarget && Time.realtimeSinceStartup >= _cbACooldownUntil)
         {
-            if (Time.realtimeSinceStartup >= _cbACooldownUntil)
+            OpenXRManager.GetButtonAState(out bool aPressed);
+            if (_cbANeedsRelease) { if (!aPressed) _cbANeedsRelease = false; }
+            else if (aPressed)
             {
-                OpenXRManager.GetButtonAState(out bool aPressed);
-                if (_cbANeedsRelease) { if (!aPressed) _cbANeedsRelease = false; }
-                else if (aPressed)
+                Canvas? rmbTarget = MinimapUnderRay(rPos, rFwd) ?? _ctxCursorTargetCanvas;
+                if (rmbTarget != null)
                 {
-                    // Prefer aimed canvas; fall back to case board when aiming at nothing.
-                    // Override to minimap if ray hits it — _cursorTargetCanvas may be a note
-                    // window sitting in front of the minimap.
-                    Canvas? rmbTarget = _ctxCursorHasTarget ? _ctxCursorTargetCanvas
-                                      : (cbOpen ? _ctxCasePanelCanvas : null);
-                    if (_ctxMinimapCanvasRef != null && _ctxMinimapCanvasRef.gameObject.activeInHierarchy &&
-                        rmbTarget != _ctxMinimapCanvasRef)
-                    {
-                        var _mmPlaneA = new Plane(-_ctxMinimapCanvasRef.transform.forward, _ctxMinimapCanvasRef.transform.position);
-                        if (_mmPlaneA.Raycast(new Ray(rPos, rFwd), out float _mmDistA) && _mmDistA > 0f)
-                        {
-                            var _mmLocalA = _ctxMinimapCanvasRef.transform.InverseTransformPoint(rPos + rFwd * _mmDistA);
-                            var _mmRTA = _ctxMinimapCanvasRef.GetComponent<RectTransform>();
-                            if (_mmRTA != null && _mmRTA.rect.Contains(new Vector2(_mmLocalA.x, _mmLocalA.y)))
-                                rmbTarget = _ctxMinimapCanvasRef;
-                        }
-                    }
-                    if (rmbTarget != null)
-                    {
-                        // Position CursorRigidbody when targeting case board
-                        bool targetIsCaseBoard = (rmbTarget == _ctxCasePanelCanvas);
-                        bool targetIsMinimap   = (rmbTarget.gameObject.name ?? "").IndexOf("Minimap", StringComparison.OrdinalIgnoreCase) >= 0;
-                        // Case board dot visible = controller ray hits CaseCanvas plane (even through a note window)
-                        bool aimingAtCaseBoard = cbOpen && _caseBoardDot != null && _caseBoardDot.activeSelf;
-                        if ((targetIsCaseBoard || aimingAtCaseBoard) && _cbCursorRbRT != null && _cbContentContainerRT != null && _ctxCasePanelCanvas != null)
-                        {
-                            try
-                            {
-                                var plane2 = new Plane(-(_cbContentContainerRT != null ? _cbContentContainerRT.transform.forward : _ctxCasePanelCanvas.transform.forward), _cbContentContainerRT.transform.position);
-                                var ray2 = new Ray(rPos, rFwd);
-                                if (plane2.Raycast(ray2, out float d2) && d2 > 0f)
-                                    PositionCursorRbAtWorldPoint(rPos + rFwd * d2);
-                            }
-                            catch { }
-                        }
-                        // When case board dot is visible (ray hits board plane), always position
-                        // cursor on CaseCanvas regardless of which canvas is the aim target.
-                        // This covers: aiming through an open note, ActionPanelCanvas frame, etc.
-                        Canvas? cursorPosCanvas = rmbTarget;
-                        if (!targetIsMinimap && (aimingAtCaseBoard || targetIsCaseBoard) && _ctxCasePanelCanvas != null)
-                        {
-                            cursorPosCanvas = _ctxCasePanelCanvas;
-                        }
-                        GetCanvasScreenPos(rPos, rFwd, cursorPosCanvas, moveCursor: true);
-
-                        // For case board right-click: pins use 2D physics, not GR — GR only
-                        // finds BG/ContentContainer.  Use direct Pinned-container scan (same as
-                        // trigger-click drag) to find the nearest pin, then call OpenMenu() directly.
-                        bool usedPinnedScanRMB = false;
-                        if (targetIsCaseBoard || aimingAtCaseBoard)
-                        {
-                            try
-                            {
-                                var pinnedCtnrRMB = _cbContentContainerRT?.transform?.Find("Pinned");
-                                int pinnedCountRMB = pinnedCtnrRMB?.childCount ?? 0;
-                                if (pinnedCountRMB > 0 && _ctxCasePanelCanvas != null && _cbContentContainerRT != null)
-                                {
-                                    // ITP-based 2D proximity: ray→plane→ITP→CC local space,
-                                    // compare to pin localPosition. Same approach as Path-2 left-click.
-                                    float rmbBestDist = float.MaxValue;
-                                    Transform? rmbBestPin = null;
-                                    Vector3 rmbPlaneOrigin = _cbContentContainerRT.transform.position;
-                                    var rmbPlane = new Plane(-(_cbContentContainerRT != null ? _cbContentContainerRT.transform.forward : _ctxCasePanelCanvas.transform.forward), rmbPlaneOrigin);
-                                    var rmbRay = new Ray(rPos, rFwd);
-                                    bool rmbGotHit = false;
-                                    Vector2 rmbHitLocal = Vector2.zero;
-                                    if (rmbPlane.Raycast(rmbRay, out float rmbPDist) && rmbPDist > 0f)
-                                    {
-                                        Vector3 rmbWp = rPos + rFwd * rmbPDist;
-                                        Vector3 rmbLocal3 = _cbContentContainerRT.InverseTransformPoint(rmbWp);
-                                        rmbHitLocal = new Vector2(rmbLocal3.x, rmbLocal3.y);
-                                        rmbGotHit = true;
-                                    }
-                                    if (rmbGotHit)
-                                    {
-                                        for (int rpi = 0; rpi < pinnedCountRMB; rpi++)
-                                        {
-                                            var rmbPinTr = pinnedCtnrRMB.GetChild(rpi);
-                                            if (rmbPinTr == null || !rmbPinTr.gameObject.activeSelf) continue;
-                                            if (rmbPinTr.GetComponent<RectTransform>() == null) continue;
-                                            Vector3 rmbPinW = GetPinVisualWorldPos(rmbPinTr);
-                                            float rmbT = Mathf.Max(0f, Vector3.Dot(rmbPinW - rPos, rFwd));
-                                            float rmbWd = Vector3.Distance(rPos + rFwd * rmbT, rmbPinW);
-                                            if (rmbWd < rmbBestDist) { rmbBestDist = rmbWd; rmbBestPin = rmbPinTr; }
-                                        }
-                                    }
-                                    float rmbThreshold = 0.25f; // world-space metres
-                                    if (rmbBestPin != null && rmbBestDist < rmbThreshold)
-                                    {
-                                        // Walk 3 levels from pin GO to find ContextMenuController
-                                        var rmbCtxWalk = rmbBestPin;
-                                        for (int rwl = 0; rwl < 4 && rmbCtxWalk != null; rwl++)
-                                        {
-                                            bool rmbCtxFound = false;
-                                            try
-                                            {
-                                                var rwComps = rmbCtxWalk.GetComponents<Component>();
-                                                foreach (var rwComp in rwComps)
-                                                {
-                                                    if (rwComp == null) continue;
-                                                    if (rwComp.GetIl2CppType().Name == "ContextMenuController")
-                                                    {
-                                                        // Log methods first time for diagnostics
-                                                        try
-                                                        {
-                                                            var rwMethods = rwComp.GetIl2CppType().GetMethods();
-                                                            var rwSb = new System.Text.StringBuilder();
-                                                            foreach (var rwm in rwMethods)
-                                                                if (rwm != null) { rwSb.Append(rwm.Name); rwSb.Append(", "); }
-                                                            Log.LogInfo($"[CaseBoard] CtxMC on '{rmbCtxWalk.gameObject.name}' methods: {rwSb}");
-                                                        }
-                                                        catch { }
-                                                        var rwMi = rwComp.GetIl2CppType().GetMethod("OpenMenu");
-                                                        if (rwMi != null)
-                                                        {
-                                                            rwMi.Invoke(rwComp, null);
-                                                            Log.LogInfo($"[CaseBoard] Pin ctx menu: OpenMenu() on '{rmbCtxWalk.gameObject.name}' dist={rmbBestDist:F0}");
-                                                            usedPinnedScanRMB = true;
-                                                        }
-                                                        else
-                                                        {
-                                                            Log.LogWarning($"[CaseBoard] Pin ctx menu: OpenMenu not found");
-                                                        }
-                                                        rmbCtxFound = true; break;
-                                                    }
-                                                }
-                                            }
-                                            catch { }
-                                            if (rmbCtxFound) break;
-                                            rmbCtxWalk = (rwl < rmbBestPin.childCount) ? rmbBestPin.GetChild(rwl) : null;
-                                        }
-                                        if (!usedPinnedScanRMB)
-                                            Log.LogInfo($"[CaseBoard] Pin ctx menu: no ContextMenuController on '{rmbBestPin.gameObject.name}' dist={rmbBestDist:F0}");
-                                    }
-                                    else Log.LogInfo($"[CaseBoard] Pin ctx menu: no pin nearby (count={pinnedCountRMB} bestDist={rmbBestDist:F4})");
-                                }
-                                else Log.LogInfo($"[CaseBoard] Pin ctx menu: Pinned children={pinnedCountRMB}");
-                            }
-                            catch (Exception ex) { Log.LogWarning($"[CaseBoard] Pin ctx scan: {ex.Message}"); }
-                        }
-
-                        if (!usedPinnedScanRMB)
-                        {
-                            // Non-case-board target (minimap, etc.): use the generic right-click router
-                            CanvasClickRouter.TryRightClick(rPos, rFwd, rmbTarget, _ctxLeftCam, this);
-                        }
-                        _cbANeedsRelease = true;
-                        _cbACooldownUntil = Time.realtimeSinceStartup + 1.0f;
-                        if (targetIsCaseBoard || aimingAtCaseBoard) _cbCursorPauseUntil = Time.realtimeSinceStartup + 3.0f;
-                        Log.LogInfo($"[CaseBoard] Right-click on '{rmbTarget.gameObject.name}' cbDot={aimingAtCaseBoard} pinnedScan={usedPinnedScanRMB}");
-                    }
+                    GetCanvasScreenPos(rPos, rFwd, rmbTarget, moveCursor: true);
+                    CanvasClickRouter.TryRightClick(rPos, rFwd, rmbTarget, _ctxLeftCam, this);
+                    _cbANeedsRelease = true;
+                    _cbACooldownUntil = Time.realtimeSinceStartup + 1.0f;
+                    Log.LogInfo($"[CaseBoard] Right-click on '{rmbTarget.gameObject.name}'");
                 }
             }
         }
 
-        // ── Right B → case board string drag / minimap pan / middle-click on canvas ──
-        // String drag stays active until B is released, even if aim target changes.
-        // When neither case board open nor aiming at canvas: B falls through to UpdateNotebook().
-        if (cbOpen || _ctxCursorHasTarget || _stringDragActive || _cbMidDragActive || _minimapPanActive)
+        // ── Right B → minimap pan / middle-click drag on the aimed canvas ──
+        // When not aiming at a canvas, B falls through to UpdateNotebook().
+        if (_ctxCursorHasTarget || _cbMidDragActive || _minimapPanActive)
         {
-            const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
             const uint MOUSEEVENTF_MIDDLEUP   = 0x0040;
 
-            // Prefer aimed canvas; fall back to case board when aiming at nothing.
-            // Override to minimap if ray hits it — _cursorTargetCanvas may be a note
-            // window sitting in front of the minimap.
-            Canvas? mmbTarget = _ctxCursorHasTarget ? _ctxCursorTargetCanvas
-                              : (cbOpen ? _ctxCasePanelCanvas : null);
-            if (_ctxMinimapCanvasRef != null && _ctxMinimapCanvasRef.gameObject.activeInHierarchy &&
-                mmbTarget != _ctxMinimapCanvasRef)
-            {
-                var _mmPlaneB = new Plane(-_ctxMinimapCanvasRef.transform.forward, _ctxMinimapCanvasRef.transform.position);
-                if (_mmPlaneB.Raycast(new Ray(rPos, rFwd), out float _mmDistB) && _mmDistB > 0f)
-                {
-                    var _mmLocalB = _ctxMinimapCanvasRef.transform.InverseTransformPoint(rPos + rFwd * _mmDistB);
-                    var _mmRTB = _ctxMinimapCanvasRef.GetComponent<RectTransform>();
-                    if (_mmRTB != null && _mmRTB.rect.Contains(new Vector2(_mmLocalB.x, _mmLocalB.y)))
-                        mmbTarget = _ctxMinimapCanvasRef;
-                }
-            }
-
+            Canvas? mmbTarget = MinimapUnderRay(rPos, rFwd) ?? (_ctxCursorHasTarget ? _ctxCursorTargetCanvas : null);
             bool mmbTargetIsMinimap = (mmbTarget?.gameObject.name ?? "").IndexOf("Minimap", StringComparison.OrdinalIgnoreCase) >= 0;
 
             // ── Minimap pan: B button → direct content.anchoredPosition manipulation ──
@@ -1547,131 +724,21 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                     catch { }
                 }
             }
-            // ── String drag in progress (VR B held on case board pin) ──
-            else if (_stringDragActive)
-            {
-                OpenXRManager.GetButtonBState(out bool bNow);
-                if (!bNow)
-                {
-                    // ── B released: find target pin and finish/cancel string link ──
-                    try
-                    {
-                        PinnedItemController? targetPin = null;
-                        if (_cbContentContainerRT != null && _ctxCasePanelCanvas != null)
-                        {
-                            var pinnedCtnr = _cbContentContainerRT.transform.Find("Pinned");
-                            int cnt = pinnedCtnr?.childCount ?? 0;
-                            if (cnt > 0)
-                            {
-                                float bestDist = float.MaxValue;
-                                Transform? bestTr = null;
-                                var pinnedRT = pinnedCtnr.TryCast<RectTransform>() ?? pinnedCtnr.GetComponent<RectTransform>();
-                                for (int i = 0; i < cnt; i++)
-                                {
-                                    var tr = pinnedCtnr.GetChild(i);
-                                    if (tr == null || !tr.gameObject.activeSelf) continue;
-                                    if (tr.GetComponent<RectTransform>() == null) continue;
-                                    Vector3 pW = GetPinVisualWorldPos(tr);
-                                    float t = Mathf.Max(0f, Vector3.Dot(pW - rPos, rFwd));
-                                    float wd = Vector3.Distance(rPos + rFwd * t, pW);
-                                    if (wd < bestDist) { bestDist = wd; bestTr = tr; }
-                                }
-                                float lossy = (pinnedRT != null) ? Mathf.Abs(pinnedRT.lossyScale.x) : 0.001f;
-                                float threshold = 400f * Mathf.Max(lossy, 0.0001f);
-                                if (bestTr != null && bestDist < threshold)
-                                {
-                                    var pic = bestTr.GetComponent<PinnedItemController>();
-                                    if (pic != null && pic != _stringDragSourcePin)
-                                        targetPin = pic;
-                                }
-                            }
-                        }
-
-                        var cpc = CasePanelController.Instance;
-                        if (cpc != null && targetPin != null)
-                        {
-                            Log.LogInfo($"[CaseBoard] StringDrag finish: '{_stringDragSourcePin?.name}' → '{targetPin.name}'");
-                            cpc.FinishCustomStringLinkSelection(targetPin);
-                        }
-                        else
-                        {
-                            Log.LogInfo($"[CaseBoard] StringDrag cancel (no target pin)");
-                            if (cpc != null) cpc.CancelCustomStringLinkSelection();
-                            // Clean up preview if game didn't destroy it
-                            if (_stringDragPreviewRT != null)
-                            {
-                                UnityEngine.Object.Destroy(_stringDragPreviewRT.gameObject);
-                                _stringDragPreviewRT = null;
-                            }
-                        }
-                    }
-                    catch (Exception ex) { Log.LogWarning($"[CaseBoard] StringDrag end: {ex.Message}"); }
-                    _stringDragActive = false;
-                    _stringDragSourcePin = null;
-                    _stringDragFromRect = null;
-                    _stringDragPreviewRT = null;
-                    _cbBNeedsRelease = true;
-                    _cbBCooldownUntil = Time.realtimeSinceStartup + 0.3f;
-                }
-                else
-                {
-                    // ── B held: update preview string each frame ──
-                    try
-                    {
-                        if (_stringDragPreviewRT != null && _stringDragFromRect != null && _cbContentContainerRT != null)
-                        {
-                            // Raycast to case board plane → local coords
-                            var planeN = -_cbContentContainerRT.transform.forward;
-                            var planeO = _cbContentContainerRT.transform.position;
-                            var cbPlane = new Plane(planeN, planeO);
-                            if (cbPlane.Raycast(new Ray(rPos, rFwd), out float cbDist) && cbDist > 0f)
-                            {
-                                Vector3 worldHit = rPos + rFwd * cbDist;
-                                Vector3 localHit = _cbContentContainerRT.InverseTransformPoint(worldHit);
-                                // 2D vector from source pin to cursor in canvas-local space
-                                Vector2 from2D = new Vector2(_stringDragFromRect.localPosition.x, _stringDragFromRect.localPosition.y);
-                                Vector2 to2D = new Vector2(localHit.x, localHit.y);
-                                Vector2 delta = to2D - from2D;
-                                float mag = delta.magnitude;
-                                float angle = Mathf.Atan2(delta.y, delta.x) * Mathf.Rad2Deg;
-                                _stringDragPreviewRT.sizeDelta = new Vector2(mag, _stringDragPreviewRT.sizeDelta.y);
-                                _stringDragPreviewRT.localRotation = Quaternion.Euler(0f, 0f, angle);
-                                _stringDragPreviewRT.localPosition = new Vector2(from2D.x, from2D.y);
-
-                                // Also update caseBoardCursorRBContainer so game code stays in sync
-                                try
-                                {
-                                    var cursorRB = InterfaceControls.Instance?.caseBoardCursorRBContainer;
-                                    if (cursorRB != null)
-                                        cursorRB.localPosition = new Vector2(localHit.x, localHit.y);
-                                }
-                                catch { }
-                            }
-                        }
-                    }
-                    catch { }
-                }
-            }
             else if (_cbMidDragActive)
             {
-                // Non-case-board mid-drag in progress (generic middle-click on other canvases)
+                // Generic middle-click drag in progress
                 OpenXRManager.GetButtonBState(out bool bNow);
-                var midDragCanvas = _cbMidDragCaseBoard ? _ctxCasePanelCanvas : mmbTarget;
                 if (!bNow)
                 {
-                    if (midDragCanvas != null)
-                        GetCanvasScreenPos(rPos, rFwd, midDragCanvas, moveCursor: true);
+                    if (mmbTarget != null)
+                        GetCanvasScreenPos(rPos, rFwd, mmbTarget, moveCursor: true);
                     try
                     {
                         if (_cbMidDragGO != null && _cbMidDragPED != null)
                         {
-                            var releaseGO = TryFindCaseBoardTarget(rPos, rFwd, out _, out var relPed,
-                                PointerEventData.InputButton.Middle);
-                            var dropTarget = releaseGO ?? _cbMidDragGO;
-                            var dropPed = relPed ?? _cbMidDragPED;
-                            dropPed.button = PointerEventData.InputButton.Middle;
-                            ExecuteEvents.ExecuteHierarchy(dropTarget, dropPed, ExecuteEvents.pointerUpHandler);
-                            ExecuteEvents.ExecuteHierarchy(dropTarget, dropPed, ExecuteEvents.dropHandler);
+                            _cbMidDragPED.button = PointerEventData.InputButton.Middle;
+                            ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, _cbMidDragPED, ExecuteEvents.pointerUpHandler);
+                            ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, _cbMidDragPED, ExecuteEvents.dropHandler);
                             ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, _cbMidDragPED, ExecuteEvents.endDragHandler);
                         }
                         else
@@ -1680,15 +747,15 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                         }
                     }
                     catch (Exception ex) { Log.LogWarning($"[CaseBoard] Mid-drag end: {ex.Message}"); }
-                    _cbMidDragActive = false; _cbMidDragStarted = false; _cbMidDragCaseBoard = false;
+                    _cbMidDragActive = false; _cbMidDragStarted = false;
                     _cbMidDragGO = null; _cbMidDragPED = null;
                     _cbBNeedsRelease = true;
                     _cbBCooldownUntil = Time.realtimeSinceStartup + 0.3f;
                 }
                 else
                 {
-                    if (midDragCanvas != null)
-                        GetCanvasScreenPos(rPos, rFwd, midDragCanvas, moveCursor: true);
+                    if (mmbTarget != null)
+                        GetCanvasScreenPos(rPos, rFwd, mmbTarget, moveCursor: true);
                     if (_cbMidDragGO != null && _cbMidDragPED != null)
                     {
                         try
@@ -1702,7 +769,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                     if (!_cbMidDragStarted)
                     {
                         _cbMidDragStarted = true;
-                        Log.LogInfo($"[CaseBoard] Mid-drag start on '{midDragCanvas?.gameObject.name}' cb={_cbMidDragCaseBoard}");
+                        Log.LogInfo($"[CaseBoard] Mid-drag start on '{mmbTarget?.gameObject.name}'");
                     }
                 }
             }
@@ -1712,8 +779,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 if (_cbBNeedsRelease) { if (!bPressed) _cbBNeedsRelease = false; }
                 else if (bPressed && mmbTarget != null)
                 {
-                    // Case board dot visible = controller aimed at pin board (even through open note)
-                    bool mmbAimingAtCaseBoard = cbOpen && _caseBoardDot != null && _caseBoardDot.activeSelf;
                     if (mmbTargetIsMinimap)
                     {
                         // Start minimap pan — record start screen pos; content movement happens per-frame
@@ -1736,74 +801,10 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                         }
                         catch (Exception ex) { Log.LogWarning($"[CaseBoard] MinimapPan start: {ex.Message}"); }
                     }
-                    else if (mmbAimingAtCaseBoard)
-                    {
-                        // ── Case board: start VR string drag (direct API, bypass game coroutine) ──
-                        try
-                        {
-                            PinnedItemController? sourcePin = null;
-                            if (_cbContentContainerRT != null && _ctxCasePanelCanvas != null)
-                            {
-                                var pinnedCtnr = _cbContentContainerRT.transform.Find("Pinned");
-                                int cnt = pinnedCtnr?.childCount ?? 0;
-                                if (cnt > 0)
-                                {
-                                    float bestDist = float.MaxValue;
-                                    Transform? bestTr = null;
-                                    var pinnedRT = pinnedCtnr.TryCast<RectTransform>() ?? pinnedCtnr.GetComponent<RectTransform>();
-                                    for (int i = 0; i < cnt; i++)
-                                    {
-                                        var tr = pinnedCtnr.GetChild(i);
-                                        if (tr == null || !tr.gameObject.activeSelf) continue;
-                                        if (tr.GetComponent<RectTransform>() == null) continue;
-                                        Vector3 pW = GetPinVisualWorldPos(tr);
-                                        float t = Mathf.Max(0f, Vector3.Dot(pW - rPos, rFwd));
-                                        float wd = Vector3.Distance(rPos + rFwd * t, pW);
-                                        if (wd < bestDist) { bestDist = wd; bestTr = tr; }
-                                    }
-                                    float lossy = (pinnedRT != null) ? Mathf.Abs(pinnedRT.lossyScale.x) : 0.001f;
-                                    float threshold = 400f * Mathf.Max(lossy, 0.0001f);
-                                    if (bestTr != null && bestDist < threshold)
-                                        sourcePin = bestTr.GetComponent<PinnedItemController>();
-                                }
-                            }
-
-                            if (sourcePin != null)
-                            {
-                                // Set game fields so FinishCustomStringLinkSelection can read them
-                                var cpc = CasePanelController.Instance;
-                                if (cpc != null)
-                                {
-                                    cpc.customStringLinkSelection = sourcePin;
-                                    cpc.customLinkSelectionMode = true;
-
-                                    // Instantiate preview string
-                                    var prefab = PrefabControls.Instance?.customStringLinkSelect;
-                                    if (prefab != null && cpc.stringContainer != null)
-                                    {
-                                        var previewGO = UnityEngine.Object.Instantiate(prefab, cpc.stringContainer);
-                                        _stringDragPreviewRT = previewGO?.GetComponent<RectTransform>();
-                                        cpc.customString = _stringDragPreviewRT;
-                                    }
-
-                                    _stringDragSourcePin = sourcePin;
-                                    _stringDragFromRect = sourcePin.pinButtonController?.rect;
-                                    _stringDragActive = true;
-                                    Log.LogInfo($"[CaseBoard] StringDrag start: '{sourcePin.name}' fromRect={_stringDragFromRect != null}");
-                                }
-                            }
-                            else
-                            {
-                                Log.LogInfo("[CaseBoard] StringDrag: no pin found near aim");
-                            }
-                        }
-                        catch (Exception ex) { Log.LogWarning($"[CaseBoard] StringDrag start: {ex.Message}"); }
-                    }
                     else
                     {
-                        // Non-case-board: generic middle-click drag (ExecuteEvents fallback)
-                        var pressCanvas = mmbTarget;
-                        GetCanvasScreenPos(rPos, rFwd, pressCanvas, moveCursor: true);
+                        // Generic middle-click drag (ExecuteEvents fallback)
+                        GetCanvasScreenPos(rPos, rFwd, mmbTarget, moveCursor: true);
                         try
                         {
                             var es = EventSystem.current;
@@ -1811,45 +812,23 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                             {
                                 var mmbPed = new PointerEventData(es);
                                 mmbPed.button = PointerEventData.InputButton.Middle;
-                                _cbMidDragGO = mmbTarget?.gameObject;
+                                _cbMidDragGO = mmbTarget.gameObject;
                                 _cbMidDragPED = mmbPed;
-                                if (_cbMidDragGO != null)
-                                {
-                                    ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, mmbPed, ExecuteEvents.pointerEnterHandler);
-                                    ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, mmbPed, ExecuteEvents.pointerDownHandler);
-                                    try { ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, mmbPed, ExecuteEvents.beginDragHandler); } catch { }
-                                }
+                                ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, mmbPed, ExecuteEvents.pointerEnterHandler);
+                                ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, mmbPed, ExecuteEvents.pointerDownHandler);
+                                try { ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, mmbPed, ExecuteEvents.beginDragHandler); } catch { }
                             }
                         }
                         catch (Exception ex) { Log.LogWarning($"[CaseBoard] Mid-press: {ex.Message}"); }
                         _cbMidDragActive = true;
                         _cbMidDragStarted = false;
-                        _cbMidDragCaseBoard = false;
                     }
                 }
             }
         }
         else
         {
-            // No target — clean up any stale drag/string state
-            if (_stringDragActive)
-            {
-                try
-                {
-                    var cpc = CasePanelController.Instance;
-                    if (cpc != null) cpc.CancelCustomStringLinkSelection();
-                    if (_stringDragPreviewRT != null)
-                    {
-                        UnityEngine.Object.Destroy(_stringDragPreviewRT.gameObject);
-                        _stringDragPreviewRT = null;
-                    }
-                }
-                catch { }
-                _stringDragActive = false;
-                _stringDragSourcePin = null;
-                _stringDragFromRect = null;
-                _stringDragPreviewRT = null;
-            }
+            // No target — clean up any stale drag state
             if (_cbMidDragActive)
             {
                 const uint MOUSEEVENTF_MIDDLEUP_C = 0x0040;
@@ -1861,7 +840,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 {
                     mouse_event(MOUSEEVENTF_MIDDLEUP_C, 0, 0, 0, UIntPtr.Zero);
                 }
-                _cbMidDragActive = false; _cbMidDragStarted = false; _cbMidDragCaseBoard = false;
+                _cbMidDragActive = false; _cbMidDragStarted = false;
                 _cbMidDragGO = null; _cbMidDragPED = null;
             }
             if (_minimapPanActive)
@@ -1870,6 +849,19 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 _minimapPanActive = false;
             }
         }
+    }
+
+    /// <summary>MinimapCanvas when the ray lands inside its rect — preferred over the aim target,
+    /// which may be a window in front of the map that the player is aiming past.</summary>
+    private Canvas? MinimapUnderRay(Vector3 rPos, Vector3 rFwd)
+    {
+        var mm = _ctxMinimapCanvasRef;
+        if (mm == null || !mm.gameObject.activeInHierarchy) return null;
+        var plane = new Plane(-mm.transform.forward, mm.transform.position);
+        if (!plane.Raycast(new Ray(rPos, rFwd), out float dist) || dist <= 0f) return null;
+        var local = mm.transform.InverseTransformPoint(rPos + rFwd * dist);
+        var rt = mm.GetComponent<RectTransform>();
+        return rt != null && rt.rect.Contains(new Vector2(local.x, local.y)) ? mm : null;
     }
 
     /// <summary>Keeps edge state current and marks every held button as needing a release, so a
@@ -2034,28 +1026,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         return 0;
     }
 
-    public bool ShouldRejectHit(Canvas hitCanvas, GameObject hitGo)
-    {
-        // CaseCanvas interaction filter: only process clicks that land on (or inside) a
-        // GameObject with a Button component in its hierarchy. Generic elements like 'Text',
-        // 'Overlay', background panels consume the click via a reject without doing anything
-        // useful, blocking real interactive elements underneath.
-        string hitCanvasName = hitCanvas.gameObject.name ?? "";
-        if (!hitCanvasName.Equals("CaseCanvas", StringComparison.OrdinalIgnoreCase)) return false;
-
-        bool hasButton = false;
-        try
-        {
-            var walker = hitGo?.transform;
-            for (int wi = 0; wi < 8 && walker != null; wi++)
-            {
-                if (walker.GetComponent<Button>() != null) { hasButton = true; break; }
-                walker = walker.parent;
-            }
-        }
-        catch { }
-        return !hasButton;
-    }
+    public bool ShouldRejectHit(Canvas hitCanvas, GameObject hitGo) => false;
 
     public bool TryHandleSpecialClick(Canvas hitCanvas, GameObject hitGo, PointerEventData ped)
     {
@@ -2127,357 +1098,30 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             }
             catch (Exception rcEx) { Log.LogWarning($"[CaseBoard] TryRightClick MinimapRC: {rcEx.Message}"); }
         }
-
-        // For case board targets: also try direct ContextMenuController.OpenMenu() call. This
-        // runs alongside (not instead of) the generic ExecuteEvents fallback — only the minimap
-        // branch above suppresses it, matching the original's nesting exactly.
-        if (!rcHandled)
-        {
-            bool isCaseBoardTargetRC = (targetCanvas == _ctxCasePanelCanvas ||
-                (targetCanvas?.gameObject.name ?? "").IndexOf("Case", StringComparison.OrdinalIgnoreCase) >= 0);
-            if (isCaseBoardTargetRC && hitGo != null)
-            {
-                var ctxWalker = hitGo.transform;
-                for (int wi = 0; wi < 8 && ctxWalker != null; wi++)
-                {
-                    bool ctxFound = false;
-                    try
-                    {
-                        var comps = ctxWalker.GetComponents<Component>();
-                        foreach (var comp in comps)
-                        {
-                            if (comp == null) continue;
-                            if (comp.GetIl2CppType().Name == "ContextMenuController")
-                            {
-                                try
-                                {
-                                    var allMethods = comp.GetIl2CppType().GetMethods();
-                                    var sbM = new System.Text.StringBuilder();
-                                    foreach (var m2 in allMethods)
-                                        if (m2 != null) { sbM.Append(m2.Name); sbM.Append(", "); }
-                                    Log.LogInfo($"[CaseBoard] ContextMenuController on '{ctxWalker.gameObject.name}' methods: {sbM}");
-                                }
-                                catch { }
-
-                                string[] tryNames = { "OpenMenu", "OpenContextMenu", "Show", "ShowMenu", "Open" };
-                                bool invoked = false;
-                                foreach (var mName in tryNames)
-                                {
-                                    try
-                                    {
-                                        var mi = comp.GetIl2CppType().GetMethod(mName);
-                                        if (mi != null)
-                                        {
-                                            mi.Invoke(comp, null);
-                                            Log.LogInfo($"[CaseBoard] TryRightClick: called {mName}() on ContextMenuController at '{ctxWalker.gameObject.name}'");
-                                            invoked = true;
-                                            break;
-                                        }
-                                    }
-                                    catch (Exception miEx)
-                                    {
-                                        Log.LogWarning($"[CaseBoard] ContextMenuController.{mName} invoke: {miEx.Message}");
-                                    }
-                                }
-                                if (!invoked)
-                                    Log.LogWarning($"[CaseBoard] ContextMenuController: no matching open method found");
-                                ctxFound = true;
-                                break;
-                            }
-                        }
-                    }
-                    catch (Exception ctxEx) { Log.LogWarning($"[CaseBoard] CtxMenu walk wi={wi}: {ctxEx.Message}"); }
-                    if (ctxFound) break;
-                    ctxWalker = ctxWalker.parent;
-                }
-            }
-        }
         return rcHandled;
     }
 
     // ── Private helpers (moved verbatim from VRCamera, field refs updated to _ctx* equivalents) ─
 
     /// <summary>
-    /// Finds a CaseCanvas pin (or Panel/CaseBoard/Tooltip canvas element) under the controller
-    /// ray for the trigger-drag path. Menu-category canvases (WindowCanvas, DialogCanvas, etc.)
-    /// are intentionally excluded here — they're handled by <see cref="CanvasClickRouter.TryClick"/>
-    /// via this method's null-return fallback, which uses proper button-click logic; routing them
-    /// through the CB drag path instead caused inconsistent click registration on notes/notepad.
+    /// Raycasts the controller ray against a legacy canvas's plane and returns the screen-space
+    /// position in its worldCamera (the left eye). With <paramref name="moveCursor"/>, also warps
+    /// the OS cursor there — the minimap still reads Input.mousePosition.
     /// </summary>
-    private GameObject? TryFindCaseBoardTarget(Vector3 origin, Vector3 direction,
-                                                out Canvas? canvas, out PointerEventData? ped,
-                                                PointerEventData.InputButton mouseButton = PointerEventData.InputButton.Left)
-    {
-        canvas = null; ped = null;
-        if (_ctxLeftCam == null) return null;
-
-        var es = EventSystem.current;
-        if (es == null) return null;
-        var ray = new Ray(origin, direction);
-
-        // Collect candidate canvases: all visible managed canvases + CaseCanvas (no bounds check)
-        // Sort by ray distance (nearest first) so closest canvas wins
-        var candidates = new List<(float dist, Canvas c, Vector2 screenPos, bool isCaseCanvas)>();
-
-        // Always include CaseCanvas (no bounds check — sizeDelta doesn't match visual extent).
-        // Use _ctxGameCamRef for screen pos — CaseCanvas.worldCamera = _ctxGameCamRef, so PED
-        // positions must be in _ctxGameCamRef screen space for DragCasePanel's coordinate
-        // conversion to work. Plane origin = ContentContainer world pos so the hit point lives on
-        // ContentContainer's actual plane, giving a screen pos consistent with where elements are.
-        if (_ctxCasePanelCanvas != null && _ctxCasePanelCanvas.gameObject.activeSelf && _ctxGameCamRef != null)
-        {
-            Vector3 cbPlaneOrigin = (_cbContentContainerRT != null)
-                ? _cbContentContainerRT.transform.position
-                : _ctxCasePanelCanvas.transform.position;
-            var casePlane = new Plane(-(_cbContentContainerRT != null ? _cbContentContainerRT.transform.forward : _ctxCasePanelCanvas.transform.forward), cbPlaneOrigin);
-            if (casePlane.Raycast(ray, out float caseDist) && caseDist > 0f)
-            {
-                Vector3 wp = origin + direction * caseDist;
-                Vector3 sp = _ctxGameCamRef.WorldToScreenPoint(wp);
-                if (sp.z > 0f)
-                    candidates.Add((caseDist, _ctxCasePanelCanvas, new Vector2(sp.x, sp.y), true));
-            }
-        }
-
-        // Include Panel/CaseBoard/Tooltip canvases as CB targets.
-        foreach (var kvp in _ctxManagedCanvases)
-        {
-            var c = kvp.Value;
-            if (c == null || !c.gameObject.activeSelf) continue;
-            if (c == _ctxCasePanelCanvas) continue; // already added above
-            if (c.renderMode != RenderMode.WorldSpace) continue;
-            var cCat = CanvasCategoryInfo.GetCanvasCategory(c.gameObject.name ?? "");
-            if (cCat == CanvasCategory.Menu)    continue; // WindowCanvas etc. handled by CanvasClickRouter
-            if (cCat == CanvasCategory.Panel)   continue; // Panel buttons use CanvasClickRouter
-            if (cCat == CanvasCategory.Tooltip) continue; // Tooltip must not intercept pin board raycasts
-            if (cCat == CanvasCategory.HUD)     continue; // HUD not interactive on case board
-            if (cCat == CanvasCategory.Ignored) continue;
-            // Exclude canvases nested inside Menu-category canvases (e.g. Note inside WindowCanvas).
-            // Their buttons (PinButton, CloseButton) are handled by CanvasClickRouter's button path.
-            // Including them here routes clicks through the CB drag path, whose EventSystem drag
-            // events bubble to ItemController → native drag → warps all notes sideways.
-            if (_ctxNestedCanvasIds.Contains(kvp.Key))
-            {
-                bool insideMenu = false;
-                try
-                {
-                    var np = c.transform.parent;
-                    for (int w = 0; w < 10 && np != null; w++)
-                    {
-                        var npc = np.GetComponent<Canvas>();
-                        if (npc != null && CanvasCategoryInfo.GetCanvasCategory(npc.gameObject.name ?? "") == CanvasCategory.Menu)
-                        { insideMenu = true; break; }
-                        np = np.parent;
-                    }
-                }
-                catch { }
-                if (insideMenu) continue;
-            }
-
-            var cPlane = new Plane(-c.transform.forward, c.transform.position);
-            if (!cPlane.Raycast(ray, out float cDist) || cDist <= 0f) continue;
-
-            // Bounds check for non-CaseCanvas canvases (centered-pivot — reliable in IL2CPP)
-            Vector3 wp2 = origin + direction * cDist;
-            Vector3 local = c.transform.InverseTransformPoint(wp2);
-            var rect = c.GetComponent<RectTransform>();
-            if (rect == null) continue;
-            Vector2 hs = rect.sizeDelta * 0.5f;
-            if (Mathf.Abs(local.x) > hs.x || Mathf.Abs(local.y) > hs.y) continue;
-
-            Vector3 sp2 = _ctxLeftCam.WorldToScreenPoint(wp2);
-            candidates.Add((cDist, c, new Vector2(sp2.x, sp2.y), false));
-        }
-
-        // Sort nearest first
-        candidates.Sort((a, b) => a.dist.CompareTo(b.dist));
-
-        if (candidates.Count > 0)
-        {
-            var sb = new System.Text.StringBuilder();
-            sb.Append($"[CaseBoard] TryFindCBTarget: {candidates.Count} candidates:");
-            foreach (var (d, cc, sp, isCC) in candidates)
-                sb.Append($" '{cc.gameObject.name}'(d={d:F2},sp={sp},cc={isCC})");
-            Log.LogInfo(sb.ToString());
-        }
-
-        // Try each candidate — first one with a valid UI hit wins
-        foreach (var (dist, cCanvas, screenPos, isCaseCanvas) in candidates)
-        {
-            try
-            {
-                // CaseCanvas uses _ctxGameCamRef as worldCamera; screenPos is already in that
-                // space. Other canvases use _ctxLeftCam; screenPos is in _ctxLeftCam space. No
-                // camera swap needed — each canvas's worldCamera matches its screenPos space.
-                if (cCanvas.worldCamera == null)
-                {
-                    if (_ctxLeftCam != null) cCanvas.worldCamera = _ctxLeftCam;
-                    else continue;
-                }
-
-                var localPed = new PointerEventData(es);
-                localPed.position = screenPos;
-
-                var gr = cCanvas.GetComponent<GraphicRaycaster>();
-                if (gr == null || !gr.enabled) continue;
-
-                var results = new Il2CppSystem.Collections.Generic.List<RaycastResult>();
-                gr.Raycast(localPed, results);
-                if (results.Count == 0) continue;
-
-                var go = results[0].gameObject;
-                if (go == null) continue;
-
-                // All canvases: require a Button (or DragCasePanel for pins) in hierarchy.
-                // Decorative elements (LensFlare, borders, backgrounds) have neither — returning
-                // them causes FireCaseBoardClick to silently eat the click.
-                {
-                    bool hasBtn = false;
-                    var walker = go.transform;
-                    for (int wi = 0; wi < 8 && walker != null; wi++)
-                    {
-                        if (walker.GetComponent<Button>() != null) hasBtn = true;
-                        // DragCasePanel marks a draggable pin — Text/Overlay children of
-                        // pins don't have Button, but they are still interactive via drag/click.
-                        if (isCaseCanvas)
-                        {
-                            try
-                            {
-                                var comps2 = walker.GetComponents<Component>();
-                                foreach (var comp2 in comps2)
-                                    if (comp2 != null && comp2.GetIl2CppType().Name == "DragCasePanel")
-                                    { hasBtn = true; break; }
-                            }
-                            catch { }
-                        }
-                        walker = walker.parent;
-                    }
-                    if (!hasBtn) continue; // skip non-interactive element — fall through to next candidate
-                }
-
-                localPed.pointerEnter = go;
-                localPed.pointerPress = go;
-                localPed.rawPointerPress = go;
-                localPed.pointerDrag = go;
-                localPed.pressPosition = localPed.position;
-                localPed.pointerCurrentRaycast = results[0];
-                localPed.pointerPressRaycast = results[0];
-                localPed.eligibleForClick = true;
-                localPed.button = mouseButton;
-
-                canvas = cCanvas;
-                ped = localPed;
-                string cName = cCanvas.gameObject.name ?? "?";
-                Log.LogInfo($"[CaseBoard] CaseBoard target: '{go.name}' on '{cName}' btn={mouseButton}");
-                return go;
-            }
-            catch { }
-        }
-        return null;
-    }
-
-    /// <summary>
-    /// Fires a click on a CaseCanvas element using persistent listener invocation (bypasses
-    /// ButtonController.mouseInputMode guard) + ExecuteEvents for 0-listener buttons.
-    ///
-    /// Deliberately NOT unified with <see cref="CanvasClickRouter.InvokeButtonClick"/> despite the
-    /// visible similarity: this skips the hidden/interactable check (case-board pins don't need
-    /// it). See this file's header on why disposable code isn't worth redesigning to remove the
-    /// duplication.
-    /// </summary>
-    private void FireCaseBoardClick(GameObject go)
-    {
-        try
-        {
-            var walker = go.transform;
-            for (int bl = 0; bl < 8 && walker != null; bl++)
-            {
-                var btn = walker.GetComponent<Button>();
-                if (btn != null)
-                {
-                    int pCount = btn.onClick.GetPersistentEventCount();
-                    if (pCount > 0)
-                    {
-                        for (int pi = 0; pi < pCount; pi++)
-                            btn.onClick.SetPersistentListenerState(pi, UnityEngine.Events.UnityEventCallState.RuntimeOnly);
-                        btn.onClick.Invoke();
-                        for (int pi = 0; pi < pCount; pi++)
-                            btn.onClick.SetPersistentListenerState(pi, UnityEngine.Events.UnityEventCallState.Off);
-                        _ctxRequestForceScan();
-                        Log.LogInfo($"[CaseBoard] CB persistent click: '{walker.gameObject.name}' persistent={pCount}");
-                        return;
-                    }
-                    // 0 persistent listeners — use ExecuteEvents
-                    break;
-                }
-                walker = walker.parent;
-            }
-        }
-        catch { }
-        // Fallback: fire ExecuteEvents (for 0-listener buttons / custom IPointerClickHandler)
-        try
-        {
-            var es = EventSystem.current;
-            if (es != null)
-            {
-                var ped = new PointerEventData(es);
-                ped.pointerPress = go;
-                ped.button = PointerEventData.InputButton.Left;
-                ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerClickHandler);
-                ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.submitHandler);
-            }
-        }
-        catch { }
-    }
-
-    /// <summary>
-    /// Positions CursorRigidbody at the world point where the VR controller ray hits the board.
-    /// Direct canvas-local projection via InverseTransformPoint avoids a WorldToScreen→ScreenToLocal
-    /// camera-projection roundtrip, which introduces error when the canvas worldCamera
-    /// (_ctxGameCamRef) differs from the VR eye (_ctxLeftCam). ITP is verified correct
-    /// (ITP diff=0 in diagnostics), so this is the ground truth.
-    /// </summary>
-    private void PositionCursorRbAtWorldPoint(Vector3 wp)
-    {
-        if (_cbCursorRbRT == null || _cbContentContainerRT == null) return;
-        Vector3 local3 = _cbContentContainerRT.InverseTransformPoint(wp);
-        _cbCursorRbRT.anchoredPosition = new Vector2(local3.x, local3.y);
-    }
-
-    /// <summary>
-    /// Raycasts the controller ray against a canvas plane (defaulting to CaseCanvas) and returns
-    /// the screen-space position matching that canvas's worldCamera. Renamed from
-    /// GetCaseBoardScreenPos — the generic mid-drag fallback in Tick() also calls this for
-    /// non-case-board canvases, so the old name was misleading.
-    /// </summary>
-    private Vector2 GetCanvasScreenPos(Vector3 origin, Vector3 direction, Canvas? targetCanvas = null,
+    private Vector2 GetCanvasScreenPos(Vector3 origin, Vector3 direction, Canvas targetCanvas,
                                         bool moveCursor = false)
     {
-        var c = targetCanvas ?? _ctxCasePanelCanvas;
-        if (c == null || _ctxLeftCam == null)
+        if (targetCanvas == null || _ctxLeftCam == null)
             return Vector2.zero;
-        // Use ContentContainer forward when targeting case board — CaseCanvas forward
-        // can differ slightly, causing ray-plane intersection offset that scales with distance.
-        var planeNormal = (c == _ctxCasePanelCanvas && _cbContentContainerRT != null)
-            ? -_cbContentContainerRT.transform.forward : -c.transform.forward;
-        var planeOriginGSP = (c == _ctxCasePanelCanvas && _cbContentContainerRT != null)
-            ? _cbContentContainerRT.transform.position : c.transform.position;
-        var plane = new Plane(planeNormal, planeOriginGSP);
+        var plane = new Plane(-targetCanvas.transform.forward, targetCanvas.transform.position);
         if (plane.Raycast(new Ray(origin, direction), out float d) && d > 0f)
         {
             Vector3 wp = origin + direction * d;
-            // Return screen coords matching the canvas's worldCamera for PointerEventData.
-            // CaseCanvas uses _ctxGameCamRef (Screen space); all others use _ctxLeftCam (VR eye space).
-            bool isCaseC = (c == _ctxCasePanelCanvas && _ctxGameCamRef != null);
-            Vector3 sp = isCaseC ? _ctxGameCamRef.WorldToScreenPoint(wp)
-                                 : _ctxLeftCam.WorldToScreenPoint(wp);
+            Vector3 sp = _ctxLeftCam.WorldToScreenPoint(wp);
 
-            // Move the OS cursor so Input.mousePosition matches — the game's case board
-            // reads Input.mousePosition directly for drag positioning, pin placement, etc.
-            // Use the GAME camera (renders to screen) for WorldToScreenPoint so the result
-            // is directly in Screen.width × Screen.height space.  The old code used _leftCam
-            // pixel space with viewport normalization, which failed because the VR eye camera
-            // has a completely different resolution/FOV from the game window.
+            // Use the GAME camera (renders to screen) for the OS cursor so the result is directly
+            // in Screen.width × Screen.height space — the VR eye camera has a completely different
+            // resolution/FOV from the game window.
             if (moveCursor && _ctxGameCamRef != null)
             {
                 try
@@ -2501,22 +1145,5 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             return new Vector2(sp.x, sp.y);
         }
         return Vector2.zero;
-    }
-
-    /// <summary>
-    /// Returns the world-space position where a pin VISUALLY renders on the case board.
-    /// The game's CustomScrollRect moves ContentContainer between Update and LateUpdate,
-    /// so pin.transform.position in Update is at the pre-scroll location.
-    /// We apply the cached render-time scroll delta to get the actual visual position.
-    /// </summary>
-    private Vector3 GetPinVisualWorldPos(Transform pinTr)
-    {
-        if (_ctxCasePanelCanvas == null)
-            return pinTr.position;
-
-        // Apply fixed offset along the canvas's local X axis to compensate
-        // for the consistent visual misalignment between transform.position
-        // and where the Canvas renderer draws the pin.
-        return pinTr.position + _ctxCasePanelCanvas.transform.right * PinFixedOffsetX;
     }
 }

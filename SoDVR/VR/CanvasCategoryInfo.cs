@@ -8,9 +8,8 @@ namespace SoDVR.VR;
 /// Each canvas is assigned a category that controls placement, scale, and interactability.
 /// Ignored: transient/world-space canvases — never converted, never in depth scan.
 /// HUD: body-locked (VROrigin yaw only), non-interactable, excluded from ray system.
-/// CaseBoard: recentres on open, remembers relative layout, grip-relocatable.
 /// </summary>
-internal enum CanvasCategory { HUD, Menu, CaseBoard, Panel, Tooltip, Ignored, Default }
+internal enum CanvasCategory { HUD, Menu, Panel, Tooltip, Ignored, Default }
 
 internal readonly struct CanvasCategoryDefaults
 {
@@ -20,13 +19,12 @@ internal readonly struct CanvasCategoryDefaults
     public readonly bool  RecentreOnActivate;   // reposition when canvas becomes active
     public readonly bool  RepositionEveryFrame; // never mark positioned (tooltip behaviour)
     public readonly bool  IsHUD;                // body-locked; excluded from ray/click system
-    public readonly bool  IsGripRelocatable;    // CaseBoard grip-drag support
     public CanvasCategoryDefaults(float dist, float vOff, float targetW,
                                   bool recentre, bool everyFrame = false,
-                                  bool isHud = false, bool isGrip = false)
+                                  bool isHud = false)
     { Distance = dist; VerticalOffset = vOff; TargetWorldWidth = targetW;
       RecentreOnActivate = recentre; RepositionEveryFrame = everyFrame;
-      IsHUD = isHud; IsGripRelocatable = isGrip; }
+      IsHUD = isHud; }
 }
 
 /// <summary>
@@ -67,9 +65,6 @@ internal static class CanvasCategoryInfo
         ["upgradesCanvas"]            = CanvasCategory.Menu,
         ["VirtualCursorCanvas & EventSystem"] = CanvasCategory.Ignored, // game virtual cursor, not ours
 
-        // CaseBoard — recentres on open, remembers relative layout, grip-relocatable
-        ["CaseCanvas"]                = CanvasCategory.CaseBoard,
-        ["caseCanvas"]                = CanvasCategory.CaseBoard,
 
         // Panel — recentres on activate, interactable, behind Menu
         ["contentCanvas"]             = CanvasCategory.Panel,
@@ -94,11 +89,10 @@ internal static class CanvasCategoryInfo
     // Per-category placement defaults.
     // TargetWorldWidth: canvas scale is computed as TargetWorldWidth / sizeDelta.x at runtime,
     // so it's immune to CanvasScaler inflation (sizeDelta may be 2720 or 1280 — doesn't matter).
-    // Distance ordering (front to back): Menu (1.8m) → Panel (2.1m) → CaseBoard (2.3m) → HUD (2.5m back)
+    // Distance ordering (front to back): Menu (1.8m) → Panel (2.1m) → HUD (2.5m back)
     private static readonly Dictionary<CanvasCategory, CanvasCategoryDefaults> s_categoryDefaults = new()
     {
         [CanvasCategory.Menu]      = new(1.8f,  0.00f, 1.2f, recentre: true),
-        [CanvasCategory.CaseBoard] = new(2.3f,  0.00f, 2.5f, recentre: true,  isGrip: true),  // wider: pins/notes more readable
         [CanvasCategory.Panel]     = new(2.1f,  0.00f, 2.0f, recentre: true),                 // wider: action panel buttons bigger
         [CanvasCategory.HUD]       = new(2.5f, -0.15f, 1.5f, recentre: false, isHud: true),
         [CanvasCategory.Tooltip]   = new(1.2f, -0.10f, 1.2f, recentre: false, everyFrame: true), // wider: context menu text readable

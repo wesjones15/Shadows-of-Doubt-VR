@@ -14,7 +14,7 @@ namespace SoDVR.VR;
 ///
 /// <see cref="PositionCanvases"/> is a single foreach over every managed canvas with one long
 /// per-category if/else-if/continue chain (cursor → tooltip/dialog → HUD → B-button-minimap →
-/// already-positioned skip → CaseBoard-vs-default), sharing locals across every branch and
+/// already-positioned skip → default), sharing locals across every branch and
 /// mutating cross-cutting VRCamera dictionaries throughout. It moves as one method rather than
 /// being split further — fine-grained sub-extraction would need the same kind of
 /// SetFrameContext-style redesign CaseBoardInteraction's Tick() needed, and this method doesn't
@@ -33,7 +33,7 @@ internal sealed class CanvasPlacement
         Dictionary<int, Graphic> managedFades, int frameCount,
         Canvas? menuCanvasRef,
         Camera? leftCam, bool posesValid,
-        Canvas? casePanelCanvas, int casePanelId, Canvas? cursorCanvas,
+        Canvas? cursorCanvas,
         Dictionary<int, Canvas> managedCanvases, HashSet<int> nestedCanvasIds,
         Dictionary<int, bool> canvasWasActive, HashSet<int> positionedCanvases,
         Dictionary<int, int> lastRescanFrame,
@@ -45,8 +45,7 @@ internal sealed class CanvasPlacement
         ref Vector3 contextMenuFreezePos, ref Quaternion contextMenuFreezeRot,
         LocomotionController locomotion,
         ref bool minimapBBtnHasOffset, ref Vector3 minimapBBtnLocalOffset, ref Quaternion minimapBBtnLocalRot,
-        bool cursorHasTarget, Vector3 cursorTargetPos, Quaternion cursorTargetRot, float cursorAimDepth,
-        HashSet<int> caseContentIds)
+        bool cursorHasTarget, Vector3 cursorTargetPos, Quaternion cursorTargetRot, float cursorAimDepth)
     {
         // Suppress FadeOverlay graphics every 4 frames (prevents black screen flash).
         if (managedFades.Count > 0 && (frameCount % 4) == 0)
@@ -127,20 +126,14 @@ internal sealed class CanvasPlacement
             canvasWasActive[tid] = nowActive;
         }
 
-        // When the case board opens, force-recentre every legacy CaseBoard canvas around the
-        // freshly placed board anchor.
+        // When the case board opens, re-place the legacy canvases laid out around the freshly
+        // placed board anchor.
         if (caseBoardJustOpened)
         {
             foreach (var cb in managedCanvases)
             {
                 if (cb.Value == null) continue;
                 string cbName = cb.Value.gameObject.name ?? "";
-                var cbCat = CanvasCategoryInfo.GetCanvasCategory(cbName);
-                if (cbCat == CanvasCategory.CaseBoard)
-                {
-                    positionedCanvases.Remove(cb.Key);
-                    lastRescanFrame.Remove(cb.Key);
-                }
                 // MinimapCanvas: always remove from positioned so it can be re-placed.
                 // If grip-dragged, PositionCanvases will restore from anchor offsets.
                 // If not, it gets default head+forward placement.
@@ -158,7 +151,7 @@ internal sealed class CanvasPlacement
                     gripDragEnforce.Remove(cb.Key);
                 }
             }
-            Log.LogInfo("[CanvasPlacement] Case board opened — recentring CaseBoard (Minimap preserved if grip-dragged)");
+            Log.LogInfo("[CanvasPlacement] Case board opened — re-placing Minimap and anchor-relative canvases");
         }
 
         _placementIndex = 0;
@@ -361,7 +354,7 @@ internal sealed class CanvasPlacement
                 continue;
             }
 
-            // ── Menu, Panel, CaseBoard, Default ──────────────────────────────
+            // ── Menu, Panel, Default ─────────────────────────────────────────
             // Skip if already positioned and not needing recentre.
             if (positionedCanvases.Contains(id)) continue;
 
@@ -399,9 +392,7 @@ internal sealed class CanvasPlacement
 
             _placementIndex++; // incremental depth offset to prevent z-fighting
             // Skip if not currently visible (will be placed when it activates).
-            // Exception: CaseBoard canvases are always positioned — the game may
-            // fade them in via CanvasGroup after our positioning pass.
-            if (!CanvasCategoryInfo.IsCanvasVisible(canvas) && cat != CanvasCategory.CaseBoard) continue;
+            if (!CanvasCategoryInfo.IsCanvasVisible(canvas)) continue;
 
             float dist = catDefs.Distance;
             if (cat == CanvasCategory.Menu) dist = VRSettingsPanel.MenuDistance;
@@ -433,19 +424,6 @@ internal sealed class CanvasPlacement
                 canvas.transform.rotation = yawOnly;
                 positionedCanvases.Add(id);
                 Log.LogInfo($"[CanvasPlacement] Placed '{cname}' [{cat}] dist={dist - depthJitter:F2}m yaw={headYaw:F1}°");
-            }
-        }
-
-        // Sync map/content nested canvases to CaseCanvas transform.
-        if (casePanelCanvas != null && caseContentIds.Count > 0 && positionedCanvases.Contains(casePanelId))
-        {
-            Vector3    casePos = casePanelCanvas.transform.position;
-            Quaternion caseRot = casePanelCanvas.transform.rotation;
-            foreach (var cid in caseContentIds)
-            {
-                if (!managedCanvases.TryGetValue(cid, out var cc) || cc == null) continue;
-                cc.transform.position = casePos;
-                cc.transform.rotation = caseRot;
             }
         }
     }

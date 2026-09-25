@@ -14,9 +14,9 @@ namespace SoDVR.VR;
 /// — none of this depends on case-board or any other specific canvas's mechanics, which is why
 /// it's split apart from CaseBoardInteraction rather than bundled with it.
 ///
-/// Case-board/minimap-specific behavior (extra hit candidates like ContextMenus/dialogs/dragged
-/// notes, the CaseCanvas Button-ancestor filter, minimap's hidden-overlay-button skip and
-/// map-node click, the case-board/minimap branches of a right-click) is reached through
+/// Minimap/context-menu/dialog-specific behavior (extra hit candidates like ContextMenus/dialogs,
+/// minimap's hidden-overlay-button skip and
+/// map-node click, the minimap branch of a right-click) is reached through
 /// <see cref="ICanvasClickExtensions"/> rather than being inline here — <c>ext</c> is null until
 /// CaseBoardInteraction (a later step in this split) implements it, and stays null forever if a
 /// future menu rewrite bypasses this router entirely for that surface.
@@ -470,7 +470,7 @@ internal interface ICanvasClickExtensions
     int SelectBestResult(Canvas hitCanvas, Il2CppSystem.Collections.Generic.List<RaycastResult> results);
 
     /// <summary>Return true to reject this hit and fall through to the next candidate canvas
-    /// (e.g. CaseCanvas requires a Button ancestor).</summary>
+    /// (a canvas whose raw hits aren't meaningful clicks).</summary>
     bool ShouldRejectHit(Canvas hitCanvas, GameObject hitGo);
 
     /// <summary>Handle a click that had no Button (e.g. the minimap's map-node click). Return

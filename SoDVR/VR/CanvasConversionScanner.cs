@@ -31,10 +31,9 @@ internal static class CanvasConversionScanner
         CanvasMaterialPatcher materialPatcher, HashSet<int> ownedCanvasIds,
         Dictionary<int, Canvas> managedCanvases, HashSet<int> positionedCanvases,
         Dictionary<int, bool> canvasWasActive, HashSet<int> nestedCanvasIds,
-        HashSet<int> caseContentIds, Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
-        ref Canvas? casePanelCanvas, ref int casePanelId,
+        Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
         int frameCount, Dictionary<int, int> lastRescanFrame,
-        Dictionary<int, Graphic> managedFades, Camera? gameCamRef, Camera? leftCam,
+        Dictionary<int, Graphic> managedFades, Camera? leftCam,
         ref Canvas? minimapCanvasRef,
         ref GameObject? popupMessageGO, ref Canvas? popupMessageCanvas,
         ref GameObject? tutorialMessageGO, ref Canvas? tutorialMessageCanvas,
@@ -44,8 +43,7 @@ internal static class CanvasConversionScanner
         var dead = new List<int>();
         foreach (var kvp in managedCanvases)
             if (kvp.Value == null) dead.Add(kvp.Key);
-        foreach (var k in dead) { managedCanvases.Remove(k); positionedCanvases.Remove(k); canvasWasActive.Remove(k); nestedCanvasIds.Remove(k); caseContentIds.Remove(k); gripDragEnforce.Remove(k); }
-        if (dead.Contains(casePanelId)) { casePanelCanvas = null; casePanelId = -1; }
+        foreach (var k in dead) { managedCanvases.Remove(k); positionedCanvases.Remove(k); canvasWasActive.Remove(k); nestedCanvasIds.Remove(k); gripDragEnforce.Remove(k); }
 
         Canvas[] all;
         try
@@ -92,44 +90,9 @@ internal static class CanvasConversionScanner
             if (CanvasCategoryInfo.GetCanvasCategory(cname) == CanvasCategory.Ignored)
                 continue;
 
-            // CaseCanvas: convert to WorldSpace but suppress background elements
-            // that cause bright white wash. The interactive case board content
-            // (pins, notes, evidence) lives as children of this canvas.
-            if (string.Equals(cname, "CaseCanvas", StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    // Suppress background children that cause the white wash
-                    var children = canvas.GetComponentsInChildren<Transform>(true);
-                    foreach (var child in children)
-                    {
-                        if (child == null || child == canvas.transform) continue;
-                        string cn = child.gameObject.name ?? "";
-                        if (cn.Equals("BG", StringComparison.OrdinalIgnoreCase))
-                        {
-                            // Hide background elements by making their graphics transparent
-                            var bg = child.GetComponent<Graphic>();
-                            if (bg != null)
-                                bg.color = new Color(bg.color.r, bg.color.g, bg.color.b, 0f);
-                            Log.LogInfo($"[CanvasConversionScanner] CaseCanvas: suppressed BG element '{cn}'");
-                        }
-                    }
-                    // Keep GraphicRaycaster enabled so pinned notes on the case board can be clicked.
-                    // BG element hits are filtered out in TryClickCanvas to prevent background steals.
-                }
-                catch { }
-                // Fall through to normal conversion below
-            }
-
-            ConvertCanvasToWorldSpace(canvas, materialPatcher, managedFades, gameCamRef, leftCam);
+            ConvertCanvasToWorldSpace(canvas, materialPatcher, managedFades, leftCam);
             managedCanvases[id] = canvas;
 
-            // Cache CaseCanvas — enforced to follow the case-board anchor every frame.
-            if (string.Equals(cname, "CaseCanvas", StringComparison.OrdinalIgnoreCase))
-            {
-                casePanelCanvas = canvas;
-                casePanelId = id;
-            }
             // Cache MinimapCanvas — used for direct ray-hit checks independent of _cursorTargetCanvas.
             if (cname.IndexOf("Minimap", StringComparison.OrdinalIgnoreCase) >= 0)
                 minimapCanvasRef = canvas;
@@ -166,11 +129,7 @@ internal static class CanvasConversionScanner
                 {
                     var gr = c.GetComponent<GraphicRaycaster>();
                     if (gr == null) c.gameObject.AddComponent<GraphicRaycaster>();
-                    string rpName = c.gameObject.name ?? "";
-                    if (gameCamRef != null && string.Equals(rpName, "CaseCanvas", StringComparison.OrdinalIgnoreCase))
-                        c.worldCamera = gameCamRef;
-                    else if (leftCam != null)
-                        c.worldCamera = leftCam;
+                    if (leftCam != null) c.worldCamera = leftCam;
                 }
                 catch { }
             }
@@ -370,7 +329,7 @@ internal static class CanvasConversionScanner
     }
 
     private static void ConvertCanvasToWorldSpace(Canvas canvas, CanvasMaterialPatcher materialPatcher,
-        Dictionary<int, Graphic> managedFades, Camera? gameCamRef, Camera? leftCam)
+        Dictionary<int, Graphic> managedFades, Camera? leftCam)
     {
         // CRITICAL: disable CanvasScaler FIRST.
         // Without this, CanvasScaler inflates sizeDelta from the reference resolution (e.g. 1280×720)
@@ -418,14 +377,7 @@ internal static class CanvasConversionScanner
             var gr = canvas.GetComponent<GraphicRaycaster>();
             if (gr == null) gr = canvas.gameObject.AddComponent<GraphicRaycaster>();
             gr.blockingMask = 0;
-            // CaseCanvas uses the game camera so the game's native Input.mousePosition →
-            // canvas.worldCamera pipeline works for drag/click interaction.
-            // All other canvases use _leftCam for VR GraphicRaycaster hit-testing.
-            string wcName = canvas.gameObject.name ?? "";
-            if (gameCamRef != null && string.Equals(wcName, "CaseCanvas", StringComparison.OrdinalIgnoreCase))
-                canvas.worldCamera = gameCamRef;
-            else if (leftCam != null)
-                canvas.worldCamera = leftCam;
+            if (leftCam != null) canvas.worldCamera = leftCam;
         }
         catch (Exception ex) { Log.LogWarning($"[CanvasConversionScanner] GraphicRaycaster setup: {ex.Message}"); }
 
