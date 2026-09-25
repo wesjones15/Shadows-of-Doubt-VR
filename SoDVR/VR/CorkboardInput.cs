@@ -259,6 +259,8 @@ internal sealed class CorkboardInput : IRTPointerExtension
         return true;
     }
 
+    public bool TryTakeScroll(float delta, GameObject? hitGo, in RTPointerSample sample) => false;
+
     public void Cancel()
     {
         if (_pinRT != null && _dragging) _pinRT.localPosition = _pinStartLocal;

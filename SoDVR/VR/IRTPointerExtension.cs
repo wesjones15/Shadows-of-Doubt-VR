@@ -37,6 +37,10 @@ internal interface IRTPointerExtension
     /// right-button click is then not sent.</summary>
     bool TryTakeSecondaryClick(GameObject? hitGo, in RTPointerSample sample);
 
+    /// <summary>Stick scroll over <paramref name="hitGo"/>. Return true if handled here — no scroll
+    /// event is sent then.</summary>
+    bool TryTakeScroll(float delta, GameObject? hitGo, in RTPointerSample sample);
+
     /// <summary>The panel's alternate button (B) this frame, with whatever is under the pointer.</summary>
     void OnAltButton(bool press, bool held, bool release, GameObject? hitGo, in RTPointerSample sample);
 

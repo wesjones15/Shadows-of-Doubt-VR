@@ -192,7 +192,7 @@ internal sealed class RTPanelPointer
 
         if (input.SecondaryClick && !(_extension?.TryTakeSecondaryClick(hitGo, sample) ?? false) && hitGo != null)
             SecondaryClick(hitGo, hitResult);
-        if (Mathf.Abs(input.Scroll) > 0f && hitGo != null)
+        if (Mathf.Abs(input.Scroll) > 0f && !(_extension?.TryTakeScroll(input.Scroll, hitGo, sample) ?? false) && hitGo != null)
         {
             _ped.scrollDelta = new Vector2(0f, input.Scroll);
             ExecuteEvents.ExecuteHierarchy(hitGo, _ped, ExecuteEvents.scrollHandler);
