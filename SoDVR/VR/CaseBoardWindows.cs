@@ -34,7 +34,8 @@ internal sealed class CaseBoardWindows
 
     private const float WindowMarginPixels = 6f;
     private const float GripMargin = 1.3f;
-    private const int MaxRelocationLogsPerWindow = 3;
+    private const int DiagnosticDelayFrames = 60;
+    private const int ScrollLogFrames = 30;
 
     // Default placement for a new window, in board-anchor space: in front of the navbar (where
     // legacy put WindowCanvas, at menu distance), each further window cascaded right/down/nearer.
@@ -83,8 +84,45 @@ internal sealed class CaseBoardWindows
             {
                 w.View.SetPixelRect(Grow(_panel.PixelRectOf(w.Rect), WindowMarginPixels));
                 if (--w.OverlayRefreshCountdown <= 0) RefreshOverlays(w);
+                LogDiagnostics(w);
             }
             w.View.Visible = visible;
+        }
+    }
+
+    // Diagnostics for open notes: why the close (minus) button is never hit, how often the game
+    // re-centres the window, and whether its scroll content jitters (the first note opened).
+    private void LogDiagnostics(BoardWindow w)
+    {
+        string name = w.Canvas.gameObject.name;
+        if (Time.frameCount == w.DiagnosticFrame)
+        {
+            var close = w.Info != null && w.Info.closeButton != null ? w.Info.closeButton.transform : null;
+            CanvasDump.DumpButton($"open-note close '{name}'", close);
+            var closeRect = close != null ? close.GetComponent<RectTransform>() : null;
+            if (closeRect != null)
+                Log.LogInfo($"[CaseBoardWindows] '{name}' close button pixelRect={_panel.UnclampedPixelRectOf(closeRect)} viewPixelRect={w.View.PixelRect}");
+        }
+
+        if (w.ScrollLogFramesLeft > 0 && Time.frameCount >= w.DiagnosticFrame)
+        {
+            w.ScrollLogFramesLeft--;
+            try
+            {
+                var scroll = w.Info?.scrollRect;
+                if (scroll != null && scroll.content != null)
+                    Log.LogInfo($"[CaseBoardWindows] '{name}' frame {Time.frameCount}: scroll content anchoredPosition={scroll.content.anchoredPosition} " +
+                                $"velocity={scroll.velocity} normalized={scroll.normalizedPosition} gameMovesSoFar={w.GameMoves}");
+            }
+            catch (Exception ex) { Log.LogWarning($"[CaseBoardWindows] Scroll log: {ex.Message}"); w.ScrollLogFramesLeft = 0; }
+        }
+
+        if (Time.unscaledTime - w.MoveCountStart >= 1f)
+        {
+            if (w.GameMoves > 0)
+                Log.LogInfo($"[CaseBoardWindows] Game moved '{name}' {w.GameMoves}x in the last {Time.unscaledTime - w.MoveCountStart:F1}s (last to {w.LastGamePosition}) — slot re-applied each time.");
+            w.GameMoves = 0;
+            w.MoveCountStart = Time.unscaledTime;
         }
     }
 
@@ -126,8 +164,15 @@ internal sealed class CaseBoardWindows
             return;
         }
 
-        var view = _panel.CreateView(canvas.gameObject.name, extension: new WindowPointerExtension(canvas.GetComponent<InfoWindow>()));
-        var w = new BoardWindow(canvas, rect, view, slot, _anchor);
+        var info = canvas.GetComponent<InfoWindow>();
+        var view = _panel.CreateView(canvas.gameObject.name, extension: new WindowPointerExtension(info));
+        var w = new BoardWindow(canvas, rect, view, slot, _anchor)
+        {
+            Info = info,
+            DiagnosticFrame = Time.frameCount + DiagnosticDelayFrames,
+            ScrollLogFramesLeft = _windows.Count == 0 ? ScrollLogFrames : 0,
+            MoveCountStart = Time.unscaledTime,
+        };
         _slots[slot] = w;
         _windows[id] = w;
 
@@ -154,16 +199,17 @@ internal sealed class CaseBoardWindows
         Log.LogInfo($"[CaseBoardWindows] Window closed: slot={w.Slot}");
     }
 
-    /// <summary>Moves the window's rect centre onto its slot centre. Logs (a few times per window)
-    /// when the game had moved it since the last write — evidence for whether the game fights the
-    /// slot layout every frame or only positions windows when they open.</summary>
+    /// <summary>Moves the window's rect centre onto its slot centre, counting how often the game had
+    /// moved it since the last write (diagnostic: the game re-centres open notes every frame).</summary>
     private void ApplySlot(BoardWindow w)
     {
         if (w.Canvas == null) return;
         var rt = w.Rect;
-        if (w.HasWritten && (rt.localPosition - w.LastWritten).sqrMagnitude > 0.25f
-            && w.RelocationLogs++ < MaxRelocationLogsPerWindow)
-            Log.LogInfo($"[CaseBoardWindows] Game moved '{w.Canvas.gameObject.name}' to {rt.localPosition} since the last slot write — re-applying.");
+        if (w.HasWritten && (rt.localPosition - w.LastWritten).sqrMagnitude > 0.25f)
+        {
+            w.GameMoves++;
+            w.LastGamePosition = rt.localPosition;
+        }
 
         int col = w.Slot % SlotColumns, row = w.Slot / SlotColumns;
         var slotCenterPixel = new Vector2((col + 0.5f) * SlotSize, (SlotRows - row - 0.5f) * SlotSize);
@@ -249,7 +295,12 @@ internal sealed class CaseBoardWindows
         public int OverlayRefreshCountdown;
         public Vector3 LastWritten;
         public bool HasWritten;
-        public int RelocationLogs;
+        public InfoWindow? Info;
+        public int DiagnosticFrame;
+        public int ScrollLogFramesLeft;
+        public int GameMoves;
+        public Vector3 LastGamePosition;
+        public float MoveCountStart;
 
         public void SetLayout(Vector3 offset, Quaternion rotation)
         {

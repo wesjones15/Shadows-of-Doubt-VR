@@ -92,49 +92,105 @@ internal static class CanvasDump
         DumpInventoryCloseButton();
     }
 
-    /// <summary>
-    /// Why the inventory's X (BioScreenController.closeButton) isn't drawn in its RT panel: every
-    /// way it could be hidden — inactive, faded by colour / CanvasRenderer / CanvasGroup alpha,
-    /// culled or clipped by a mask, on a nested canvas, or placed outside the canvas rect.
-    /// </summary>
+    /// <summary>The inventory's X (BioScreenController.closeButton), which is missing from its RT
+    /// panel, with the inventory's own state.</summary>
     public static void DumpInventoryCloseButton()
     {
         try
         {
             var bio = BioScreenController.Instance;
             if (bio == null) { Log.LogInfo("[CanvasDump] BioScreenController.Instance=null"); return; }
-            var button = bio.closeButton;
             Log.LogInfo($"[CanvasDump] BioScreenController isOpen={bio.isOpen} openedFromPause={bio.openedFromPause} " +
-                        $"inventoryDisplayProgress={bio.inventoryDisplayProgress:F2} closeButton={(button == null ? "null" : "set")}");
-            if (button == null) return;
+                        $"inventoryDisplayProgress={bio.inventoryDisplayProgress:F2}");
+            DumpButton("inventory X", bio.closeButton != null ? bio.closeButton.transform : null);
+        }
+        catch (Exception ex) { Log.LogWarning($"[CanvasDump] Inventory close button: {ex.Message}"); }
+    }
 
-            var t = button.transform;
+    /// <summary>
+    /// Everything that decides whether a button is seen and hit in its RT panel: where it sits
+    /// (and the layout chain that put it there), every way it could be hidden (inactive, faded,
+    /// culled, masked), what can hit-test it (the raycasters of its canvases, CanvasGroups blocking
+    /// raycasts), and which graphics are drawn over it in the game's own draw order.
+    /// </summary>
+    public static void DumpButton(string label, Transform? t)
+    {
+        if (t == null) { Log.LogInfo($"[CanvasDump] {label}: null"); return; }
+        try
+        {
             Canvas? owner = null;
-            var path = new StringBuilder(t.gameObject.name);
-            for (var tr = t.parent; tr != null; tr = tr.parent)
+            var path = new StringBuilder();
+            for (var tr = t; tr != null; tr = tr.parent)
             {
-                path.Insert(0, tr.gameObject.name + "/");
+                path.Insert(0, tr == t ? tr.gameObject.name : tr.gameObject.name + "/");
                 if (owner == null) owner = tr.GetComponent<Canvas>();
             }
-            owner ??= t.GetComponent<Canvas>();
             var root = owner != null ? owner.rootCanvas : null;
-            Log.LogInfo($"[CanvasDump] closeButton path='{path}' activeSelf={t.gameObject.activeSelf} activeInHierarchy={t.gameObject.activeInHierarchy} " +
-                        $"interactable={button.interactable} ownerCanvas='{owner?.gameObject.name}' nested={(owner != null && !owner.isRootCanvas)} " +
+            var rt = t.GetComponent<RectTransform>();
+            Log.LogInfo($"[CanvasDump] {label}: path='{path}' activeInHierarchy={t.gameObject.activeInHierarchy} " +
+                        $"ownerCanvas='{owner?.gameObject.name}' nested={(owner != null && !owner.isRootCanvas)} " +
                         $"overrideSorting={owner?.overrideSorting} sortingOrder={owner?.sortingOrder} rootCanvas='{root?.gameObject.name}' " +
-                        $"rectInRoot={(root != null ? CanvasLocalRect(root, t.GetComponent<RectTransform>()) : "n/a")} rootRect={DescribeRect(root?.GetComponent<RectTransform>())} " +
-                        $"canvasGroups=[{DescribeCanvasGroupChain(t)}] masks=[{DescribeMasks(t)}]");
+                        $"rectInRoot={(root != null && rt != null ? CanvasLocalRect(root, rt) : "n/a")} rootRect={DescribeRect(root?.GetComponent<RectTransform>())} " +
+                        $"raycasters=[{DescribeRaycasters(t)}] canvasGroups=[{DescribeCanvasGroupChain(t)}] masks=[{DescribeMasks(t)}]");
 
+            int maxDepth = int.MinValue;
             foreach (var g in t.GetComponentsInChildren<Graphic>(true))
             {
                 if (g == null) continue;
                 var cr = g.canvasRenderer;
+                if (g.gameObject.activeInHierarchy && g.enabled) maxDepth = Math.Max(maxDepth, g.depth);
                 Log.LogInfo($"[CanvasDump]   graphic '{g.gameObject.name}' {g.GetIl2CppType().Name} activeInHierarchy={g.gameObject.activeInHierarchy} " +
                             $"enabled={g.enabled} colorA={g.color.a:F2} rendererA={cr.GetAlpha():F2} inheritedA={cr.GetInheritedAlpha():F2} " +
                             $"cull={cr.cull} raycastTarget={g.raycastTarget} depth={g.depth} " +
                             $"rect={(root != null ? CanvasLocalRect(root, g.rectTransform) : "n/a")}");
             }
+
+            for (var tr = t; tr != null; tr = tr.parent)
+            {
+                var r = tr.GetComponent<RectTransform>();
+                if (r != null)
+                    Log.LogInfo($"[CanvasDump]   layout '{tr.gameObject.name}' anchorMin={r.anchorMin} anchorMax={r.anchorMax} pivot={r.pivot} " +
+                                $"anchoredPosition={r.anchoredPosition} sizeDelta={r.sizeDelta} localPosition={r.localPosition} localScale={r.localScale}");
+                if (root != null && tr == root.transform) break;
+            }
+
+            if (root != null && rt != null) LogOccluders(root, t, RootLocalRect(root, rt), maxDepth);
         }
-        catch (Exception ex) { Log.LogWarning($"[CanvasDump] Inventory close button: {ex.Message}"); }
+        catch (Exception ex) { Log.LogWarning($"[CanvasDump] {label}: {ex.Message}"); }
+    }
+
+    private const int MaxOccludersLogged = 12;
+
+    /// <summary>Graphics on the same root canvas that overlap the button and are drawn after it
+    /// (depth is absolute within the root canvas) — what covers it, and takes the pointer first.</summary>
+    private static void LogOccluders(Canvas root, Transform button, Rect buttonRect, int buttonDepth)
+    {
+        int count = 0;
+        var sb = new StringBuilder();
+        foreach (var g in root.GetComponentsInChildren<Graphic>(false))
+        {
+            if (g == null || !g.enabled || g.transform.IsChildOf(button) || g.depth <= buttonDepth) continue;
+            bool drawn = g.color.a * g.canvasRenderer.GetInheritedAlpha() > 0.01f;
+            if (!drawn && !g.raycastTarget) continue;
+            if (!RootLocalRect(root, g.rectTransform).Overlaps(buttonRect)) continue;
+            if (count++ >= MaxOccludersLogged) continue;
+            var canvas = g.canvas;
+            sb.Append($" '{g.gameObject.name}'(depth={g.depth} drawn={drawn} raycastTarget={g.raycastTarget} canvas='{canvas?.gameObject.name}')");
+        }
+        Log.LogInfo($"[CanvasDump]   drawn over it: {count}{sb}");
+    }
+
+    private static string DescribeRaycasters(Transform t)
+    {
+        var sb = new StringBuilder();
+        for (var tr = t; tr != null; tr = tr.parent)
+        {
+            if (tr.GetComponent<Canvas>() == null) continue;
+            var gr = tr.GetComponent<GraphicRaycaster>();
+            if (sb.Length > 0) sb.Append("; ");
+            sb.Append($"'{tr.gameObject.name}' {(gr == null ? "none" : gr.enabled ? "enabled" : "disabled")}");
+        }
+        return sb.ToString();
     }
 
     private static string DescribeMasks(Transform t)
@@ -230,11 +286,16 @@ internal static class CanvasDump
     /// with scaleFactor 1 that is canvas pixels, centred on the canvas pivot.</summary>
     private static string CanvasLocalRect(Canvas canvas, RectTransform rt)
     {
+        var r = RootLocalRect(canvas, rt);
+        return $"({r.xMin:F0},{r.yMin:F0},{r.width:F0},{r.height:F0})";
+    }
+
+    private static Rect RootLocalRect(Canvas canvas, RectTransform rt)
+    {
         var r = rt.rect;
         var ct = canvas.transform;
         Vector3 a = ct.InverseTransformPoint(rt.TransformPoint(new Vector3(r.xMin, r.yMin, 0f)));
         Vector3 b = ct.InverseTransformPoint(rt.TransformPoint(new Vector3(r.xMax, r.yMax, 0f)));
-        float xMin = Mathf.Min(a.x, b.x), yMin = Mathf.Min(a.y, b.y);
-        return $"({xMin:F0},{yMin:F0},{Mathf.Abs(b.x - a.x):F0},{Mathf.Abs(b.y - a.y):F0})";
+        return Rect.MinMaxRect(Mathf.Min(a.x, b.x), Mathf.Min(a.y, b.y), Mathf.Max(a.x, b.x), Mathf.Max(a.y, b.y));
     }
 }

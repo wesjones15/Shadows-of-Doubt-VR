@@ -80,6 +80,7 @@ internal sealed class CaseBoardRTController
     {
         bool open = IsOpen;
         if (open && !_wasOpen && leftCam != null) PlaceAnchor(leftCam);
+        if (open && !_wasOpen) LogInputMode();
         _wasOpen = open;
 
         bool relayout = _relayoutPending;
@@ -90,14 +91,15 @@ internal sealed class CaseBoardRTController
     }
 
     // Diagnostic for the inventory's missing X (__pending_tasks.md §3), logged once the open
-    // animation has settled.
+    // animation has settled and again a second later.
     private void LogInventoryCloseButtonAfterOpen()
     {
         bool inventoryOpen = false;
         try { inventoryOpen = BioScreenController.Instance != null && BioScreenController.Instance.isOpen; } catch { }
         if (inventoryOpen && !_inventoryWasOpen) _inventoryDumpFrame = Time.frameCount + 60;
         _inventoryWasOpen = inventoryOpen;
-        if (!inventoryOpen || Time.frameCount != _inventoryDumpFrame) return;
+        // Twice, a second apart: shows whether the game keeps moving it or it's static layout.
+        if (!inventoryOpen || (Time.frameCount != _inventoryDumpFrame && Time.frameCount != _inventoryDumpFrame + 60)) return;
         CanvasDump.DumpInventoryCloseButton();
     }
 
@@ -117,6 +119,14 @@ internal sealed class CaseBoardRTController
     {
         foreach (var panel in _panels) panel.AppendOverlay(overlay);
         _windows.AppendOverlay(overlay);
+    }
+
+    // Diagnostic: whether the game thinks it's in mouse or controller mode while the board is up
+    // (controller mode would explain windows being re-centred every frame).
+    private static void LogInputMode()
+    {
+        try { Log.LogInfo($"[CaseBoardRT] Board opened: InputController.mouseInputMode={InputController.Instance?.mouseInputMode}"); }
+        catch (System.Exception ex) { Log.LogWarning($"[CaseBoardRT] mouseInputMode read: {ex.Message}"); }
     }
 
     private void PlaceAnchor(Camera leftCam)
