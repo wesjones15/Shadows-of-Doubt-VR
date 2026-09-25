@@ -30,9 +30,7 @@ internal static class CanvasClickRouter
     /// </summary>
     public static void TryClick(Vector3 origin, Vector3 direction, Camera? leftCam,
         Dictionary<int, Canvas> managedCanvases, HashSet<int> noGroupInteractable,
-        Dictionary<int, int> lastRescanFrame, Action requestForceScan,
-        int menuSettingsBtnId, Canvas? menuCanvasRef,
-        Action onSaveLoadButtonClicked, ICanvasClickExtensions? ext)
+        Dictionary<int, int> lastRescanFrame, Action requestForceScan, ICanvasClickExtensions? ext)
     {
         if (leftCam == null) return;
 
@@ -138,60 +136,6 @@ internal static class CanvasClickRouter
 
                     string hitCanvasName = hitCanvas.gameObject.name ?? "";
                     Log.LogInfo($"[CanvasClickRouter] Trigger click: '{go?.name}' on '{hitCanvasName}'");
-
-                    // Detect save-load button clicks.  When the user clicks "Continue" or any
-                    // "New Game"-style button, SaveStateController:LoadSaveState is about to
-                    // reconstruct the entire physics hierarchy.  The caller needs to know NOW —
-                    // before ExecuteEvents propagates the click — so canvas scanning and
-                    // locomotion are fully quiesced before the Rigidbody/CharacterJoint teardown.
-                    // Walk UP the hierarchy — the raycasted GO may be a child (e.g. 'Border')
-                    // rather than the button itself ('Continue').
-                    {
-                        bool isSaveLoad = false;
-                        var slWalker = go?.transform;
-                        for (int slI = 0; slI < 6 && slWalker != null; slI++)
-                        {
-                            string n = (slWalker.gameObject.name ?? "").ToLowerInvariant();
-                            if (n.Contains("continue") || n.Contains("new game") || n.Contains("new city"))
-                            { isSaveLoad = true; break; }
-                            slWalker = slWalker.parent;
-                        }
-                        if (isSaveLoad) onSaveLoadButtonClicked();
-                    }
-
-                    // Check if the click landed on (or inside) the patched Settings button.
-                    // Walk up the hierarchy — the raycasted GO may be a child label, not the button itself.
-                    if (menuSettingsBtnId != 0)
-                    {
-                        var tr = go?.transform;
-                        bool settingsMatched = false;
-                        for (int i = 0; i < 8 && tr != null; i++)
-                        {
-                            if (tr.gameObject.GetInstanceID() == menuSettingsBtnId)
-                            {
-                                Log.LogInfo("[CanvasClickRouter] Settings button intercepted → VRSettingsPanel.Toggle");
-                                VRSettingsPanel.Toggle();
-                                settingsMatched = true;
-                                return;
-                            }
-                            tr = tr.parent;
-                        }
-                        if (!settingsMatched && hitCanvas == menuCanvasRef)
-                        {
-                            var sb2 = new System.Text.StringBuilder();
-                            var dtr = go?.transform;
-                            for (int di = 0; di < 8 && dtr != null; di++)
-                            {
-                                sb2.Append(dtr.gameObject.name);
-                                sb2.Append('(');
-                                sb2.Append(dtr.gameObject.GetInstanceID());
-                                sb2.Append(')');
-                                if (di < 7 && dtr.parent != null) sb2.Append('→');
-                                dtr = dtr.parent;
-                            }
-                            Log.LogInfo($"[CanvasClickRouter] Settings missed (want={menuSettingsBtnId}): {sb2}");
-                        }
-                    }
 
                     // ── VRSettingsPanel button intercept ─────────────────────────────
                     // Walk hierarchy so child GOs (e.g. labels with raycastTarget=false)

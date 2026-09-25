@@ -1205,12 +1205,11 @@ public class VRCamera : MonoBehaviour
 
         _caseBoard.SetFrameContext(
             _managedCanvases, _noGroupInteractable,
-            _lastRescanFrame, () => _forceScanFrames = 30, OnSaveLoadButtonClicked,
-            _menuRTPanel.SettingsBtnId, _menuRTPanel.Canvas,
+            _lastRescanFrame, () => _forceScanFrames = 30,
             _leftCam, _gameCamRef, _rightControllerGO, _leftControllerGO,
             _caseBoardRT.IsOpen, _caseBoardRT.Anchor, _minimapCanvasRef,
             _gripDragEnforce, _gripDragAnchorOffsets,
-            _canvasVRPose, _nestedCanvasIds,
+            _canvasVRPose,
             transform, _cursorHasTarget, _cursorTargetCanvas,
             _locomotion.MinimapInBBtnContext, _minimapBBtnLocalOffset, _minimapBBtnLocalRot, _minimapBBtnHasOffset);
 

@@ -65,7 +65,6 @@ internal sealed class MenuRTPanel
     }
 
     public Canvas? Canvas => _canvas;
-    public int SettingsBtnId => _settingsBtnId;
 
     /// <summary>
     /// True exactly while the quad is placed and visible in the world — Unity's own stable

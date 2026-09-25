@@ -90,9 +90,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private HashSet<int> _ctxNoGroupInteractable = null!;
     private Dictionary<int, int> _ctxLastRescanFrame = null!;
     private Action _ctxRequestForceScan = null!;
-    private Action _ctxOnSaveLoadButtonClicked = null!;
-    private int _ctxMenuSettingsBtnId;
-    private Canvas? _ctxMenuCanvasRef;
     private Camera? _ctxLeftCam;
     private Camera? _ctxGameCamRef;
     private GameObject? _ctxRightControllerGO;
@@ -103,7 +100,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
     private Dictionary<int, (Vector3 pos, Quaternion rot)> _ctxGripDragEnforce = null!;
     private Dictionary<int, (Vector3 offset, Quaternion rot)> _ctxGripDragAnchorOffsets = null!;
     private Dictionary<int, (Vector3 pos, Quaternion rot, Vector3 scale)> _ctxCanvasVRPose = null!;
-    private HashSet<int> _ctxNestedCanvasIds = null!;
     private Transform _ctxVrOrigin = null!;
     private bool _ctxCursorHasTarget;
     private Canvas? _ctxCursorTargetCanvas;
@@ -121,14 +117,12 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
 
     public void SetFrameContext(
         Dictionary<int, Canvas> managedCanvases, HashSet<int> noGroupInteractable,
-        Dictionary<int, int> lastRescanFrame, Action requestForceScan, Action onSaveLoadButtonClicked,
-        int menuSettingsBtnId, Canvas? menuCanvasRef,
+        Dictionary<int, int> lastRescanFrame, Action requestForceScan,
         Camera? leftCam, Camera? gameCamRef, GameObject? rightControllerGO, GameObject? leftControllerGO,
         bool caseBoardOpen, Transform caseBoardAnchor, Canvas? minimapCanvasRef,
         Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
         Dictionary<int, (Vector3 offset, Quaternion rot)> gripDragAnchorOffsets,
         Dictionary<int, (Vector3 pos, Quaternion rot, Vector3 scale)> canvasVRPose,
-        HashSet<int> nestedCanvasIds,
         Transform vrOrigin, bool cursorHasTarget, Canvas? cursorTargetCanvas,
         bool minimapInBBtnContext, Vector3 minimapBBtnLocalOffset, Quaternion minimapBBtnLocalRot, bool minimapBBtnHasOffset)
     {
@@ -136,9 +130,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         _ctxNoGroupInteractable = noGroupInteractable;
         _ctxLastRescanFrame = lastRescanFrame;
         _ctxRequestForceScan = requestForceScan;
-        _ctxOnSaveLoadButtonClicked = onSaveLoadButtonClicked;
-        _ctxMenuSettingsBtnId = menuSettingsBtnId;
-        _ctxMenuCanvasRef = menuCanvasRef;
         _ctxLeftCam = leftCam;
         _ctxGameCamRef = gameCamRef;
         _ctxRightControllerGO = rightControllerGO;
@@ -149,7 +140,6 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
         _ctxGripDragEnforce = gripDragEnforce;
         _ctxGripDragAnchorOffsets = gripDragAnchorOffsets;
         _ctxCanvasVRPose = canvasVRPose;
-        _ctxNestedCanvasIds = nestedCanvasIds;
         _ctxVrOrigin = vrOrigin;
         _ctxCursorHasTarget = cursorHasTarget;
         _ctxCursorTargetCanvas = cursorTargetCanvas;
@@ -442,8 +432,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
             _triggerNeedsRelease = true;
             _triggerFireFrame = Time.frameCount;
             CanvasClickRouter.TryClick(rPos, rFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
-                _ctxLastRescanFrame, _ctxRequestForceScan, _ctxMenuSettingsBtnId, _ctxMenuCanvasRef,
-                _ctxOnSaveLoadButtonClicked, this);
+                _ctxLastRescanFrame, _ctxRequestForceScan, this);
         }
 
         // ── Left trigger → same generic click fallback, independent state ──
@@ -466,8 +455,7 @@ internal sealed class CaseBoardInteraction : ICanvasClickExtensions
                 Vector3 lPos = _ctxLeftControllerGO.transform.position;
                 Vector3 lFwd = _ctxLeftControllerGO.transform.forward;
                 CanvasClickRouter.TryClick(lPos, lFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
-                    _ctxLastRescanFrame, _ctxRequestForceScan, _ctxMenuSettingsBtnId, _ctxMenuCanvasRef,
-                    _ctxOnSaveLoadButtonClicked, this);
+                    _ctxLastRescanFrame, _ctxRequestForceScan, this);
             }
         }
 
