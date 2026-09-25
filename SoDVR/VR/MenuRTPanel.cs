@@ -153,7 +153,7 @@ internal sealed class MenuRTPanel
             _quadGO.transform.position = headPos + forward * dist + Vector3.up * catDef.VerticalOffset;
             _quadGO.transform.rotation = yawOnly;
             _quadPlaced = true;
-            Log.LogInfo($"[MenuRTPanel] Placed at dist={dist:F2}m yaw={headYaw:F1}°");
+            Log.LogInfo($"[MenuRTPanel] Placed at dist={dist:F2}m yaw={headYaw:F1}° (t={Time.realtimeSinceStartup:F1}s frame={Time.frameCount})");
         }
 
         if (_quadGO != null)

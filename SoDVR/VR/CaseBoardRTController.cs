@@ -126,7 +126,7 @@ internal sealed class CaseBoardRTController
     // (controller mode would explain windows being re-centred every frame).
     private static void LogInputMode()
     {
-        try { Log.LogInfo($"[CaseBoardRT] Board opened: InputController.mouseInputMode={InputController.Instance?.mouseInputMode}"); }
+        try { Log.LogInfo($"[CaseBoardRT] Board opened (t={Time.realtimeSinceStartup:F1}s frame={Time.frameCount}): InputController.mouseInputMode={InputController.Instance?.mouseInputMode}"); }
         catch (System.Exception ex) { Log.LogWarning($"[CaseBoardRT] mouseInputMode read: {ex.Message}"); }
     }
 
