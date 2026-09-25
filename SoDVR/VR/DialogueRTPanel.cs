@@ -7,8 +7,8 @@ namespace SoDVR.VR;
 
 /// <summary>
 /// DialogCanvas (talking to a citizen, or on the phone) on the RT pipeline: one view tight to the
-/// dialogue window, placed below the eye line at arm's length when the conversation starts so it
-/// doesn't cover the face being talked to. Trigger on an option says it (the game's own click
+/// dialogue window, centred at eye level at arm's length when the conversation starts (the window
+/// itself — the game draws it near the bottom of its screen). Trigger on an option says it (the game's own click
 /// handler); stick moves the selection, which is how the game pages through more options than fit;
 /// B ends the conversation from anywhere — the game's own "End Conversation" action, which it binds
 /// to right-click.
@@ -25,11 +25,11 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
     private const float ContentMarginPixels = 8f;
     private const float GripMargin = 1.3f;
     // Full screen width in the world; the dialogue window is a little over half of it.
-    private const float ScreenWorldWidth = 0.6f;
+    private const float ScreenWorldWidth = 1.2f;
     // Stick deflection accumulates in RTPanelInput's scroll units; one option step per unit.
     private const float ScrollPerOption = 1f;
 
-    private static readonly Vector3 DefaultHeadOffset = new(0f, -0.35f, 0.75f);
+    private static readonly Vector3 DefaultHeadOffset = new(0f, 0f, 0.75f);
     private static readonly InteractionKey[] ActionKeys =
         { InteractionKey.secondary, InteractionKey.primary, InteractionKey.alternative };
 
@@ -82,7 +82,7 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
         _wasOpen = open;
 
         _view!.Visible = open;
-        if (open) _view.SetCanvasPose(_posePosition, _poseRotation);
+        if (open) _view.SetPose(_posePosition, _poseRotation);
 
         OpenXRManager.GetButtonBState(out bool b);
         if (open && b && !_prevB) EndConversation();
@@ -175,7 +175,7 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
     {
         _posePosition = position;
         _poseRotation = rotation;
-        if (_view != null && _view.Visible) _view.SetCanvasPose(_posePosition, _poseRotation);
+        if (_view != null && _view.Visible) _view.SetPose(_posePosition, _poseRotation);
     }
 
     public void OnGripReleased()
