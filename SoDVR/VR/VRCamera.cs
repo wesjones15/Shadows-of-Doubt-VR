@@ -719,7 +719,7 @@ public class VRCamera : MonoBehaviour
                 try { _interactLabel.BeforeRender(_leftPointer.Label, _leftCam); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] InteractLabelPanel.BeforeRender: {ex.Message}"); }
 
-                try { _compass.BeforeRender(_leftCam); }
+                try { _compass.BeforeRender(_hudRT, _leftCam); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] CompassDisplay.BeforeRender: {ex.Message}"); }
 
                 // Directional route arrow: reposition in front of VR head.
