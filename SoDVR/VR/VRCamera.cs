@@ -42,6 +42,10 @@ public class VRCamera : MonoBehaviour
 
     private Transform     _cameraOffset = null!;
     private Camera        _leftCam    = null!;   // scene eye camera — renders everything (all layers)
+
+    /// <summary>The head's view (the left eye), and the game's own camera — for Harmony patches.</summary>
+    internal static Camera? HeadCamera { get; private set; }
+    internal static Camera? GameCamera { get; private set; }
     private Camera        _rightCam   = null!;
     private RenderTexture _leftRT     = null!;
     private RenderTexture _rightRT    = null!;
@@ -683,6 +687,7 @@ public class VRCamera : MonoBehaviour
         var leftGO = new GameObject("LeftEye");
         leftGO.transform.SetParent(_cameraOffset, false);
         _leftCam = leftGO.AddComponent<Camera>();
+        HeadCamera = _leftCam;
         _leftRT  = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32) { name = "SoDVR_Left" };
         _leftRT.Create();
         CameraRig.SetupEyeCam(_leftCam, _leftRT);
@@ -997,6 +1002,7 @@ public class VRCamera : MonoBehaviour
         _gameCam          = found.transform;
         _gameCamPending   = found;
         _gameCamRef       = found;
+        GameCamera        = found;
         _gameCamSavedMask = found.cullingMask;
         _gameCamDisableDelay = 10;
         Log.LogInfo($"[VRCamera] Found game camera: '{found.gameObject.name}' pos={found.transform.position} (suppress in 10 frames)");
