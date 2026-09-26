@@ -485,7 +485,7 @@ internal sealed class LocomotionController
             const uint MOUSEEVENTF_LEFTUP   = 0x0004;
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
             mouse_event(MOUSEEVENTF_LEFTUP,   0, 0, 0, UIntPtr.Zero);
-            Log.LogInfo("[Locomotion] Interact (LMB via left controller aim)");
+            Log.LogInfo($"[Locomotion] Interact (LMB via left controller aim) at {ControllerInteraction.AimTarget}");
         }
         catch (Exception ex) { Log.LogWarning($"[Locomotion] UpdateInteract: {ex.Message}"); }
     }

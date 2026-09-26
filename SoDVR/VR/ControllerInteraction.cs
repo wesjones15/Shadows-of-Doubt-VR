@@ -24,6 +24,9 @@ internal sealed class ControllerInteraction
     private bool _leftDotVisible;
     private Canvas? _leftLabelCanvas;
     private TextMeshProUGUI? _leftLabelText;
+
+    /// <summary>What the left hand last pointed at, as the interact log reports it.</summary>
+    public static string AimTarget { get; private set; } = "nothing";
     private bool _leftLabelVisible;
 
     private readonly List<GameObject> _aimDotPool = new();
@@ -248,6 +251,11 @@ internal sealed class ControllerInteraction
                 catch { }
             }
 
+            AimTarget = !didHit ? "nothing"
+                : hitIC == null ? $"'{lHit.collider.name}' (not interactable)"
+                : !isInteractable ? $"'{hitIC.name}' (out of reach at {lHit.distance:F1} m)"
+                : $"'{hitIC.name}'";
+
             // ── Dot: WorldSpace canvas at hit point ──────────────────────
             if (_leftDotCanvas != null)
             {
@@ -314,6 +322,7 @@ internal sealed class ControllerInteraction
                     catch { }
 
                     string fullLabel = string.IsNullOrEmpty(actionText) ? objName : $"{objName}\n{actionText}";
+                    AimTarget = $"'{hitIC.name}' labelled {fullLabel.Replace("\n", " | ")}";
                     if (_leftLabelText != null)
                         _leftLabelText.text = fullLabel;
 
