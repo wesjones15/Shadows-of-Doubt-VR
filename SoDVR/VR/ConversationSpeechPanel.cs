@@ -28,6 +28,8 @@ internal sealed class ConversationSpeechPanel
     private RectTransform? _anchor;
     private int _discoveryCooldown;
     private bool _wasShowingAlone;
+    private bool _hadChildren;
+    private int _poseLogs;
 
     public ConversationSpeechPanel(int quadLayer, RTPanelInput input, float screenWorldWidth)
     {
@@ -50,7 +52,13 @@ internal sealed class ConversationSpeechPanel
 
         var rect = _panel.ContentPixelRect(_anchor, ContentMarginPixels, out int count);
         bool showing = count > 0;
-        _view!.Visible = showing;
+        if (showing != _view!.Visible || (_anchor.childCount > 0) != _hadChildren)
+        {
+            _hadChildren = _anchor.childCount > 0;
+            Log.LogInfo($"[ConversationSpeech] TEMP showing={showing} children={_anchor.childCount} graphics={count} rect={rect} " +
+                        $"dialogueView={(dialogueView != null ? dialogueView.Transform.position.ToString() : "none")}");
+        }
+        _view.Visible = showing;
         if (!showing) { _wasShowingAlone = false; return; }
         _view.SetPixelRect(rect);
 
@@ -59,6 +67,9 @@ internal sealed class ConversationSpeechPanel
             var rotation = dialogueView.Transform.rotation;
             float lift = 0.5f * (dialogueView.WorldSize.y + _view.WorldSize.y) + GapMeters;
             _view.SetPose(dialogueView.Transform.position + rotation * (Vector3.up * lift), rotation);
+            if (_poseLogs++ < 3)
+                Log.LogInfo($"[ConversationSpeech] TEMP pose={_view.Transform.position} size={_view.WorldSize} rot={rotation.eulerAngles} " +
+                            $"visible={_view.Visible} dialogue={dialogueView.Transform.position} dialogueSize={dialogueView.WorldSize}");
             _wasShowingAlone = false;
         }
         else if (!_wasShowingAlone)
