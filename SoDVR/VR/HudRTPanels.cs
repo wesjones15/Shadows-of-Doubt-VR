@@ -93,7 +93,9 @@ internal sealed class HudRTPanels
         _boardAnchor = boardAnchor;
         _boardExtent = boardExtent;
 
-        _sheet!.Visible = IsShowing && !onBoard;
+        // On a computer the sheet would float between the player and the monitor; clue messages
+        // and world marks stay, as the computer can turn up clues.
+        _sheet!.Visible = IsShowing && !onBoard && !ComputerUse.InUse;
         if (onBoard) TickBoard(boardAnchor);
         else HideBoardElements();
 
