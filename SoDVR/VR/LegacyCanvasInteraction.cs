@@ -9,18 +9,14 @@ using static SoDVR.VR.NativeInput;
 namespace SoDVR.VR;
 
 /// <summary>
-/// Controller input for the canvases still on the legacy WorldSpace pipeline — the minimap and
-/// every canvas no RT panel owns yet (dialogue, computers, keyboard, fingerprints, ...): trigger
-/// clicks through <see cref="CanvasClickRouter"/>, A right-click, B minimap pan / middle-drag,
-/// grip-drag, and the per-frame pose re-enforcement those canvases need. The case board, pause
-/// menu and tooltips are RT panels and never reach here. A deletion target: each canvas that
-/// moves to an RT panel takes its handling with it, and the file goes when the last one does.
-///
-/// Implements <see cref="ICanvasClickExtensions"/> for the minimap's special cases (its hidden
-/// overlay button, map-node click and map context menu). Cross-cutting VRCamera state is passed
-/// once per frame via <see cref="SetFrameContext"/>.
+/// Controller input for the canvases still on the legacy WorldSpace pipeline — every canvas no RT
+/// panel owns yet: trigger clicks through <see cref="CanvasClickRouter"/>, A right-click, B
+/// middle-drag, grip-drag, and the per-frame pose re-enforcement those canvases need. RT panels
+/// never reach here. A deletion target: each canvas that moves to an RT panel takes its handling
+/// with it, and the file goes when the last one does. Cross-cutting VRCamera state is passed once
+/// per frame via <see cref="SetFrameContext"/>.
 /// </summary>
-internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
+internal sealed class LegacyCanvasInteraction
 {
     private static ManualLogSource Log => Plugin.Log;
 
@@ -29,7 +25,7 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
     private bool _triggerNeedsRelease;
     private int _triggerFireFrame;
     // Left-trigger generic click fallback: independent of the right-trigger state above.
-    // Minimap pan and middle-drag stay right-hand-only (unaffected by
+    // Middle-drag stays right-hand-only (unaffected by
     // this), but a legacy WorldSpace canvas needs to be
     // reachable when the player is on their left hand (RTPanelPointer lets them swap there for RT
     // panels; the legacy click router had no equivalent left-hand path at all before this).
@@ -48,13 +44,6 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
     private float _cbBCooldownUntil;
     private bool _cbBNeedsRelease;
 
-    // ── Minimap: pan + cursor-node state ────────────────────────────────────
-    private bool _minimapPanActive;
-    private Vector2 _minimapPanLastScreenPos;
-    private ScrollRect? _minimapScrollRect;
-    private NewNode? _minimapLastKnownNode;
-    private float _minimapLastLoad;
-
     // ── Regular canvas grip-drag ─────────────────────────────────────────────
     private bool _gripWasPressed;
     private Canvas? _gripDragCanvas;
@@ -68,7 +57,7 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
 
     /// <summary>A legacy press/drag/grip is mid-gesture — RTPanelInput must not take the pointer
     /// until it ends, or the gesture would never see its release.</summary>
-    public bool HasActiveGesture => _cbMidDragActive || _minimapPanActive || _gripDragCanvas != null;
+    public bool HasActiveGesture => _cbMidDragActive || _gripDragCanvas != null;
     public Canvas? GripDragCanvas => _gripDragCanvas;
     public Vector3 GripDragDesiredPos => _gripDragDesiredPos;
     public Quaternion GripDragDesiredRot => _gripDragDesiredRot;
@@ -84,35 +73,21 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
     private GameObject? _ctxLeftControllerGO;
     private bool _ctxCaseBoardOpen;
     private Transform _ctxCaseBoardAnchor = null!;
-    private Canvas? _ctxMinimapCanvasRef;
     private Dictionary<int, (Vector3 pos, Quaternion rot)> _ctxGripDragEnforce = null!;
     private Dictionary<int, (Vector3 offset, Quaternion rot)> _ctxGripDragAnchorOffsets = null!;
     private Dictionary<int, (Vector3 pos, Quaternion rot, Vector3 scale)> _ctxCanvasVRPose = null!;
-    private Transform _ctxVrOrigin = null!;
     private bool _ctxCursorHasTarget;
     private Canvas? _ctxCursorTargetCanvas;
-    private bool _ctxMinimapInBBtnContext;
-    private Vector3 _ctxMinimapBBtnLocalOffset;
-    private Quaternion _ctxMinimapBBtnLocalRot;
-    private bool _ctxMinimapBBtnHasOffset;
-
-    /// <summary>Written back to VRCamera's _minimapBBtnLocalOffset/_minimapBBtnLocalRot/
-    /// _minimapBBtnHasOffset after Tick()/UpdateGripDrag() — those three are also written by
-    /// LocomotionController's notebook outcome and read by PositionCanvases, so they stay
-    /// VRCamera-owned rather than moving here.</summary>
-    public (Vector3 offset, Quaternion rot, bool has) MinimapBBtnResult =>
-        (_ctxMinimapBBtnLocalOffset, _ctxMinimapBBtnLocalRot, _ctxMinimapBBtnHasOffset);
 
     public void SetFrameContext(
         Dictionary<int, Canvas> managedCanvases, HashSet<int> noGroupInteractable,
         Dictionary<int, int> lastRescanFrame, Action requestForceScan,
         Camera? leftCam, Camera? gameCamRef, GameObject? rightControllerGO, GameObject? leftControllerGO,
-        bool caseBoardOpen, Transform caseBoardAnchor, Canvas? minimapCanvasRef,
+        bool caseBoardOpen, Transform caseBoardAnchor,
         Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
         Dictionary<int, (Vector3 offset, Quaternion rot)> gripDragAnchorOffsets,
         Dictionary<int, (Vector3 pos, Quaternion rot, Vector3 scale)> canvasVRPose,
-        Transform vrOrigin, bool cursorHasTarget, Canvas? cursorTargetCanvas,
-        bool minimapInBBtnContext, Vector3 minimapBBtnLocalOffset, Quaternion minimapBBtnLocalRot, bool minimapBBtnHasOffset)
+        bool cursorHasTarget, Canvas? cursorTargetCanvas)
     {
         _ctxManagedCanvases = managedCanvases;
         _ctxNoGroupInteractable = noGroupInteractable;
@@ -124,17 +99,11 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
         _ctxLeftControllerGO = leftControllerGO;
         _ctxCaseBoardOpen = caseBoardOpen;
         _ctxCaseBoardAnchor = caseBoardAnchor;
-        _ctxMinimapCanvasRef = minimapCanvasRef;
         _ctxGripDragEnforce = gripDragEnforce;
         _ctxGripDragAnchorOffsets = gripDragAnchorOffsets;
         _ctxCanvasVRPose = canvasVRPose;
-        _ctxVrOrigin = vrOrigin;
         _ctxCursorHasTarget = cursorHasTarget;
         _ctxCursorTargetCanvas = cursorTargetCanvas;
-        _ctxMinimapInBBtnContext = minimapInBBtnContext;
-        _ctxMinimapBBtnLocalOffset = minimapBBtnLocalOffset;
-        _ctxMinimapBBtnLocalRot = minimapBBtnLocalRot;
-        _ctxMinimapBBtnHasOffset = minimapBBtnHasOffset;
     }
 
     // ── Grip-drag (whole canvas + nested note relocate) ─────────────────────────────────────
@@ -151,7 +120,7 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
 
         // Start drag: grip pressed while controller ray hits a draggable canvas.
         bool caseBoardOpen = _ctxCaseBoardOpen;
-        // Also allow grip-drag when any interactive canvas is visible (notebook, map, etc.)
+        // Also allow grip-drag when any interactive canvas is visible.
         bool anyInteractiveVisible = false;
         if (!caseBoardOpen)
         {
@@ -238,43 +207,21 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
         // Release: persist the new position
         if (gripReleased && _gripDragCanvas != null)
         {
-            // B-button minimap: save as VROrigin-relative offset (body-locked context).
-            // Skip the anchor-relative save so case board context is unaffected.
-            string releasedName = _gripDragCanvas.gameObject.name ?? "";
-            bool isMinimapBBtn = _ctxMinimapInBBtnContext
-                && releasedName.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase);
-            if (isMinimapBBtn)
-            {
-                Quaternion vrYaw = Quaternion.Euler(0, _ctxVrOrigin.eulerAngles.y, 0);
-                Quaternion invVrYaw = Quaternion.Inverse(vrYaw);
-                _ctxMinimapBBtnLocalOffset = invVrYaw * (_gripDragCanvas.transform.position - _ctxVrOrigin.position);
-                _ctxMinimapBBtnLocalRot = invVrYaw * _gripDragCanvas.transform.rotation;
-                _ctxMinimapBBtnHasOffset = true;
-                // Still store absolute for this-frame enforcement
-                int enfId = _gripDragCanvas.GetInstanceID();
-                _ctxGripDragEnforce[enfId] = (
-                    _gripDragCanvas.transform.position,
-                    _gripDragCanvas.transform.rotation
-                );
-            }
-            else
-            {
-                // Store offset in the case-board anchor's LOCAL coordinate space.
-                // This means the offset rotates with the anchor — when the case board
-                // reopens facing a different direction, the arrangement is preserved.
-                int dragId = _gripDragCanvas.GetInstanceID();
-                Quaternion invAnchorRot = Quaternion.Inverse(_ctxCaseBoardAnchor.rotation);
-                _ctxGripDragAnchorOffsets[dragId] = (
-                    invAnchorRot * (_gripDragCanvas.transform.position - _ctxCaseBoardAnchor.position),
-                    invAnchorRot * _gripDragCanvas.transform.rotation
-                );
+            // Store offset in the case-board anchor's LOCAL coordinate space.
+            // This means the offset rotates with the anchor — when the case board
+            // reopens facing a different direction, the arrangement is preserved.
+            int dragId = _gripDragCanvas.GetInstanceID();
+            Quaternion invAnchorRot = Quaternion.Inverse(_ctxCaseBoardAnchor.rotation);
+            _ctxGripDragAnchorOffsets[dragId] = (
+                invAnchorRot * (_gripDragCanvas.transform.position - _ctxCaseBoardAnchor.position),
+                invAnchorRot * _gripDragCanvas.transform.rotation
+            );
 
-                // Store absolute position for LateUpdate enforcement (game may reset between frames)
-                _ctxGripDragEnforce[dragId] = (
-                    _gripDragCanvas.transform.position,
-                    _gripDragCanvas.transform.rotation
-                );
-            }
+            // Store absolute position for LateUpdate enforcement (game may reset between frames)
+            _ctxGripDragEnforce[dragId] = (
+                _gripDragCanvas.transform.position,
+                _gripDragCanvas.transform.rotation
+            );
 
             Log.LogInfo($"[LegacyCanvas] GripDrag end: '{_gripDragCanvas.gameObject.name}'");
             _gripDragCanvas = null;
@@ -283,7 +230,7 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
 
     /// <summary>
     /// Everything that has to run BEFORE ControllerInteraction.ScanAndRenderAimDots(): re-enforce
-    /// snapshotted canvas poses and the minimap B-button body-lock.
+    /// snapshotted and grip-dragged canvas poses.
     /// </summary>
     public void PreAimScan()
     {
@@ -305,19 +252,6 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
             }
         }
 
-        // ── B-button minimap body-lock: update VROrigin-relative position every frame ──
-        if (_ctxMinimapInBBtnContext && _ctxMinimapBBtnHasOffset && _ctxMinimapCanvasRef != null
-            && _ctxMinimapCanvasRef.gameObject.activeSelf)
-        {
-            int mmId = _ctxMinimapCanvasRef.GetInstanceID();
-            Quaternion vrYaw = Quaternion.Euler(0, _ctxVrOrigin.eulerAngles.y, 0);
-            Vector3 mmPos = _ctxVrOrigin.position + vrYaw * _ctxMinimapBBtnLocalOffset;
-            Quaternion mmRot = vrYaw * _ctxMinimapBBtnLocalRot;
-            _ctxMinimapCanvasRef.transform.position = mmPos;
-            _ctxMinimapCanvasRef.transform.rotation = mmRot;
-            _ctxGripDragEnforce[mmId] = (mmPos, mmRot);
-        }
-
         // Enforce grip-dragged top-level canvas positions in Update too (LateUpdate enforcement
         // runs after the aim dot scan / click handling, so without this the game's reset wins).
         if (_ctxGripDragEnforce.Count > 0)
@@ -334,9 +268,8 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
 
     /// <summary>
     /// Trigger-edge detection through the Right-A/Right-B dispatch for the canvases still on the
-    /// legacy WorldSpace pipeline: minimap cursor/pan/right-click, and the generic canvas-click,
-    /// right-click and middle-drag fallbacks. Skipped entirely on frames an RT panel owns the
-    /// pointer.
+    /// legacy WorldSpace pipeline: the generic canvas-click, right-click and middle-drag. Skipped
+    /// entirely on frames an RT panel owns the pointer.
     /// </summary>
     public void Tick(bool pointerOwnedByRTPanel)
     {
@@ -355,61 +288,6 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
         Vector3 rPos = _ctxRightControllerGO.transform.position;
         Vector3 rFwd = _ctxRightControllerGO.transform.forward;
 
-        // ── Minimap: drive MapController.mapCursorNode directly while aimed at MinimapCanvas ──
-        // MapController.Update() uses ScreenPointToLocalPointInRectangle(camera=null) which
-        // silently breaks for WorldSpace canvases → mapCursorNode always null.
-        // Bypass: convert world hit point to overlayAll local coords via InverseTransformPoint,
-        // call MapToNode(), look up PathFinder.nodeMap, and set mapCursorNode ourselves.
-        // BepInEx Update() runs after game scripts so we overwrite MapController's null each frame.
-        // Always raycast against MinimapCanvas directly — _cursorTargetCanvas may be WindowCanvas
-        // (an open evidence note) sitting in front of the minimap, but the user is aiming past it.
-        var _mmCanvasForCursor = _ctxMinimapCanvasRef;
-        if (_mmCanvasForCursor != null && _mmCanvasForCursor.gameObject.activeInHierarchy)
-        {
-            try
-            {
-                var mapCtrl = MapController.Instance;
-                if (mapCtrl?.overlayAll != null)
-                {
-                    var mmPlane = new Plane(-_mmCanvasForCursor.transform.forward, _mmCanvasForCursor.transform.position);
-                    if (mmPlane.Raycast(new Ray(rPos, rFwd), out float mmDist) && mmDist > 0f)
-                    {
-                        Vector3 mmWP   = rPos + rFwd * mmDist;
-                        // World hit point → overlayAll local space (= map pixel coords)
-                        Vector3 localXYZ = mapCtrl.overlayAll.InverseTransformPoint(mmWP);
-                        Vector2 localPos2D = new Vector2(localXYZ.x, localXYZ.y);
-                        // Node grid coords
-                        Vector2 nodeCoords = mapCtrl.MapToNode(localPos2D);
-                        var nodeKey = new Vector3(
-                            Mathf.RoundToInt(nodeCoords.x),
-                            Mathf.RoundToInt(nodeCoords.y),
-                            mapCtrl.load);
-                        // Look up and set mapCursorNode
-                        var pf = PathFinder.Instance;
-                        if (pf?.nodeMap != null)
-                        {
-                            NewNode foundNode = null;
-                            // Clear cached node if floor changed
-                            if (mapCtrl.load != _minimapLastLoad)
-                            {
-                                _minimapLastKnownNode = null;
-                                _minimapLastLoad = mapCtrl.load;
-                            }
-                            if (pf.nodeMap.TryGetValue(nodeKey, out foundNode))
-                            {
-                                mapCtrl.mapCursorNode = foundNode;
-                                _minimapLastKnownNode = foundNode;
-                                _minimapLastLoad = mapCtrl.load;
-                            }
-                            else
-                                mapCtrl.mapCursorNode = null;
-                        }
-                    }
-                }
-            }
-            catch { }
-        }
-
         // ── Right trigger → generic canvas click ──
         if (_triggerNeedsRelease)
         {
@@ -420,7 +298,7 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
             _triggerNeedsRelease = true;
             _triggerFireFrame = Time.frameCount;
             CanvasClickRouter.TryClick(rPos, rFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
-                _ctxLastRescanFrame, _ctxRequestForceScan, this);
+                _ctxLastRescanFrame, _ctxRequestForceScan);
         }
 
         // ── Left trigger → same generic click fallback, independent state ──
@@ -443,7 +321,7 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
                 Vector3 lPos = _ctxLeftControllerGO.transform.position;
                 Vector3 lFwd = _ctxLeftControllerGO.transform.forward;
                 CanvasClickRouter.TryClick(lPos, lFwd, _ctxLeftCam, _ctxManagedCanvases, _ctxNoGroupInteractable,
-                    _ctxLastRescanFrame, _ctxRequestForceScan, this);
+                    _ctxLastRescanFrame, _ctxRequestForceScan);
             }
         }
 
@@ -455,11 +333,11 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
             if (_cbANeedsRelease) { if (!aPressed) _cbANeedsRelease = false; }
             else if (aPressed)
             {
-                Canvas? rmbTarget = MinimapUnderRay(rPos, rFwd) ?? _ctxCursorTargetCanvas;
+                Canvas? rmbTarget = _ctxCursorTargetCanvas;
                 if (rmbTarget != null)
                 {
                     GetCanvasScreenPos(rPos, rFwd, rmbTarget, moveCursor: true);
-                    CanvasClickRouter.TryRightClick(rPos, rFwd, rmbTarget, _ctxLeftCam, this);
+                    CanvasClickRouter.TryRightClick(rPos, rFwd, rmbTarget, _ctxLeftCam);
                     _cbANeedsRelease = true;
                     _cbACooldownUntil = Time.realtimeSinceStartup + 1.0f;
                     Log.LogInfo($"[LegacyCanvas] Right-click on '{rmbTarget.gameObject.name}'");
@@ -467,68 +345,15 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
             }
         }
 
-        // ── Right B → minimap pan / middle-click drag on the aimed canvas ──
+        // ── Right B → middle-click drag on the aimed canvas ──
         // When not aiming at a canvas, B falls through to UpdateNotebook().
-        if (_ctxCursorHasTarget || _cbMidDragActive || _minimapPanActive)
+        if (_ctxCursorHasTarget || _cbMidDragActive)
         {
             const uint MOUSEEVENTF_MIDDLEUP   = 0x0040;
 
-            Canvas? mmbTarget = MinimapUnderRay(rPos, rFwd) ?? (_ctxCursorHasTarget ? _ctxCursorTargetCanvas : null);
-            bool mmbTargetIsMinimap = (mmbTarget?.gameObject.name ?? "").IndexOf("Minimap", StringComparison.OrdinalIgnoreCase) >= 0;
+            Canvas? mmbTarget = _ctxCursorHasTarget ? _ctxCursorTargetCanvas : null;
 
-            // ── Minimap pan: B button → direct content.anchoredPosition manipulation ──
-            // ExecuteEvents drag chain requires initializePotentialDrag (not exposed in IL2CPP interop)
-            // before OnBeginDrag/OnDrag will work. Instead we move content directly each frame.
-            if (_minimapPanActive)
-            {
-                OpenXRManager.GetButtonBState(out bool bNow);
-                if (!bNow)
-                {
-                    Log.LogInfo("[LegacyCanvas] MinimapPan end");
-                    _minimapPanActive = false;
-                    _cbBNeedsRelease = true;
-                    _cbBCooldownUntil = Time.realtimeSinceStartup + 0.3f;
-                }
-                else if (_minimapScrollRect != null && _ctxLeftCam != null)
-                {
-                    // Continue pan: raycast to canvas, convert to viewport-local delta, shift content
-                    try
-                    {
-                        var vpRT = _minimapScrollRect.viewport;
-                        var contentRT = _minimapScrollRect.content;
-                        if (vpRT != null && contentRT != null)
-                        {
-                            var srCanvas = _minimapScrollRect.GetComponentInParent<Canvas>();
-                            if (srCanvas != null)
-                            {
-                                var plane = new Plane(-srCanvas.transform.forward, srCanvas.transform.position);
-                                if (plane.Raycast(new Ray(rPos, rFwd), out float dist) && dist > 0f)
-                                {
-                                    Vector3 wp2 = rPos + rFwd * dist;
-                                    Vector2 sp2 = (Vector2)_ctxLeftCam.WorldToScreenPoint(wp2);
-                                    if ((sp2 - _minimapPanLastScreenPos).sqrMagnitude > 0.01f)
-                                    {
-                                        // Convert both screen points to viewport-local coords
-                                        bool gotOld = RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                                            vpRT, _minimapPanLastScreenPos, _ctxLeftCam, out Vector2 oldLocal);
-                                        bool gotNew = RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                                            vpRT, sp2, _ctxLeftCam, out Vector2 newLocal);
-                                        if (gotOld && gotNew)
-                                        {
-                                            // Dragging right moves content right (grab-and-drag feel)
-                                            Vector2 localDelta = newLocal - oldLocal;
-                                            contentRT.anchoredPosition += localDelta;
-                                        }
-                                        _minimapPanLastScreenPos = sp2;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                }
-            }
-            else if (_cbMidDragActive)
+            if (_cbMidDragActive)
             {
                 // Generic middle-click drag in progress
                 OpenXRManager.GetButtonBState(out bool bNow);
@@ -583,50 +408,25 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
                 if (_cbBNeedsRelease) { if (!bPressed) _cbBNeedsRelease = false; }
                 else if (bPressed && mmbTarget != null)
                 {
-                    if (mmbTargetIsMinimap)
+                    // Generic middle-click drag (ExecuteEvents fallback)
+                    GetCanvasScreenPos(rPos, rFwd, mmbTarget, moveCursor: true);
+                    try
                     {
-                        // Start minimap pan — record start screen pos; content movement happens per-frame
-                        try
+                        var es = EventSystem.current;
+                        if (es != null)
                         {
-                            if (_minimapScrollRect == null)
-                                _minimapScrollRect = mmbTarget.GetComponentInChildren<ScrollRect>(true);
-                            if (_minimapScrollRect != null && _ctxLeftCam != null)
-                            {
-                                var plane = new Plane(-mmbTarget.transform.forward, mmbTarget.transform.position);
-                                if (plane.Raycast(new Ray(rPos, rFwd), out float dist) && dist > 0f)
-                                {
-                                    Vector3 wp2 = rPos + rFwd * dist;
-                                    Vector2 sp2 = (Vector2)_ctxLeftCam.WorldToScreenPoint(wp2);
-                                    _minimapPanActive = true;
-                                    _minimapPanLastScreenPos = sp2;
-                                    Log.LogInfo($"[LegacyCanvas] MinimapPan start at {sp2.ToString("F0")} SR='{_minimapScrollRect.gameObject.name}'");
-                                }
-                            }
+                            var mmbPed = new PointerEventData(es);
+                            mmbPed.button = PointerEventData.InputButton.Middle;
+                            _cbMidDragGO = mmbTarget.gameObject;
+                            _cbMidDragPED = mmbPed;
+                            ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, mmbPed, ExecuteEvents.pointerEnterHandler);
+                            ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, mmbPed, ExecuteEvents.pointerDownHandler);
+                            try { ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, mmbPed, ExecuteEvents.beginDragHandler); } catch { }
                         }
-                        catch (Exception ex) { Log.LogWarning($"[LegacyCanvas] MinimapPan start: {ex.Message}"); }
                     }
-                    else
-                    {
-                        // Generic middle-click drag (ExecuteEvents fallback)
-                        GetCanvasScreenPos(rPos, rFwd, mmbTarget, moveCursor: true);
-                        try
-                        {
-                            var es = EventSystem.current;
-                            if (es != null)
-                            {
-                                var mmbPed = new PointerEventData(es);
-                                mmbPed.button = PointerEventData.InputButton.Middle;
-                                _cbMidDragGO = mmbTarget.gameObject;
-                                _cbMidDragPED = mmbPed;
-                                ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, mmbPed, ExecuteEvents.pointerEnterHandler);
-                                ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, mmbPed, ExecuteEvents.pointerDownHandler);
-                                try { ExecuteEvents.ExecuteHierarchy(_cbMidDragGO, mmbPed, ExecuteEvents.beginDragHandler); } catch { }
-                            }
-                        }
-                        catch (Exception ex) { Log.LogWarning($"[LegacyCanvas] Mid-press: {ex.Message}"); }
-                        _cbMidDragActive = true;
-                        _cbMidDragStarted = false;
-                    }
+                    catch (Exception ex) { Log.LogWarning($"[LegacyCanvas] Mid-press: {ex.Message}"); }
+                    _cbMidDragActive = true;
+                    _cbMidDragStarted = false;
                 }
             }
         }
@@ -647,25 +447,7 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
                 _cbMidDragActive = false; _cbMidDragStarted = false;
                 _cbMidDragGO = null; _cbMidDragPED = null;
             }
-            if (_minimapPanActive)
-            {
-                Log.LogInfo("[LegacyCanvas] MinimapPan cancelled (no target)");
-                _minimapPanActive = false;
-            }
         }
-    }
-
-    /// <summary>MinimapCanvas when the ray lands inside its rect — preferred over the aim target,
-    /// which may be a window in front of the map that the player is aiming past.</summary>
-    private Canvas? MinimapUnderRay(Vector3 rPos, Vector3 rFwd)
-    {
-        var mm = _ctxMinimapCanvasRef;
-        if (mm == null || !mm.gameObject.activeInHierarchy) return null;
-        var plane = new Plane(-mm.transform.forward, mm.transform.position);
-        if (!plane.Raycast(new Ray(rPos, rFwd), out float dist) || dist <= 0f) return null;
-        var local = mm.transform.InverseTransformPoint(rPos + rFwd * dist);
-        var rt = mm.GetComponent<RectTransform>();
-        return rt != null && rt.rect.Contains(new Vector2(local.x, local.y)) ? mm : null;
     }
 
     /// <summary>Keeps edge state current and marks every held button as needing a release, so a
@@ -686,135 +468,12 @@ internal sealed class LegacyCanvasInteraction : ICanvasClickExtensions
         if (bNow) _cbBNeedsRelease = true;
     }
 
-    // ── ICanvasClickExtensions: minimap-specific hooks for CanvasClickRouter ────────────────
-
-    public int SelectBestResult(Canvas hitCanvas, Il2CppSystem.Collections.Generic.List<RaycastResult> results)
-    {
-        // On MinimapCanvas, a transparent overlay Button (ControllerSelectMapButton, alpha=0)
-        // sits at results[0] and intercepts every click. Pre-scan all results to find the first
-        // one whose hierarchy contains a visible, interactable Button — or no Button at all (map
-        // buildings use ButtonController, not Unity Button, so "first visible button" would never
-        // match and leave bestResultIdx stuck at 0).
-        bool hitCanvasIsMinimap = (hitCanvas.gameObject.name ?? "").IndexOf("Minimap", StringComparison.OrdinalIgnoreCase) >= 0;
-        if (!hitCanvasIsMinimap) return 0;
-
-        for (int ri = 0; ri < results.Count; ri++)
-        {
-            var rgo = results[ri].gameObject;
-            if (rgo == null) continue;
-            bool hasHiddenBtn = false;
-            try
-            {
-                var rbtr = rgo.transform;
-                for (int rbl = 0; rbl < 6 && rbtr != null; rbl++)
-                {
-                    var rbtn = rbtr.GetComponent<Button>();
-                    if (rbtn != null)
-                    {
-                        bool rbtnHidden = false;
-                        try { rbtnHidden = !rbtn.IsInteractable(); } catch { }
-                        if (!rbtnHidden)
-                        {
-                            try
-                            {
-                                var rbtnGr = rbtr.gameObject.GetComponent<Graphic>();
-                                if (rbtnGr != null) rbtnHidden = rbtnGr.color.a < 0.01f;
-                            }
-                            catch { }
-                        }
-                        hasHiddenBtn = rbtnHidden;
-                        break;
-                    }
-                    rbtr = rbtr.parent;
-                }
-            }
-            catch { }
-            if (!hasHiddenBtn) return ri;
-        }
-        return 0;
-    }
-
-    public bool ShouldRejectHit(Canvas hitCanvas, GameObject hitGo) => false;
-
-    public bool TryHandleSpecialClick(Canvas hitCanvas, GameObject hitGo, PointerEventData ped)
-    {
-        bool hitCanvasIsMinimap = (hitCanvas.gameObject.name ?? "").IndexOf("Minimap", StringComparison.OrdinalIgnoreCase) >= 0;
-        if (!hitCanvasIsMinimap) return false;
-
-        // Map buildings have raycastTarget=false — GraphicRaycaster always returns Viewport,
-        // never the building tile. Instead use mapCursorNode, which Tick()'s minimap-cursor
-        // drive sets each frame from the controller ray.
-        bool minimapHandled = false;
-        try
-        {
-            var mapCtrl = MapController.Instance;
-            var node = mapCtrl?.mapCursorNode ?? _minimapLastKnownNode;
-            if (node != null && node.gameLocation != null)
-            {
-                InterfaceController.Instance.SpawnWindow(node.gameLocation.evidenceEntry, Evidence.DataKey.location);
-                minimapHandled = true;
-                _ctxRequestForceScan();
-                Log.LogInfo($"[LegacyCanvas] MinimapClick: SpawnWindow node='{node.gameLocation.name}'");
-            }
-            else
-            {
-                Log.LogInfo($"[LegacyCanvas] MinimapClick: mapCursorNode={(node == null ? "null" : "noGameLocation")}");
-            }
-        }
-        catch (Exception mmex) { Log.LogWarning($"[LegacyCanvas] MinimapClick: {mmex.Message}"); }
-        return minimapHandled;
-    }
-
-    public bool TryHandleSpecialRightClick(Canvas targetCanvas, GameObject hitGo, PointerEventData ped, Vector3 origin, Vector3 direction)
-    {
-        bool rcHandled = false;
-        bool targetIsMinimapRC = (targetCanvas.gameObject.name ?? "").IndexOf("Minimap", StringComparison.OrdinalIgnoreCase) >= 0;
-        if (targetIsMinimapRC)
-        {
-            try
-            {
-                var mapCtrl = MapController.Instance;
-                NewNode rcNode = mapCtrl?.mapCursorNode;
-                if (rcNode == null && mapCtrl?.overlayAll != null)
-                {
-                    try
-                    {
-                        var mmPlaneRC = new Plane(-targetCanvas.transform.forward, targetCanvas.transform.position);
-                        if (mmPlaneRC.Raycast(new Ray(origin, direction), out float mmDistRC) && mmDistRC > 0f)
-                        {
-                            var localRC = mapCtrl.overlayAll.InverseTransformPoint(origin + direction * mmDistRC);
-                            var ncRC = mapCtrl.MapToNode(new Vector2(localRC.x, localRC.y));
-                            var keyRC = new Vector3(Mathf.RoundToInt(ncRC.x), Mathf.RoundToInt(ncRC.y), mapCtrl.load);
-                            NewNode fn = null;
-                            if (PathFinder.Instance?.nodeMap?.TryGetValue(keyRC, out fn) == true)
-                                rcNode = fn;
-                        }
-                    }
-                    catch { }
-                }
-                if (mapCtrl?.mapContextMenu != null && rcNode != null)
-                {
-                    mapCtrl.mapCursorNode = rcNode; // freeze correct node for menu item callbacks
-                    mapCtrl.mapContextMenu.OpenMenu();
-                    rcHandled = true;
-                    Log.LogInfo($"[LegacyCanvas] TryRightClick: OpenMenu for node='{rcNode.gameLocation?.name}'");
-                }
-                else
-                {
-                    Log.LogInfo($"[LegacyCanvas] TryRightClick: minimap skip — node={(rcNode == null ? "null" : "ok")} menu={(mapCtrl?.mapContextMenu == null ? "null" : "ok")}");
-                }
-            }
-            catch (Exception rcEx) { Log.LogWarning($"[LegacyCanvas] TryRightClick MinimapRC: {rcEx.Message}"); }
-        }
-        return rcHandled;
-    }
-
     // ── Private helpers ─────────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Raycasts the controller ray against a legacy canvas's plane and returns the screen-space
     /// position in its worldCamera (the left eye). With <paramref name="moveCursor"/>, also warps
-    /// the OS cursor there — the minimap still reads Input.mousePosition.
+    /// the OS cursor there, for middle-drag handlers that read Input.mousePosition.
     /// </summary>
     private Vector2 GetCanvasScreenPos(Vector3 origin, Vector3 direction, Canvas targetCanvas,
                                         bool moveCursor = false)

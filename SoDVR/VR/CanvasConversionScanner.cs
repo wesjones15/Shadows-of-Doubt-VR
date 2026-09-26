@@ -34,7 +34,6 @@ internal static class CanvasConversionScanner
         Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
         int frameCount, Dictionary<int, int> lastRescanFrame,
         Dictionary<int, Graphic> managedFades, Camera? leftCam,
-        ref Canvas? minimapCanvasRef,
         HashSet<int> noGroupInteractable)
     {
         var dead = new List<int>();
@@ -81,10 +80,6 @@ internal static class CanvasConversionScanner
 
             ConvertCanvasToWorldSpace(canvas, materialPatcher, managedFades, leftCam);
             managedCanvases[id] = canvas;
-
-            // Cache MinimapCanvas — used for direct ray-hit checks independent of _cursorTargetCanvas.
-            if (cname.IndexOf("Minimap", StringComparison.OrdinalIgnoreCase) >= 0)
-                minimapCanvasRef = canvas;
         }
 
         // Reparent pass: canvases physically inside GameCanvas (or any other scaled canvas)
@@ -143,7 +138,7 @@ internal static class CanvasConversionScanner
         {
             if (kvp.Value == null) continue;
             // Rate-limit rescans: skip canvases that were recently rescanned.
-            // This prevents MinimapCanvas (1300+ graphics) from creating hundreds
+            // This prevents a huge canvas (the map had 1300+ graphics) from creating hundreds
             // of new Material instances every scan cycle, which causes D3D device loss.
             int cid = kvp.Key;
             if (lastRescanFrame.TryGetValue(cid, out int lastFrame) &&

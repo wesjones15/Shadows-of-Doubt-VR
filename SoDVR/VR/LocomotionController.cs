@@ -5,19 +5,6 @@ using static SoDVR.VR.NativeInput;
 
 namespace SoDVR.VR;
 
-/// <summary>Outcome of a notebook/minimap B-button tick, for the fields that belong to the
-/// still-deferred canvas-positioning/grip-drag tangle rather than to locomotion. VRCamera
-/// applies these itself rather than LocomotionController writing them directly — the same
-/// fields are also written by PositionCanvases and UpdateGripDrag, so there's no single owner
-/// to hand them to yet.</summary>
-internal struct NotebookOutcome
-{
-    public bool TabJustReleased;
-    public bool HasMinimapOffset;
-    public Vector3 MinimapOffset;
-    public Quaternion MinimapRotation;
-}
-
 /// <summary>
 /// Movement, snap-turn, and every button-driven action (jump/crouch/sprint/interact/inventory/
 /// flashlight/notebook/menu). Most of these forward to the flat game's own keybinds via
@@ -75,14 +62,12 @@ internal sealed class LocomotionController
     private bool _tabHeldDown;
     private bool _backpackBtnPrev;             // edge detection for backpack gesture
     private bool _ignoreBUntilReleased;
-    private bool _minimapInBBtnContext;        // true while B is held and minimap shown (not case board)
 
     private bool _flashlightBtnPrev;
     private bool _inventoryBtnPrev;
 
     public bool HasPlayerController => _playerCC != null;
     public bool InAirVent => _inAirVent;
-    public bool MinimapInBBtnContext => _minimapInBBtnContext;
 
     /// <summary>Called once from DiscoverMovementSystem with whatever it found — the searching
     /// (walking the hierarchy, GetComponent calls) stays there, this just stores the results.</summary>
@@ -602,16 +587,14 @@ internal sealed class LocomotionController
     /// <summary>Right B → Tab (notebook/map), or X (inventory) if controller is behind shoulder.</summary>
     /// <param name="inConversation">B ends a conversation instead; the press that ends it must not
     /// then open the map once the conversation is gone.</param>
-    public NotebookOutcome UpdateNotebook(bool settingsOpen, bool caseBoardOpen, bool inConversation,
-                                           GameObject? rightControllerGO,
-                                           Camera? leftCam, bool cursorHasTarget, Canvas? minimapCanvasRef,
-                                           Transform vrOrigin)
+    public void UpdateNotebook(bool settingsOpen, bool caseBoardOpen, bool inConversation,
+                               GameObject? rightControllerGO, Camera? leftCam, bool cursorHasTarget)
     {
         if (settingsOpen)
         {
             // Release Tab if held while VR settings opened
             if (_tabHeldDown) ReleaseTabKey();
-            return default;
+            return;
         }
 
         OpenXRManager.GetButtonBState(out bool pressed);
@@ -621,7 +604,7 @@ internal sealed class LocomotionController
         {
             if (_tabHeldDown) ReleaseTabKey();
             if (!pressed && !inConversation) _ignoreBUntilReleased = false;
-            return default;
+            return;
         }
 
         // When case board is open, B = middle-click — suppress Tab.
@@ -630,7 +613,7 @@ internal sealed class LocomotionController
         if (caseBoardOpen)
         {
             if (_tabHeldDown) ReleaseTabKey();
-            return default;
+            return;
         }
 
         // ── Backpack gesture: B pressed with right controller behind shoulder → inventory (X key) ──
@@ -665,13 +648,13 @@ internal sealed class LocomotionController
                 }
                 catch (Exception ex) { Log.LogWarning($"[Locomotion] Backpack: {ex.Message}"); }
             }
-            return default; // don't process Tab while in backpack zone
+            return; // don't process Tab while in backpack zone
         }
         _backpackBtnPrev = pressed;
 
         // When NOT holding Tab, suppress if aiming at a canvas (B = middle-click on canvas)
         if (!_tabHeldDown && cursorHasTarget)
-            return default;
+            return;
 
         // Hold-to-show: hold Tab while B is physically held
         if (pressed && !_tabHeldDown)
@@ -681,40 +664,14 @@ internal sealed class LocomotionController
                 const byte VK_TAB = 0x09;
                 keybd_event(VK_TAB, 0, 0, UIntPtr.Zero); // key DOWN
                 _tabHeldDown = true;
-                _minimapInBBtnContext = true;
                 Log.LogInfo("[Locomotion] Notebook Tab DOWN (hold-to-show)");
             }
             catch (Exception ex) { Log.LogWarning($"[Locomotion] UpdateNotebook DOWN: {ex.Message}"); }
         }
         else if (!pressed && _tabHeldDown)
         {
-            // Before clearing, save B-button minimap position as VROrigin-relative offset
-            // (only if we don't already have a grip-dragged offset — default placement is
-            // saved here so the minimap reopens at the same spot next time).
-            var outcome = new NotebookOutcome { TabJustReleased = true };
-            if (_minimapInBBtnContext && minimapCanvasRef != null && minimapCanvasRef.gameObject.activeSelf)
-            {
-                try
-                {
-                    Quaternion vrYaw = Quaternion.Euler(0, vrOrigin.eulerAngles.y, 0);
-                    Quaternion invVrYaw = Quaternion.Inverse(vrYaw);
-                    outcome = new NotebookOutcome
-                    {
-                        TabJustReleased = true,
-                        HasMinimapOffset = true,
-                        MinimapOffset = invVrYaw * (minimapCanvasRef.transform.position - vrOrigin.position),
-                        MinimapRotation = invVrYaw * minimapCanvasRef.transform.rotation,
-                    };
-                }
-                catch { }
-            }
-            _minimapInBBtnContext = false;
-
             ReleaseTabKey();
-            return outcome;
         }
-
-        return default;
     }
 
     private void ReleaseTabKey()

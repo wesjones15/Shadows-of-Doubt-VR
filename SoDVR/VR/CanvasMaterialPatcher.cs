@@ -29,14 +29,6 @@ internal sealed class CanvasMaterialPatcher
     // Only used by RescanCanvasAlpha/ForceUIZTestAlways's per-Graphic material patch.
     private const float UIBackgroundAlpha = 0.25f;
 
-    // ── MinimapCanvas Viewport discovery — exposed to VRCamera ──────────────────────────────
-    // Written here (via RelaxMenuCanvasClipping's Mask-based discovery, or ForceUIZTestAlways's
-    // ScrollRect fallback discovery), read+written externally by VRCamera's UpdateMinimapZoom
-    // (still VRCamera-owned today, eventual CanvasPlacement territory) once it applies the
-    // zoom-to-fit.
-    public Transform? MinimapViewportTransform;
-    public bool MinimapZoomApplied;
-
     internal void RescanCanvasAlpha(Canvas canvas, HashSet<int> ownedCanvasIds,
         Dictionary<int, Canvas> managedCanvases, Dictionary<int, Graphic> managedFades)
     {
@@ -367,26 +359,6 @@ internal sealed class CanvasMaterialPatcher
 
     internal int ForceUIZTestAlways(Canvas canvas, Dictionary<int, Graphic> managedFades, bool logQueueMap = true)
     {
-        // Discover MinimapCanvas Viewport via ScrollRect regardless of whether masks have
-        // already been processed (TextMaterialPatcher.s_menuMaskRelaxedCanvases skips the Mask loop on re-runs).
-        if (MinimapViewportTransform == null)
-        {
-            try
-            {
-                bool isMinimapCanvas = (canvas.gameObject.name ?? "").IndexOf("Minimap", StringComparison.OrdinalIgnoreCase) >= 0;
-                if (isMinimapCanvas)
-                {
-                    var sr = canvas.GetComponentInChildren<ScrollRect>(true);
-                    if (sr?.viewport != null)
-                    {
-                        MinimapViewportTransform = sr.viewport;
-                        MinimapZoomApplied = false;
-                        Log.LogInfo($"[CanvasMaterialPatcher] MinimapViewport discovered via ScrollRect: '{sr.viewport.gameObject.name}'");
-                    }
-                }
-            }
-            catch { }
-        }
         try
         {
             RelaxMenuCanvasClipping(canvas);
@@ -717,40 +689,15 @@ internal sealed class CanvasMaterialPatcher
                     if (mg != null) mg.color = new Color(mg.color.r, mg.color.g, mg.color.b, 0f);
                 }
                 catch { }
-                // For the MinimapCanvas ScrollRect Viewport: keep the stencil Mask enabled.
-                // The Mask clips the map content using stencil — this only works if we DON'T
-                // replace child materials (which would lose the stencil state Mask applied).
-                // We cache the Viewport transform so ForceUIZTestAlways can skip patching its content.
-                // For all other ScrollRect Viewports: disable Mask and add RectMask2D instead.
-                bool skipMaskDisable = false;
+                // ScrollRect viewports: RectMask2D replaces the stencil Mask.
                 try
                 {
                     bool isScrollViewport = mask.transform.parent != null
                         && mask.transform.parent.GetComponent<ScrollRect>() != null;
                     if (isScrollViewport)
                     {
-                        bool isMinimapViewport = false;
-                        var cvWalk = mask.transform.parent;
-                        for (int cv = 0; cv < 6 && cvWalk != null; cv++)
+                        if (mask.gameObject.GetComponent<RectMask2D>() == null)
                         {
-                            if ((cvWalk.gameObject.name ?? "").IndexOf("Minimap", StringComparison.OrdinalIgnoreCase) >= 0)
-                            { isMinimapViewport = true; break; }
-                            cvWalk = cvWalk.parent;
-                        }
-                        if (isMinimapViewport)
-                        {
-                            // Stencil Mask is disabled (HDRP uses stencil buffer internally,
-                            // conflicting with UI stencil → map content invisible inside mask).
-                            // RectMask2D can't clip nested Canvas children.
-                            // Instead: scale ZoomContent so the city fits within the Viewport
-                            // at minimum zoom (no overflow at zoom-out), applied in UpdateMinimapZoom().
-                            MinimapViewportTransform = mask.transform;
-                            MinimapZoomApplied = false; // re-apply zoom fit on next LateUpdate
-                            Log.LogInfo($"[CanvasMaterialPatcher] MinimapViewport: '{mask.gameObject.name}' cached (Mask disabled, zoom-fit will be applied)");
-                        }
-                        else if (mask.gameObject.GetComponent<RectMask2D>() == null)
-                        {
-                            // Non-minimap ScrollRect Viewport: RectMask2D replaces stencil Mask.
                             mask.gameObject.AddComponent<RectMask2D>();
                             Log.LogInfo($"[CanvasMaterialPatcher] Added RectMask2D to '{mask.gameObject.name}' (replacing stencil Mask on ScrollRect viewport)");
                         }

@@ -56,7 +56,7 @@ internal sealed class RTPanelGrip
     /// <summary>Returns true while this frame's grip belongs to an RT panel (grabbed one this
     /// press, or is mid-drag) — the legacy grip-drag must not start then.</summary>
     /// <param name="legacyHitDistance">Ray distance to the legacy UI the right-hand ray last hit,
-    /// or +Infinity: an RT target behind it (a panel behind the legacy Minimap) must not take
+    /// or +Infinity: an RT target behind it (a panel behind a legacy canvas) must not take
     /// the grip from it.</param>
     public bool Update(GameObject? rightControllerGO, GameObject? leftControllerGO, bool activeHandIsRight, float legacyHitDistance)
     {

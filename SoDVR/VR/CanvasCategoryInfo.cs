@@ -49,7 +49,6 @@ internal static class CanvasCategoryInfo
         ["StatusDisplayCanvas"]       = CanvasCategory.HUD,
         ["interactionProgressCanvas"] = CanvasCategory.HUD,
         ["OverlayCanvas"]             = CanvasCategory.HUD,
-        ["MinimapCanvas"]             = CanvasCategory.Panel,  // was HUD — needs to be interactable
         ["GameWorldDisplayCanvas"]    = CanvasCategory.Ignored,  // already WorldSpace, game manages position
         ["CentreDisplayCanvas"]       = CanvasCategory.HUD,
         ["MessageSystemCanvas"]       = CanvasCategory.HUD,
@@ -62,11 +61,9 @@ internal static class CanvasCategoryInfo
 
 
         // Panel — recentres on activate, interactable, behind Menu
-        ["contentCanvas"]             = CanvasCategory.Panel,
         ["osCanvas"]                  = CanvasCategory.Panel,
         ["keyboardCanvas"]            = CanvasCategory.Panel,
         ["fingerprintDisplayCanvas"]  = CanvasCategory.Panel,
-        ["mapLayerCanvas"]            = CanvasCategory.Panel,
         ["PrototypeBuilderCanvas"]    = CanvasCategory.Panel,
         ["ControlsDisplayCanvas"]     = CanvasCategory.Ignored,  // VR has own controls; keyboard hints block aim dot
     };

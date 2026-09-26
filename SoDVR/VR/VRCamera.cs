@@ -99,8 +99,8 @@ public class VRCamera : MonoBehaviour
     private int _canvasTick; // counts Update() calls; resets at UICanvasScanRate
     private int _forceScanFrames; // when >0, force a scan every frame (counts down)
     // Rate-limit RescanCanvasAlpha: maps canvas instance ID → frame number of last rescan.
-    // Prevents rescanning the same canvas every 90 frames (huge canvases like MinimapCanvas
-    // create 1300+ materials per rescan cycle, causing D3D device loss crashes).
+    // Prevents rescanning the same canvas every 90 frames (a huge canvas — the map had 1300+
+    // graphics — creates that many materials per rescan cycle, causing D3D device loss crashes).
     private readonly Dictionary<int, int> _lastRescanFrame = new();
 
     // Tracks which canvas IDs have already been placed in world space.
@@ -118,17 +118,12 @@ public class VRCamera : MonoBehaviour
     // Nested canvas IDs: these live inside a parent canvas and must not be independently
     // positioned (their transform is driven by the parent canvas hierarchy).
     private readonly HashSet<int>         _nestedCanvasIds = new();
-    private Canvas?                       _minimapCanvasRef;     // cached reference to MinimapCanvas
 
     // ── CaseBoard grip-relocate ───────────────────────────────────────────────
     // Grip-drag offset stored relative to the case-board anchor, which is re-placed each time the
     // case board opens, so offsets stay consistent.
     private readonly Dictionary<int, (Vector3 offset, Quaternion rot)> _gripDragAnchorOffsets = new();
     private readonly Dictionary<int, (Vector3 pos, Quaternion rot)> _gripDragEnforce = new(); // absolute world positions enforced every LateUpdate
-    // ── B-button minimap: body-locked offset relative to VROrigin yaw ────────
-    private bool       _minimapBBtnHasOffset;      // true after first B-button minimap placement or grip-drag
-    private Vector3    _minimapBBtnLocalOffset;     // position offset in VROrigin-local space (yaw-aligned)
-    private Quaternion _minimapBBtnLocalRot = Quaternion.identity; // rotation in VROrigin-local space
 
     // Canvases without CanvasGroup that have enough active Graphics to be considered
     // "actually showing content".  Updated every scan cycle.  Used by depth scan / click
@@ -341,7 +336,6 @@ public class VRCamera : MonoBehaviour
                     _gripDragEnforce,
                     _frameCount, _lastRescanFrame,
                     _managedFades, _leftCam,
-                    ref _minimapCanvasRef,
                     _noGroupInteractable);
             }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] ScanAndConvertCanvases outer: {ex.GetType().Name}: {ex.Message}"); }
@@ -583,33 +577,8 @@ public class VRCamera : MonoBehaviour
                 _locomotion.UpdateYButton();
                 _locomotion.UpdateSprint();
 
-                var notebookOutcome = _locomotion.UpdateNotebook(vrSettingsOpenForInput, caseBoardOpenForInput, _dialogueRT.IsOpen,
-                    _rightControllerGO, _leftCam, pointerOnUI, _minimapCanvasRef, transform);
-                if (notebookOutcome.TabJustReleased)
-                {
-                    if (notebookOutcome.HasMinimapOffset)
-                    {
-                        _minimapBBtnLocalOffset = notebookOutcome.MinimapOffset;
-                        _minimapBBtnLocalRot = notebookOutcome.MinimapRotation;
-                        _minimapBBtnHasOffset = true;
-                    }
-                    // Remove map/notebook canvases from _positionedCanvases so they get
-                    // fresh placement next time they open.
-                    try
-                    {
-                        foreach (var kvp in _managedCanvases)
-                        {
-                            if (kvp.Value == null) continue;
-                            string cn = kvp.Value.gameObject.name ?? "";
-                            if (cn.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase))
-                            {
-                                _positionedCanvases.Remove(kvp.Key);
-                                _gripDragEnforce.Remove(kvp.Key);
-                            }
-                        }
-                    }
-                    catch { }
-                }
+                _locomotion.UpdateNotebook(vrSettingsOpenForInput, caseBoardOpenForInput, _dialogueRT.IsOpen,
+                    _rightControllerGO, _leftCam, pointerOnUI);
 
                 _locomotion.UpdateFlashlight(pointerOnUI || isPausedForLocomotion);
                 _locomotion.UpdateInventory(pointerOnUI || isPausedForLocomotion);
@@ -1056,8 +1025,6 @@ public class VRCamera : MonoBehaviour
                 _gripDragAnchorOffsets,
                 _gripDragEnforce,
                 _caseBoardRT.IsOpen, _caseBoardRT.JustOpened, _caseBoardRT.Anchor, _caseBoardRT.AnchorPlaced,
-                _locomotion,
-                ref _minimapBBtnHasOffset, ref _minimapBBtnLocalOffset, ref _minimapBBtnLocalRot,
                 _cursorHasTarget, _cursorTargetPos, _cursorTargetRot);
         }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] PositionCanvases exception: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}"); }
@@ -1135,10 +1102,6 @@ public class VRCamera : MonoBehaviour
 
                 // Directional route arrow: reposition in front of VR head.
                 _hud.UpdateDirectionArrow(_leftCam);
-
-                // Minimap: set ZoomContent zoom range so the full city fits within the
-                // Viewport at minimum zoom (applied once after MapController is ready).
-                _canvasPlacement.UpdateMinimapZoom(_materialPatcher);
 
                 try { _menuRTPanel.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.Render: {ex.Message}"); }
@@ -1224,18 +1187,16 @@ public class VRCamera : MonoBehaviour
             _managedCanvases, _noGroupInteractable,
             _lastRescanFrame, () => _forceScanFrames = 30,
             _leftCam, _gameCamRef, _rightControllerGO, _leftControllerGO,
-            _caseBoardRT.IsOpen, _caseBoardRT.Anchor, _minimapCanvasRef,
+            _caseBoardRT.IsOpen, _caseBoardRT.Anchor,
             _gripDragEnforce, _gripDragAnchorOffsets,
             _canvasVRPose,
-            transform, _cursorHasTarget, _cursorTargetCanvas,
-            _locomotion.MinimapInBBtnContext, _minimapBBtnLocalOffset, _minimapBBtnLocalRot, _minimapBBtnHasOffset);
+            _cursorHasTarget, _cursorTargetCanvas);
 
         // Grip-drag: move CaseBoard canvases with the grip button.
         bool rtOwnsGrip = false;
         try { rtOwnsGrip = _rtPanelGrip.Update(_rightControllerGO, _leftControllerGO, _rtPanelInput.ActiveHandIsRight, _lastLegacyHitDistance); }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] RTPanelGrip.Update: {ex.Message}"); }
         _legacyCanvases.UpdateGripDrag(rtOwnsGrip);
-        (_minimapBBtnLocalOffset, _minimapBBtnLocalRot, _minimapBBtnHasOffset) = _legacyCanvases.MinimapBBtnResult;
 
         _controllerInteraction.UpdateLeftInteractMarker(_leftControllerGO, _menuRTPanel.Canvas, _gameCamRef,
             _leftCam, _interactionLayerMask, _baseInteractionRange);

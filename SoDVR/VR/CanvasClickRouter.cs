@@ -11,12 +11,8 @@ namespace SoDVR.VR;
 /// Generic canvas-click routing: cast a ray against every managed WorldSpace canvas, resolve the
 /// UI element under the nearest hit via GraphicRaycaster, and fire it (Button persistent
 /// listeners, or an ExecuteEvents fallback for non-Button IPointerClickHandlers). Canvas-agnostic
-/// — none of this depends on any specific canvas's mechanics.
-///
-/// Minimap-specific behavior (its hidden-overlay-button skip, map-node click and map context menu)
-/// is reached through <see cref="ICanvasClickExtensions"/>, implemented by
-/// <see cref="LegacyCanvasInteraction"/>. RT panels don't come through here: they send clicks
-/// the way a mouse does (RTPanelPointer).
+/// — none of this depends on any specific canvas's mechanics. RT panels don't come through here:
+/// they send clicks the way a mouse does (RTPanelPointer).
 /// </summary>
 internal static class CanvasClickRouter
 {
@@ -29,7 +25,7 @@ internal static class CanvasClickRouter
     /// </summary>
     public static void TryClick(Vector3 origin, Vector3 direction, Camera? leftCam,
         Dictionary<int, Canvas> managedCanvases, HashSet<int> noGroupInteractable,
-        Dictionary<int, int> lastRescanFrame, Action requestForceScan, ICanvasClickExtensions? ext)
+        Dictionary<int, int> lastRescanFrame, Action requestForceScan)
     {
         if (leftCam == null) return;
 
@@ -88,13 +84,8 @@ internal static class CanvasClickRouter
 
                 if (results.Count > 0)
                 {
-                    int bestResultIdx = ext?.SelectBestResult(hitCanvas, results) ?? 0;
-                    if (bestResultIdx < 0 || bestResultIdx >= results.Count) bestResultIdx = 0;
-                    var go = results[bestResultIdx].gameObject;
-                    var bestResult = results[bestResultIdx];
-
-                    if (ext != null && ext.ShouldRejectHit(hitCanvas, go))
-                        continue; // skip non-interactive — fall through to next canvas
+                    var go = results[0].gameObject;
+                    var bestResult = results[0];
 
                     // Nested-canvas interaction filter: canvases parented inside another managed
                     // canvas (e.g. 'Detective's Notebook', 'Scroll View' inside WindowCanvas) can
@@ -172,15 +163,11 @@ internal static class CanvasClickRouter
                     // custom IPointerClickHandler implementations (e.g. notes, toggles).
                     if (!handledByButton)
                     {
-                        bool specialHandled = ext?.TryHandleSpecialClick(hitCanvas, go, ped) ?? false;
-                        if (!specialHandled)
-                        {
-                            ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerEnterHandler);
-                            ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerDownHandler);
-                            ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerUpHandler);
-                            ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerClickHandler);
-                            ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.submitHandler);
-                        }
+                        ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerEnterHandler);
+                        ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerDownHandler);
+                        ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerUpHandler);
+                        ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerClickHandler);
+                        ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.submitHandler);
                     }
 
                     // Activate TMP_InputField for keyboard entry.
@@ -236,8 +223,6 @@ internal static class CanvasClickRouter
                 if (btn != null)
                 {
                     // Skip buttons that the game has marked non-interactable OR hidden.
-                    // e.g. ControllerSelectMapButton on MinimapCanvas has alpha=0 and
-                    // intercepts every map click when no gamepad is connected.
                     bool btnHidden = false;
                     try { btnHidden = !btn.IsInteractable(); } catch { }
                     if (!btnHidden)
@@ -303,8 +288,7 @@ internal static class CanvasClickRouter
     /// the controller ray. Used where mouse_event doesn't reach IPointerClickHandler
     /// implementations (e.g. location marker context menus).
     /// </summary>
-    public static void TryRightClick(Vector3 origin, Vector3 direction, Canvas targetCanvas,
-        Camera? leftCam, ICanvasClickExtensions? ext)
+    public static void TryRightClick(Vector3 origin, Vector3 direction, Canvas targetCanvas, Camera? leftCam)
     {
         try
         {
@@ -326,9 +310,7 @@ internal static class CanvasClickRouter
             gr.Raycast(ped, results);
             if (results.Count == 0) return;
 
-            // Skip transparent overlay buttons (e.g. ControllerSelectMapButton alpha=0) —
-            // applied unconditionally here (unlike the left-click router, which only does this
-            // for the minimap), matching this method's existing behavior.
+            // Skip transparent overlay buttons.
             int bestIdx = 0;
             for (int ri = 0; ri < results.Count; ri++)
             {
@@ -369,15 +351,10 @@ internal static class CanvasClickRouter
             ped.pointerPressRaycast     = results[bestIdx];
             ped.eligibleForClick        = true;
 
-            bool rcHandled = ext?.TryHandleSpecialRightClick(targetCanvas, go, ped, origin, direction) ?? false;
-
-            if (!rcHandled)
-            {
-                ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerEnterHandler);
-                ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerDownHandler);
-                ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerUpHandler);
-                ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerClickHandler);
-            }
+            ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerEnterHandler);
+            ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerDownHandler);
+            ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerUpHandler);
+            ExecuteEvents.ExecuteHierarchy(go, ped, ExecuteEvents.pointerClickHandler);
             Log.LogInfo($"[CanvasClickRouter] TryRightClick: '{go.name}' on '{targetCanvas.gameObject.name}'");
         }
         catch (Exception ex)
@@ -385,28 +362,4 @@ internal static class CanvasClickRouter
             Log.LogWarning($"[CanvasClickRouter] TryRightClick: {ex.Message}");
         }
     }
-}
-
-/// <summary>
-/// Hook surface for minimap-specific click behavior — implemented by LegacyCanvasInteraction.
-/// See CanvasClickRouter's class doc.
-/// </summary>
-internal interface ICanvasClickExtensions
-{
-    /// <summary>Pick which raycast result to use (e.g. skip a transparent overlay button on the
-    /// minimap). Return an out-of-range index (or let the default apply) to mean "use the
-    /// nearest (index 0)".</summary>
-    int SelectBestResult(Canvas hitCanvas, Il2CppSystem.Collections.Generic.List<RaycastResult> results);
-
-    /// <summary>Return true to reject this hit and fall through to the next candidate canvas
-    /// (a canvas whose raw hits aren't meaningful clicks).</summary>
-    bool ShouldRejectHit(Canvas hitCanvas, GameObject hitGo);
-
-    /// <summary>Handle a click that had no Button (e.g. the minimap's map-node click). Return
-    /// true if handled, to skip the generic ExecuteEvents fallback.</summary>
-    bool TryHandleSpecialClick(Canvas hitCanvas, GameObject hitGo, PointerEventData ped);
-
-    /// <summary>Handle a right-click (e.g. the minimap's map context menu). Return true if
-    /// handled, to skip the generic ExecuteEvents fallback.</summary>
-    bool TryHandleSpecialRightClick(Canvas targetCanvas, GameObject hitGo, PointerEventData ped, Vector3 origin, Vector3 direction);
 }

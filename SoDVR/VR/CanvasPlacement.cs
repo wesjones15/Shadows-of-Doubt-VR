@@ -13,7 +13,7 @@ namespace SoDVR.VR;
 /// mechanically from VRCamera, not redesigned.
 ///
 /// <see cref="PositionCanvases"/> is a single foreach over every managed canvas with one long
-/// per-category if/else-if/continue chain (cursor → HUD → B-button-minimap →
+/// per-category if/else-if/continue chain (cursor → HUD →
 /// already-positioned skip → default), sharing locals across every branch and
 /// mutating cross-cutting VRCamera dictionaries throughout. It moves as one method rather than
 /// being split further — fine-grained sub-extraction would need the same kind of
@@ -39,8 +39,6 @@ internal sealed class CanvasPlacement
         Dictionary<int, (Vector3 offset, Quaternion rot)> gripDragAnchorOffsets,
         Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
         bool caseBoardOpen, bool caseBoardJustOpened, Transform caseBoardAnchor, bool caseBoardAnchorPlaced,
-        LocomotionController locomotion,
-        ref bool minimapBBtnHasOffset, ref Vector3 minimapBBtnLocalOffset, ref Quaternion minimapBBtnLocalRot,
         bool cursorHasTarget, Vector3 cursorTargetPos, Quaternion cursorTargetRot)
     {
         // Suppress FadeOverlay graphics every 4 frames (prevents black screen flash).
@@ -129,16 +127,6 @@ internal sealed class CanvasPlacement
             foreach (var cb in managedCanvases)
             {
                 if (cb.Value == null) continue;
-                string cbName = cb.Value.gameObject.name ?? "";
-                // MinimapCanvas: always remove from positioned so it can be re-placed.
-                // If grip-dragged, PositionCanvases will restore from anchor offsets.
-                // If not, it gets default head+forward placement.
-                if (cbName.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase))
-                {
-                    positionedCanvases.Remove(cb.Key);
-                    gripDragEnforce.Remove(cb.Key);
-                    lastRescanFrame.Remove(cb.Key);
-                }
                 // Any canvas with anchor offsets: remove from positioned + enforce
                 // so PositionCanvases recomputes from the new anchor.
                 if (gripDragAnchorOffsets.ContainsKey(cb.Key))
@@ -147,7 +135,7 @@ internal sealed class CanvasPlacement
                     gripDragEnforce.Remove(cb.Key);
                 }
             }
-            Log.LogInfo("[CanvasPlacement] Case board opened — re-placing Minimap and anchor-relative canvases");
+            Log.LogInfo("[CanvasPlacement] Case board opened — re-placing anchor-relative canvases");
         }
 
         _placementIndex = 0;
@@ -232,38 +220,6 @@ internal sealed class CanvasPlacement
             // Skip if already positioned and not needing recentre.
             if (positionedCanvases.Contains(id)) continue;
 
-            // ── B-button minimap: body-locked placement ──────────────────────
-            // When B is held (not case board), place MinimapCanvas from VROrigin-relative offset
-            // instead of the standard head+forward Panel logic. Marked positioned so it doesn't
-            // fall through to default placement. Per-frame body-lock update happens in Update().
-            string nameForBBtn = canvas.gameObject.name ?? "";
-            if (locomotion.MinimapInBBtnContext && nameForBBtn.Equals("MinimapCanvas", StringComparison.OrdinalIgnoreCase))
-            {
-                if (CanvasCategoryInfo.IsCanvasVisible(canvas))
-                {
-                    Quaternion vrYaw = Quaternion.Euler(0, vrOrigin.eulerAngles.y, 0);
-                    if (minimapBBtnHasOffset)
-                    {
-                        canvas.transform.position = vrOrigin.position + vrYaw * minimapBBtnLocalOffset;
-                        canvas.transform.rotation = vrYaw * minimapBBtnLocalRot;
-                    }
-                    else
-                    {
-                        // First time — use default head+forward, then save as VROrigin-relative
-                        float bDist = catDefs.Distance;
-                        canvas.transform.position = headPos + forward * bDist + Vector3.up * catDefs.VerticalOffset;
-                        canvas.transform.rotation = yawOnly;
-                        Quaternion invVrYaw = Quaternion.Inverse(vrYaw);
-                        minimapBBtnLocalOffset = invVrYaw * (canvas.transform.position - vrOrigin.position);
-                        minimapBBtnLocalRot = invVrYaw * canvas.transform.rotation;
-                        minimapBBtnHasOffset = true;
-                    }
-                    positionedCanvases.Add(id);
-                    gripDragEnforce[id] = (canvas.transform.position, canvas.transform.rotation);
-                }
-                continue;
-            }
-
             _placementIndex++; // incremental depth offset to prevent z-fighting
             // Skip if not currently visible (will be placed when it activates).
             if (!CanvasCategoryInfo.IsCanvasVisible(canvas)) continue;
@@ -298,56 +254,6 @@ internal sealed class CanvasPlacement
                 positionedCanvases.Add(id);
                 Log.LogInfo($"[CanvasPlacement] Placed '{cname}' [{cat}] dist={dist - depthJitter:F2}m yaw={headYaw:F1}°");
             }
-        }
-    }
-
-    /// <summary>
-    /// Set ZoomContent.zoomLimit.x and desiredZoom so the full city fits within the Viewport
-    /// at minimum zoom — eliminating map overflow at zoom-out.
-    /// Called once after materialPatcher.MinimapViewportTransform is cached and MapController is ready.
-    /// </summary>
-    internal void UpdateMinimapZoom(CanvasMaterialPatcher materialPatcher)
-    {
-        if (materialPatcher.MinimapZoomApplied || materialPatcher.MinimapViewportTransform == null) return;
-        try
-        {
-            var mapCtrl = MapController.Instance;
-            if (mapCtrl == null) return;
-
-            var zc = mapCtrl.zoomController;
-            if (zc == null) return;
-
-            // Prefer MapController.viewport (authoritative) over our cached transform.
-            var vpRT = mapCtrl.viewport
-                    ?? (materialPatcher.MinimapViewportTransform as RectTransform
-                        ?? materialPatcher.MinimapViewportTransform?.GetComponent<RectTransform>());
-            if (vpRT == null) return;
-
-            // normalSize is the Content sizeDelta at zoom=1 (full city).
-            var normalSize = zc.normalSize;
-            // Viewport uses stretch anchors so sizeDelta=(0,0); rect.size gives actual layout size.
-            var vpSize = vpRT.rect.size;
-            if (normalSize.x <= 0 || normalSize.y <= 0 || vpSize.x <= 0 || vpSize.y <= 0) return;
-
-            // Scale factor to fit the full city within the Viewport rect.
-            float fitZoom = Mathf.Min(vpSize.x / normalSize.x, vpSize.y / normalSize.y);
-            fitZoom = Mathf.Clamp(fitZoom, 0.01f, 1f);
-
-            // Allow zooming out to fitZoom (whole city fits) and in up to original max.
-            float maxZoom = zc.zoomLimit.y;
-            zc.zoomLimit = new UnityEngine.Vector2(fitZoom, maxZoom);
-
-            // Start zoomed in to show the player's neighbourhood, not the whole city.
-            // Use 4x the fit zoom so a reasonable area is visible without overflow.
-            float startZoom = Mathf.Min(fitZoom * 4f, maxZoom);
-            zc.desiredZoom  = startZoom;
-
-            materialPatcher.MinimapZoomApplied = true;
-            Log.LogInfo($"[CanvasPlacement] MinimapZoom: vpSize={vpSize} normalSize={normalSize} fitZoom={fitZoom:F3} startZoom={startZoom:F3} maxZoom={maxZoom:F1}");
-        }
-        catch (Exception ex)
-        {
-            Log.LogWarning($"[CanvasPlacement] UpdateMinimapZoom: {ex.Message}");
         }
     }
 }
