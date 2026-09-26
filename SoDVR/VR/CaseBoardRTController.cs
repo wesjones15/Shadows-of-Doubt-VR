@@ -58,8 +58,10 @@ internal sealed class CaseBoardRTController
             new CaseBoardPanel("BioDisplayCanvas", CaseBoardWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip,
                 regions: new[] { "InventoryDisplayArea", "SocialCreditArea" },
                 shownWhile: () => BioScreenController.Instance != null && BioScreenController.Instance.isOpen, transparent: true),
-            new CaseBoardPanel("LocationDetailsCanvas", CaseBoardWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip),
-            new CaseBoardPanel("UpgradesDisplayCanvas", PanelWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip),
+            new CaseBoardPanel("LocationDetailsCanvas", CaseBoardWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip,
+                transparent: true),
+            new CaseBoardPanel("UpgradesDisplayCanvas", PanelWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip,
+                transparent: true),
         };
         _windows = new CaseBoardWindows(quadLayer, input, grip);
 
