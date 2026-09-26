@@ -164,7 +164,7 @@ internal sealed class CanvasPlacement
             if (!CanvasCategoryInfo.IsCanvasVisible(canvas)) continue;
 
             float dist = catDefs.Distance;
-            if (cat == CanvasCategory.Menu) dist = VRSettingsPanel.MenuDistance;
+            if (cat == CanvasCategory.Menu) dist = VRSettings.MenuDistance;
             float vOff = catDefs.VerticalOffset;
 
             string cname = canvas.gameObject.name ?? "";

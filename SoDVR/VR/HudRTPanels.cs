@@ -1,6 +1,5 @@
 using System;
 using System.Text;
-using BepInEx.Configuration;
 using BepInEx.Logging;
 using UnityEngine;
 
@@ -11,7 +10,7 @@ namespace SoDVR.VR;
 /// objectives, key hints...) is nested in GameCanvas, so one transparent render of GameCanvas
 /// holds the whole HUD in its flat layout; the canvases the case board, dialogue and map own are
 /// detached from it by their own panels. Shown as one see-through sheet that lazily follows the
-/// head, placed by the [HUD] config section.
+/// head, placed by the [HUD] settings.
 /// </summary>
 internal sealed class HudRTPanels
 {
@@ -26,12 +25,6 @@ internal sealed class HudRTPanels
     private const float FollowDeadzoneDegrees = 25f;
     private const float FollowRate = 4f;
     private const int AlphaProbeAfterRenders = 60;
-
-    public const float DefaultDistance = 2.5f;
-    public const float DefaultVerticalOffset = -0.15f;
-    public static ConfigEntry<float>? Distance;
-    public static ConfigEntry<float>? Size;
-    public static ConfigEntry<float>? VerticalOffset;
 
     private readonly RTCanvasPanel _panel;
     private RTPanelView? _sheet;
@@ -68,11 +61,11 @@ internal sealed class HudRTPanels
         _headingYaw = FollowHeading(_headingYaw ?? headYaw, headYaw);
         var heading = Quaternion.Euler(0f, _headingYaw.Value, 0f);
 
-        float distance = Distance?.Value ?? DefaultDistance;
-        float width = 2f * distance * Mathf.Tan(0.5f * ScreenAngularWidthDegrees * (Size?.Value ?? 1f) * Mathf.Deg2Rad);
+        float distance = VRSettings.HudDistance;
+        float width = 2f * distance * Mathf.Tan(0.5f * ScreenAngularWidthDegrees * VRSettings.HudSize * Mathf.Deg2Rad);
         _sheet.Scale = width / ScreenWorldWidth;
         _sheet.SetPose(headPose.position + heading * new Vector3(
-            0f, VerticalOffset?.Value ?? DefaultVerticalOffset, distance), heading);
+            0f, VRSettings.HudVerticalOffset, distance), heading);
     }
 
     /// <summary>Eases the heading just far enough to bring the head back inside the deadzone.</summary>

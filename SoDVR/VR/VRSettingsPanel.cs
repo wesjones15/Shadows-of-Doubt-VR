@@ -69,46 +69,16 @@ public static class VRSettingsPanel
     private static readonly Color ColBtnOff      = new(0.85f, 0.85f, 0.85f, 1f); // light grey
     private static readonly Color ColNavBtn      = new(0.65f, 0.75f, 1.00f, 1f); // lavender
 
-    // VR-specific toggle states (not saved to PlayerPrefs — session only)
-    public static bool LeftLaserEnabled = true;   // left hand laser pointer on/off
-    public static bool ItemHandRight    = false;  // false = left hand holds items, true = right
-
-    // 31 values: 0.5, 0.6, ..., 3.5 (0.1 increments)
-    private static readonly float[]  _distValues =
+    // The values the VR tab's ◄/► rows step through. A value set in the config file between them
+    // shows as the nearest one.
+    private static readonly float[] DistanceOptions =
         Enumerable.Range(5, 31).Select(i => (float)Math.Round(i * 0.1, 1)).ToArray();
-    private static readonly string[] _distLabels =
-        Enumerable.Range(5, 31).Select(i => $"{i * 0.1:F1} m").ToArray();
-
-    // Menu/window distance. Default 1.8 m (index 13).
-    private static int _menuDistIdx = 13;
-    public static float MenuDistance => _distValues[_menuDistIdx];
-
-    // Turn mode: false = snap, true = smooth
-    public static bool SmoothTurnEnabled = false;
-
-    // Snap turn angle
-    private static int _snapAngleIdx = 2; // default 30°
-    private static readonly float[]  _snapAngleValues = { 15f, 22.5f, 30f, 45f, 60f, 90f };
-    private static readonly string[] _snapAngleLabels = { "15°", "22.5°", "30°", "45°", "60°", "90°" };
-    public static float SnapTurnAngle => _snapAngleValues[_snapAngleIdx];
-
-    // Smooth turn speed (degrees/sec at full stick deflection)
-    private static int _smoothSpeedIdx = 1; // default 120°/s
-    private static readonly float[]  _smoothSpeedValues = { 60f, 120f, 180f, 240f };
-    private static readonly string[] _smoothSpeedLabels = { "Slow (60°/s)", "Normal (120°/s)", "Fast (180°/s)", "Very Fast (240°/s)" };
-    public static float SmoothTurnSpeed => _smoothSpeedValues[_smoothSpeedIdx];
-
-    // Movement speed
-    private static int _moveSpeedIdx = 1; // default 4.0 m/s
-    private static readonly float[]  _moveSpeedValues = { 2.0f, 4.0f, 6.0f, 8.0f };
-    private static readonly string[] _moveSpeedLabels = { "Slow (2 m/s)", "Normal (4 m/s)", "Fast (6 m/s)", "Very Fast (8 m/s)" };
-    public static float MoveSpeed => _moveSpeedValues[_moveSpeedIdx];
-
-    // Sprint multiplier
-    private static int _sprintMultIdx = 1; // default 1.8×
-    private static readonly float[]  _sprintMultValues = { 1.4f, 1.8f, 2.5f, 3.0f };
-    private static readonly string[] _sprintMultLabels = { "1.4×", "1.8×", "2.5×", "3.0×" };
-    public static float SprintMultiplier => _sprintMultValues[_sprintMultIdx];
+    private static readonly float[] SnapAngleOptions   = { 15f, 22.5f, 30f, 45f, 60f, 90f };
+    private static readonly float[] SmoothSpeedOptions = { 60f, 120f, 180f, 240f };
+    private static readonly float[] MoveSpeedOptions   = { 2f, 4f, 6f, 8f };
+    private static readonly float[] SprintOptions      = { 1.4f, 1.8f, 2.5f, 3f };
+    private static readonly float[] HudSizeOptions     = { 0.6f, 0.75f, 0.9f, 1f, 1.1f, 1.25f, 1.5f };
+    private static readonly float[] HudHeightOptions   = { -0.3f, -0.2f, -0.15f, -0.1f, 0f, 0.1f, 0.2f, 0.3f };
 
     // GO instance-ID → action map — avoids IL2CPP AddListener 3× fire bug.
     // Populated in Init(); cleared at Init() start.  TryClickCanvas calls HandleClick().
@@ -121,38 +91,6 @@ public static class VRSettingsPanel
         return true;
     }
 
-    // ── VR settings persistence ──────────────────────────────────────────────
-
-    private static void LoadVRSettings()
-    {
-        // Turn / movement
-        SmoothTurnEnabled = PlayerPrefs.GetInt("SoDVR.SmoothTurn",    0) != 0;
-        _snapAngleIdx     = PlayerPrefs.GetInt("SoDVR.SnapAngleIdx",  2);
-        _smoothSpeedIdx   = PlayerPrefs.GetInt("SoDVR.SmoothSpeedIdx",1);
-        _moveSpeedIdx     = PlayerPrefs.GetInt("SoDVR.MoveSpeedIdx",  1);
-        _sprintMultIdx    = PlayerPrefs.GetInt("SoDVR.SprintMultIdx", 1);
-        _menuDistIdx      = PlayerPrefs.GetInt("SoDVR.MenuDistIdx",   13);
-        // Clamp indices in case the option count changes between versions
-        _menuDistIdx    = Math.Max(0, Math.Min(_menuDistIdx,    _distValues.Length - 1));
-        _snapAngleIdx   = Math.Max(0, Math.Min(_snapAngleIdx,   _snapAngleValues.Length - 1));
-        _smoothSpeedIdx = Math.Max(0, Math.Min(_smoothSpeedIdx, _smoothSpeedValues.Length - 1));
-        _moveSpeedIdx   = Math.Max(0, Math.Min(_moveSpeedIdx,   _moveSpeedValues.Length - 1));
-        _sprintMultIdx  = Math.Max(0, Math.Min(_sprintMultIdx,  _sprintMultValues.Length - 1));
-        Plugin.Log.LogInfo($"[VRSettings] VR settings loaded: menuDist={MenuDistance:F1}m turn={( SmoothTurnEnabled ? "smooth" : "snap" )} snapAngle={SnapTurnAngle}° moveSpeed={MoveSpeed:F1}");
-    }
-
-    private static void SaveVRSettings()
-    {
-        // Turn / movement
-        PlayerPrefs.SetInt("SoDVR.SmoothTurn",     SmoothTurnEnabled ? 1 : 0);
-        PlayerPrefs.SetInt("SoDVR.SnapAngleIdx",   _snapAngleIdx);
-        PlayerPrefs.SetInt("SoDVR.SmoothSpeedIdx", _smoothSpeedIdx);
-        PlayerPrefs.SetInt("SoDVR.MoveSpeedIdx",   _moveSpeedIdx);
-        PlayerPrefs.SetInt("SoDVR.SprintMultIdx",  _sprintMultIdx);
-        PlayerPrefs.SetInt("SoDVR.MenuDistIdx",    _menuDistIdx);
-        PlayerPrefs.Save();
-    }
-
     // ── Init ──────────────────────────────────────────────────────────────────
 
     public static GameObject? Init(Action<int> removeFromPositioned)
@@ -161,7 +99,6 @@ public static class VRSettingsPanel
         _toggleRefs.Clear();
         _staticImgRefs.Clear();
         _clickMap.Clear();
-        LoadVRSettings();
         try
         {
             // ── Canvas ────────────────────────────────────────────────────────
@@ -582,49 +519,43 @@ public static class VRSettingsPanel
             AddSectionHeader(vrContent, ref vy, "─── TURNING ───");
 
             AddToggleRow(vrContent, ref vy, "Smooth Turn",
-                () => SmoothTurnEnabled,
-                v => { SmoothTurnEnabled = v; SaveVRSettings(); });
-
-            AddPrevNextRow(vrContent, ref vy, "Snap Angle",
-                _snapAngleLabels,
-                () => _snapAngleIdx,
-                v => { _snapAngleIdx = v; SaveVRSettings(); });
-
-            AddPrevNextRow(vrContent, ref vy, "Smooth Speed",
-                _smoothSpeedLabels,
-                () => _smoothSpeedIdx,
-                v => { _smoothSpeedIdx = v; SaveVRSettings(); });
+                () => VRSettings.SmoothTurn, v => VRSettings.SmoothTurn = v);
+            AddFloatRow(vrContent, ref vy, "Snap Angle", SnapAngleOptions, v => $"{v}°",
+                () => VRSettings.SnapTurnAngle, v => VRSettings.SnapTurnAngle = v);
+            AddFloatRow(vrContent, ref vy, "Smooth Speed", SmoothSpeedOptions, v => $"{v}°/s",
+                () => VRSettings.SmoothTurnSpeed, v => VRSettings.SmoothTurnSpeed = v);
 
             // ── Movement section header ───────────────────────────────────────
             AddSectionHeader(vrContent, ref vy, "─── MOVEMENT ───");
 
-            AddPrevNextRow(vrContent, ref vy, "Move Speed",
-                _moveSpeedLabels,
-                () => _moveSpeedIdx,
-                v => { _moveSpeedIdx = v; SaveVRSettings(); });
-
-            AddPrevNextRow(vrContent, ref vy, "Sprint Multi",
-                _sprintMultLabels,
-                () => _sprintMultIdx,
-                v => { _sprintMultIdx = v; SaveVRSettings(); });
+            AddFloatRow(vrContent, ref vy, "Move Speed", MoveSpeedOptions, v => $"{v} m/s",
+                () => VRSettings.MoveSpeed, v => VRSettings.MoveSpeed = v);
+            AddFloatRow(vrContent, ref vy, "Sprint Multi", SprintOptions, v => $"{v}×",
+                () => VRSettings.SprintMultiplier, v => VRSettings.SprintMultiplier = v);
 
             // ── Controls section header ───────────────────────────────────────
             AddSectionHeader(vrContent, ref vy, "─── CONTROLS ───");
 
             AddToggleRow(vrContent, ref vy, "Left Laser",
-                () => LeftLaserEnabled,
-                v => LeftLaserEnabled = v);
+                () => VRSettings.LeftLaser, v => VRSettings.LeftLaser = v);
             AddToggleRow(vrContent, ref vy, "Item Hand: Right",
-                () => ItemHandRight,
-                v => ItemHandRight = v);
+                () => VRSettings.ItemHandRight, v => VRSettings.ItemHandRight = v);
 
             // ── Windows section header ────────────────────────────────────────
             AddSectionHeader(vrContent, ref vy, "─── WINDOWS ───");
 
-            AddPrevNextRow(vrContent, ref vy, "Menu Distance",
-                _distLabels,
-                () => _menuDistIdx,
-                v => { _menuDistIdx = v; SaveVRSettings(); });
+            AddFloatRow(vrContent, ref vy, "Menu Distance", DistanceOptions, v => $"{v:F1} m",
+                () => VRSettings.MenuDistance, v => VRSettings.MenuDistance = v);
+
+            // ── HUD section header ────────────────────────────────────────────
+            AddSectionHeader(vrContent, ref vy, "─── HUD ───");
+
+            AddFloatRow(vrContent, ref vy, "HUD Distance", DistanceOptions, v => $"{v:F1} m",
+                () => VRSettings.HudDistance, v => VRSettings.HudDistance = v);
+            AddFloatRow(vrContent, ref vy, "HUD Size", HudSizeOptions, v => $"{v:0.##}×",
+                () => VRSettings.HudSize, v => VRSettings.HudSize = v);
+            AddFloatRow(vrContent, ref vy, "HUD Height", HudHeightOptions, v => $"{v:+0.00;-0.00;0} m",
+                () => VRSettings.HudVerticalOffset, v => VRSettings.HudVerticalOffset = v);
 
             FinalizeContent(vrContent, vy);
 
@@ -1030,6 +961,14 @@ public static class VRSettingsPanel
         };
 
         yTop += ROW_STEP;
+    }
+
+    private static void AddFloatRow(
+        RectTransform content, ref float yTop, string label,
+        float[] options, Func<float, string> format, Func<float> getter, Action<float> setter)
+    {
+        AddPrevNextRow(content, ref yTop, label, options.Select(format).ToArray(),
+            () => FloatToIdx(getter(), options), i => setter(options[i]));
     }
 
     private static void AddPlaceholderRow(RectTransform content, ref float yTop, string label)

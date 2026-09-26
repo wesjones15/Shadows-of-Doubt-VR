@@ -147,7 +147,7 @@ internal sealed class MenuRTPanel
             float headYaw = leftCam.transform.eulerAngles.y;
             Quaternion yawOnly = Quaternion.Euler(0f, headYaw, 0f);
             Vector3 forward = yawOnly * Vector3.forward;
-            float dist = VRSettingsPanel.MenuDistance;
+            float dist = VRSettings.MenuDistance;
 
             _quadGO.transform.position = headPos + forward * dist + Vector3.up * catDef.VerticalOffset;
             _quadGO.transform.rotation = yawOnly;

@@ -166,7 +166,7 @@ internal sealed class ControllerInteraction
     public void UpdateLeftLaser(LineRenderer? leftLaserLine, GameObject? leftControllerGO)
     {
         if (leftLaserLine == null || leftControllerGO == null) return;
-        bool showLeft = VRSettingsPanel.LeftLaserEnabled;
+        bool showLeft = VRSettings.LeftLaser;
         if (showLeft)
         {
             try

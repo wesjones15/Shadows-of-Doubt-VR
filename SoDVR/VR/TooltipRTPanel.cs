@@ -220,7 +220,7 @@ internal sealed class TooltipRTPanel
         {
             var yawOnly = Quaternion.Euler(0f, leftCam.transform.eulerAngles.y, 0f);
             // Legacy dialog distance: just in front of the pause menu.
-            float distance = e.Kind == Kind.Dialog ? VRSettingsPanel.MenuDistance - 0.2f : VRSettingsPanel.MenuDistance;
+            float distance = e.Kind == Kind.Dialog ? VRSettings.MenuDistance - 0.2f : VRSettings.MenuDistance;
             e.Pivot = CentrePivot;
             e.Anchor = head + yawOnly * Vector3.forward * distance;
             e.Rotation = yawOnly;

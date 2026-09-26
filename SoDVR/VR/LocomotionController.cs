@@ -150,12 +150,12 @@ internal sealed class LocomotionController
 
         if (!OpenXRManager.GetThumbstickState(true, out float tx, out float _)) return;
 
-        if (VRSettingsPanel.SmoothTurnEnabled)
+        if (VRSettings.SmoothTurn)
         {
             // Smooth turn: rotate proportionally to stick deflection
             if (Mathf.Abs(tx) > MoveDeadZone)
             {
-                float speed = VRSettingsPanel.SmoothTurnSpeed * Time.deltaTime;
+                float speed = VRSettings.SmoothTurnSpeed * Time.deltaTime;
                 vrOrigin.Rotate(Vector3.up, tx * speed, Space.World);
             }
             return;
@@ -173,7 +173,7 @@ internal sealed class LocomotionController
 
         if (_snapArmed && absTx > SnapTurnDeadZone && _snapCooldown <= 0f)
         {
-            float angle = Mathf.Sign(tx) * VRSettingsPanel.SnapTurnAngle;
+            float angle = Mathf.Sign(tx) * VRSettings.SnapTurnAngle;
             vrOrigin.Rotate(Vector3.up, angle, Space.World);
             _snapCooldown = SnapTurnCooldown;
             _snapArmed    = false;
@@ -235,8 +235,8 @@ internal sealed class LocomotionController
             Vector3 moveDir  = (camFwd * dy + camRight * dx);
 
             bool alwaysRunV = PlayerPrefs.GetInt("alwaysRun", 0) != 0;
-            float msV = VRSettingsPanel.MoveSpeed * DuctSpeedFraction;
-            float smV = VRSettingsPanel.SprintMultiplier;
+            float msV = VRSettings.MoveSpeed * DuctSpeedFraction;
+            float smV = VRSettings.SprintMultiplier;
             float baseSpeedV = alwaysRunV ? msV * smV : msV;
             float altSpeedV  = alwaysRunV ? msV : msV * smV;
             float speedV     = _sprintActive ? altSpeedV : baseSpeedV;
@@ -261,8 +261,8 @@ internal sealed class LocomotionController
         Vector3 fwd   = Quaternion.Euler(0f, headYaw, 0f) * Vector3.forward;
         Vector3 right = Quaternion.Euler(0f, headYaw, 0f) * Vector3.right;
         bool alwaysRun = PlayerPrefs.GetInt("alwaysRun", 0) != 0;
-        float ms = VRSettingsPanel.MoveSpeed;
-        float sm = VRSettingsPanel.SprintMultiplier;
+        float ms = VRSettings.MoveSpeed;
+        float sm = VRSettings.SprintMultiplier;
         float baseSpeed  = alwaysRun ? ms * sm : ms;
         float altSpeed   = alwaysRun ? ms : ms * sm;
         float speed = _sprintActive ? altSpeed : baseSpeed;

@@ -44,24 +44,7 @@ public class Plugin : BasePlugin
             "a headset than the room it replaces — same menu panel, same position, only what's " +
             "behind it changes.");
 
-        SoDVR.VR.HudRTPanels.Distance = Config.Bind(
-            "HUD",
-            "Distance",
-            SoDVR.VR.HudRTPanels.DefaultDistance,
-            "How far in front of the eyes the HUD sits, in metres. Only changes its depth: the HUD " +
-            "looks the same size at any distance.");
-
-        SoDVR.VR.HudRTPanels.Size = Config.Bind(
-            "HUD",
-            "Size",
-            1f,
-            "HUD size: 1 spans about 60 degrees of view, 0.75 is smaller, 1.25 larger.");
-
-        SoDVR.VR.HudRTPanels.VerticalOffset = Config.Bind(
-            "HUD",
-            "VerticalOffset",
-            SoDVR.VR.HudRTPanels.DefaultVerticalOffset,
-            "Height of the HUD's centre relative to the eyes, in metres (negative is lower).");
+        SoDVR.VR.VRSettings.Bind(Config);
 
         if (Array.Exists(Environment.GetCommandLineArgs(), a => a == "--disable-vr"))
         {
