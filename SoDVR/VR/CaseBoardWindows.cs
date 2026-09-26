@@ -262,7 +262,7 @@ internal sealed class CaseBoardWindows
             if (canvas == null || canvas.gameObject.name != WindowCanvasName) continue;
             try
             {
-                _panel.AttachSheet(canvas, MetersPerUnit, new Vector2Int(SlotColumns * SlotSize, SlotRows * SlotSize));
+                _panel.AttachSheet(canvas, MetersPerUnit, new Vector2Int(SlotColumns * SlotSize, SlotRows * SlotSize), transparent: true);
                 Log.LogInfo("[CaseBoardWindows] WindowCanvas discovered and converted to an RT sheet.");
             }
             catch (Exception ex)

@@ -73,12 +73,13 @@ internal sealed class RTCanvasPanel
     /// <summary>Sheet layout: the canvas becomes a <paramref name="sheetSize"/> sheet of
     /// 1-pixel units (CanvasScaler off, scale factor 1) for an owner that positions content on it
     /// itself — e.g. spreading windows the game stacks on top of each other into separate slots.</summary>
-    public void AttachSheet(Canvas canvas, float metersPerUnit, Vector2Int sheetSize)
+    /// <param name="transparent">See <see cref="CameraRig.SetupRTPanelProjectorCamera"/>.</param>
+    public void AttachSheet(Canvas canvas, float metersPerUnit, Vector2Int sheetSize, bool transparent = false)
     {
         var scaler = canvas.GetComponent<CanvasScaler>();
         if (scaler != null) { try { scaler.enabled = false; } catch { } }
         if (Math.Abs(canvas.scaleFactor - 1f) > 0.001f) canvas.scaleFactor = 1f;
-        AttachCore(canvas, sheetSize, metersPerUnit, false);
+        AttachCore(canvas, sheetSize, metersPerUnit, transparent);
     }
 
     private void AttachCore(Canvas canvas, Vector2Int size, float metersPerPixel, bool transparent)
