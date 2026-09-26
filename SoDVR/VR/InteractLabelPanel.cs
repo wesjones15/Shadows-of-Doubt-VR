@@ -63,6 +63,8 @@ internal sealed class InteractLabelPanel
 
         var position = l.point + Vector3.up * AboveHitMeters;
         var headPos = head.transform.position;
+        // A menu or the board in front of it covers it, as it covers the world behind.
+        if (RTCanvasPanel.IsBehindInteractivePanel(headPos, position)) { _view.Visible = false; return; }
         float distance = Mathf.Max(0.3f, Vector3.Distance(headPos, position));
         _view.Scale = HudRTPanels.SheetMetersPerPixelAt(distance, Screen.width) * _gameScaleFactor / _panel.MetersPerPixel;
         _view.SetPose(position, Quaternion.LookRotation(position - headPos));

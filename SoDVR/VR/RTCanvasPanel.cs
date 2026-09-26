@@ -123,6 +123,7 @@ internal sealed class RTCanvasPanel
     {
         if (Canvas == null || Texture == null) throw new InvalidOperationException($"[{_logTag}] CreateView before Attach");
         var view = new RTPanelView($"{_logTag}/{name}", _quadLayer, Canvas, Texture, MetersPerPixel, onBeforeClick, extension);
+        view.Interactive = interactive;
         if (interactive) _input.Register(view.Pointer);
         _views.Add(view);
         return view;
@@ -257,6 +258,20 @@ internal sealed class RTCanvasPanel
 
     /// <summary>The canvas is up and not faded out: active, enabled, and no CanvasGroup on it or
     /// above it below 0.1 alpha (the game fades some canvases rather than deactivating them).</summary>
+    /// <summary>True if a visible panel the player uses (a menu, window, the board) stands between
+    /// <paramref name="eye"/> and <paramref name="point"/>.</summary>
+    public static bool IsBehindInteractivePanel(Vector3 eye, Vector3 point)
+    {
+        var toPoint = point - eye;
+        float distance = toPoint.magnitude;
+        if (distance < 1e-3f) return false;
+        var ray = new Ray(eye, toPoint / distance);
+        foreach (var panel in s_attached)
+            foreach (var view in panel._views)
+                if (view.Interactive && view.RaycastWithMargin(ray, 1f, out float d) && d < distance) return true;
+        return false;
+    }
+
     public static bool IsShowing(Canvas canvas)
     {
         if (canvas == null || !canvas.gameObject.activeInHierarchy || !canvas.enabled) return false;
@@ -376,6 +391,8 @@ internal sealed class RTPanelView
     }
 
     public RTPanelPointer Pointer { get; }
+    /// <summary>Takes the laser: a menu, window or board, as opposed to something only looked at.</summary>
+    public bool Interactive { get; set; }
     public Transform Transform => _quad.transform;
     public Rect PixelRect { get; private set; }
 
