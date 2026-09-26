@@ -32,6 +32,7 @@ internal static class RTOwnedCanvases
         WorldMarksPanel.CanvasName,
         InteractLabelPanel.CanvasName,
         RadialMenuPanel.CanvasName,
+        CompassDisplay.CanvasName,
         // The HUD: GameCanvas and the HUD canvases nested in it (the legacy scanner has treated
         // those as roots of their own).
         "GameCanvas",

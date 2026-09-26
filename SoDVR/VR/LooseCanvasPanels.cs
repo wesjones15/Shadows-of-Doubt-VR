@@ -20,7 +20,6 @@ internal sealed class LooseCanvasPanels
 
     private static readonly HashSet<string> s_excluded = new(StringComparer.Ordinal)
     {
-        "3DUI",                               // the first-person held-item root, not UI
         "VRCursorCanvasInternal",             // the legacy cursor
         "VirtualCursorCanvas & EventSystem",  // the game's gamepad cursor
     };

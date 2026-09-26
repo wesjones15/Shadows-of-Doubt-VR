@@ -163,6 +163,10 @@ internal sealed class HudRTPanels
         return true;
     }
 
+    /// <summary>The walking sheet's centre, facing and world size while it shows; null otherwise.</summary>
+    public (Vector3 position, Quaternion rotation, Vector2 size)? SheetPose =>
+        _placement == Placement.Sheet && _sheet != null ? (_sheet.Transform.position, _sheet.Transform.rotation, _sheet.WorldSize) : null;
+
     /// <summary>Metres per texture pixel that make HUD content look as big as on the sheet, at
     /// <paramref name="distance"/> from the eyes.</summary>
     public static float SheetMetersPerPixelAt(float distance, int textureWidth) =>

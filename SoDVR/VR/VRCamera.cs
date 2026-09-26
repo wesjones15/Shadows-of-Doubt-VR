@@ -80,6 +80,7 @@ public class VRCamera : MonoBehaviour
     private RadialMenuPanel _radialMenu = null!;
     private readonly SoloScreens _soloScreens = new();
     private readonly LeftHandPointer _leftPointer = new();
+    private readonly CompassDisplay _compass = new(UILayer);
     private readonly PostFXOverlayCompositor _overlay = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
@@ -396,6 +397,8 @@ public class VRCamera : MonoBehaviour
 
             try { _hudRT.Tick(_leftCam, _caseBoardRT.ShowsBoard, _caseBoardRT.Anchor, _caseBoardRT.BoardExtent); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] HudRTPanels.Tick: {ex.GetType().Name}: {ex.Message}"); }
+            try { _compass.Tick(_hudRT); }
+            catch (Exception ex) { Log.LogWarning($"[VRCamera] CompassDisplay.Tick: {ex.Message}"); }
 
             try { _clueRT.Tick(_hudRT, _dialogueRT.OpenView); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] ClueMessagePanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
@@ -1017,8 +1020,8 @@ public class VRCamera : MonoBehaviour
                 try { _interactLabel.BeforeRender(_leftPointer.Label, _leftCam); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] InteractLabelPanel.BeforeRender: {ex.Message}"); }
 
-                // Awareness compass: reposition and reorient for VR head view.
-                _hud.UpdateCompass(_leftCam);
+                try { _compass.BeforeRender(_hudRT, _leftCam); }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] CompassDisplay.BeforeRender: {ex.Message}"); }
 
                 // Directional route arrow: reposition in front of VR head.
                 _hud.UpdateDirectionArrow(_leftCam);
@@ -1417,20 +1420,6 @@ public class VRCamera : MonoBehaviour
             catch (Exception ex) { Log.LogWarning($"[Movement] Tutorial disable: {ex.Message}"); }
         }
 
-        // 5h. Cache awareness compass container for VR positioning.
-        Transform? foundCompassContainer = null;
-        try
-        {
-            if (foundInterfaceCtrl != null && foundInterfaceCtrl.compassContainer != null)
-            {
-                foundCompassContainer = foundInterfaceCtrl.compassContainer.transform;
-                Log.LogInfo("[Movement] compassContainer found.");
-            }
-            else
-                Log.LogInfo("[Movement] compassContainer not found or null");
-        }
-        catch (Exception ex) { Log.LogWarning($"[Movement] compassContainer cache: {ex.Message}"); }
-
         // 5i. Cache directional route arrow for VR repositioning.
         Transform? foundDirArrowContainer = null;
         Transform? foundDirArrowTransform = null;
@@ -1448,7 +1437,7 @@ public class VRCamera : MonoBehaviour
         }
         catch (Exception ex) { Log.LogWarning($"[Movement] dirArrowContainer cache: {ex.Message}"); }
 
-        _hud.Discover(foundInterfaceCtrl, foundCompassContainer, foundDirArrowContainer, foundDirArrowTransform);
+        _hud.Discover(foundInterfaceCtrl, foundDirArrowContainer, foundDirArrowTransform);
 
         // 5d. Cache Player for vent-state detection.
         Player? playerComponent = null;
