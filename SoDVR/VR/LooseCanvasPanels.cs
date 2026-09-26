@@ -31,6 +31,7 @@ internal sealed class LooseCanvasPanels
     private readonly RTPanelInput _input;
     private readonly RTPanelGrip _grip;
     private readonly Dictionary<int, LoosePanel> _panels = new();
+    private readonly HashSet<int> _logged = new();
     // Head-yaw-relative pose each canvas was last left at, by name: it outlives the canvas.
     private readonly Dictionary<string, (Vector3 offset, Quaternion rotation)> _layouts = new(StringComparer.Ordinal);
 
@@ -50,9 +51,13 @@ internal sealed class LooseCanvasPanels
 
         foreach (var canvas in all)
         {
-            if (!IsCandidate(canvas)) continue;
+            if (canvas == null || !canvas.isRootCanvas || canvas.renderMode == RenderMode.WorldSpace) continue;
             int id = canvas.GetInstanceID();
             if (_panels.ContainsKey(id)) continue;
+            var rejection = Rejection(canvas);
+            if (_logged.Add(id))
+                Log.LogInfo($"[LooseCanvas] Seen '{canvas.name}' (parent '{(canvas.transform.parent != null ? canvas.transform.parent.name : "root")}', {canvas.renderMode}): {rejection ?? "claimed"}");
+            if (rejection != null) continue;
             try
             {
                 RTOwnedCanvases.Claim(canvas);
@@ -85,20 +90,20 @@ internal sealed class LooseCanvasPanels
         foreach (var panel in _panels.Values) panel.AppendOverlay(overlay);
     }
 
-    private static bool IsCandidate(Canvas canvas)
+    /// <summary>Why a root screen canvas is left alone, or null to claim it.</summary>
+    private static string? Rejection(Canvas canvas)
     {
-        if (canvas == null || !canvas.isRootCanvas || canvas.renderMode == RenderMode.WorldSpace) return false;
         // A canvas drawn by a camera into a texture belongs in the world (a computer's screen).
         if (canvas.renderMode == RenderMode.ScreenSpaceCamera && canvas.worldCamera != null && canvas.worldCamera.targetTexture != null)
-            return false;
-        // Not a scene object (a prefab asset).
-        if (!canvas.gameObject.scene.IsValid()) return false;
+            return "drawn into a texture";
+        if (!canvas.gameObject.scene.IsValid()) return "not in a scene (a prefab)";
         string name = canvas.gameObject.name ?? "";
-        if (name.StartsWith("SoDVR_", StringComparison.Ordinal) || s_excluded.Contains(name) || RTOwnedCanvases.IsOwned(canvas))
-            return false;
+        if (name.StartsWith("SoDVR_", StringComparison.Ordinal)) return "the mod's own";
+        if (s_excluded.Contains(name)) return "excluded";
+        if (RTOwnedCanvases.IsOwned(canvas)) return "owned by another RT panel";
         foreach (var fragment in s_excludedFragments)
-            if (name.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0) return false;
-        return true;
+            if (name.IndexOf(fragment, StringComparison.OrdinalIgnoreCase) >= 0) return "excluded";
+        return null;
     }
 
     private sealed class LoosePanel : IRTGripTarget
