@@ -6,13 +6,14 @@ using UnityEngine.UI;
 namespace SoDVR.VR;
 
 /// <summary>
-/// The game's 3D awareness compass (the ring and its awareness icons, in the 3DUI canvas) just below
-/// the walking HUD sheet, at the sheet's scale, facing the head. The flat game hangs 3DUI in front
-/// of its camera, which in VR is suppressed and aimed with the left controller; here the canvas is
-/// world-space and the compass is placed each frame after the game has updated it. It is real
-/// geometry, not flat UI, so it stays 3D rather than going through an RT panel, and its objects are
-/// kept on the UI layer the eye cameras draw, including ones the game adds later. (The route arrow,
-/// also in 3DUI, is placed by <see cref="HudController"/>.)
+/// The game's 3D awareness compass (the ring and its awareness icons, in the 3DUI canvas) at ankle
+/// height a little in front of the player, turning with the head, the ring and icons facing it. The
+/// game still decides when it shows (it fades in with something to be aware of). The flat game hangs
+/// 3DUI in front of its camera, which in VR is suppressed and aimed with the left controller; here
+/// the canvas is world-space and the compass is placed each frame after the game has updated it. It
+/// is real geometry, not flat UI, so it stays 3D rather than going through an RT panel, and its
+/// objects are kept on the UI layer the eye cameras draw. (The route arrow, also in 3DUI, is placed
+/// by <see cref="HudController"/>.)
 /// </summary>
 internal sealed class CompassDisplay
 {
@@ -20,20 +21,25 @@ internal sealed class CompassDisplay
 
     public const string CanvasName = "3DUI";
     private const int DiscoveryRetryFrames = 90;
-    private const int RelayerFrames = 30;
-    private const float GapMeters = 0.02f;
-    private const float FallbackHalfHeightMeters = 0.05f;
+    // The game puts some of these objects back on its own layers now and then.
+    private const int RelayerFrames = 5;
+    private const float AheadMeters = 0.3f;
+    private const float AnkleHeightMeters = 0.12f;
+    private const float FloorSearchMeters = 3f;
+    // Where the floor is assumed when nothing is found under the head.
+    private const float FallbackEyeHeightMeters = 1.6f;
 
     private readonly int _layer;
     private Canvas? _canvas;
     private RectTransform? _rect;
     private int _discoveryCooldown;
     private int _relayerCountdown;
+    private string? _lastState;
 
     public CompassDisplay(int layer) => _layer = layer;
 
-    /// <summary>Per Update: finds the canvas, keeps its layers, and scales and turns it with the sheet.</summary>
-    public void Tick(HudRTPanels hud)
+    /// <summary>Per Update: finds the canvas and keeps its layers.</summary>
+    public void Tick()
     {
         if (_canvas == null)
         {
@@ -43,39 +49,68 @@ internal sealed class CompassDisplay
             if (_canvas == null) return;
         }
         if (--_relayerCountdown <= 0) Relayer();
-        if (hud.SheetPose is not { } sheet || _rect == null) return;
-
-        var t = _canvas.transform;
-        t.localScale = Vector3.one * (sheet.size.x / Mathf.Max(1f, _rect.rect.width));
-        t.SetPositionAndRotation(sheet.position, sheet.rotation);
     }
 
     /// <summary>Per LateUpdate, after the game has written the compass for its own camera: moves it
-    /// under the sheet and turns the ring and icons to the head.</summary>
-    public void BeforeRender(HudRTPanels hud, Camera? head)
+    /// to the player's feet and turns the ring and icons to the head.</summary>
+    public void BeforeRender(Camera? head)
     {
-        if (_canvas == null || head == null) return;
+        if (_canvas == null || _rect == null || head == null) return;
         var ui = InterfaceController.Instance;
         if (ui == null || ui.compassContainer == null) return;
 
-        if (hud.SheetPose is { } sheet)
-        {
-            var renderer = ui.compassMeshRend;
-            float halfHeight = renderer != null ? renderer.bounds.extents.y : FallbackHalfHeightMeters;
-            var up = sheet.rotation * Vector3.up;
-            ui.compassContainer.transform.position = sheet.position - up * (0.5f * sheet.size.y + GapMeters + halfHeight);
-        }
+        var headPos = head.transform.position;
+        var heading = Quaternion.Euler(0f, head.transform.eulerAngles.y, 0f);
+        var position = headPos + heading * (Vector3.forward * AheadMeters);
+        position.y = FloorBelow(headPos) + AnkleHeightMeters;
+        float distance = Vector3.Distance(headPos, position);
 
-        var headRotation = head.transform.rotation;
+        // HUD-sized to the eye at its distance, as the flat game draws it at the screen's bottom.
+        var t = _canvas.transform;
+        t.localScale = Vector3.one * HudRTPanels.SheetMetersPerPixelAt(distance, Mathf.RoundToInt(_rect.rect.width));
+        t.rotation = heading;
+        ui.compassContainer.transform.position = position;
+
         var ring = ui.backgroundTransform;
-        if (ring != null) ring.rotation = Quaternion.LookRotation(head.transform.forward, head.transform.up);
+        if (ring != null) ring.rotation = Quaternion.LookRotation(position - headPos, heading * Vector3.forward);
+        var headRotation = head.transform.rotation;
         var icons = ui.awarenessIcons;
-        if (icons == null) return;
-        for (int i = 0; i < icons.Count; i++)
+        if (icons != null)
+            for (int i = 0; i < icons.Count; i++)
+            {
+                var image = icons[i]?.imageTransform;
+                if (image != null) image.rotation = headRotation;
+            }
+
+        LogState(ui, distance);
+    }
+
+    private static float FloorBelow(Vector3 head)
+    {
+        float? floor = null;
+        foreach (var hit in Physics.RaycastAll(head, Vector3.down, FloorSearchMeters, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
         {
-            var image = icons[i]?.imageTransform;
-            if (image != null) image.rotation = headRotation;
+            // The player's own capsule is not the floor.
+            if (hit.collider.TryCast<CharacterController>() != null) continue;
+            if (floor == null || hit.point.y > floor) floor = hit.point.y;
         }
+        return floor ?? head.y - FallbackEyeHeightMeters;
+    }
+
+    /// <summary>TEMPORARY: whether the game is showing the compass and whether it can be seen, logged
+    /// on each change — to tell "hidden by the game" from "shown but not drawn".</summary>
+    private void LogState(InterfaceController ui, float distance)
+    {
+        var renderer = ui.compassMeshRend;
+        string layers = "";
+        foreach (var t in _canvas!.GetComponentsInChildren<Transform>(true))
+            if (t != null && t.gameObject.layer != _layer) layers += $" {t.name}@{LayerMask.LayerToName(t.gameObject.layer)}";
+        var state = $"alpha {ui.compassActualAlpha:F1} (wants {ui.compassDesiredAlpha:F1}), container active={ui.compassContainer.activeInHierarchy}, " +
+                    $"mesh {(renderer == null ? "none" : $"enabled={renderer.enabled} size={renderer.bounds.size}")}, " +
+                    $"off the UI layer:{(layers.Length > 0 ? layers : " none")}";
+        if (state == _lastState) return;
+        _lastState = state;
+        Log.LogInfo($"[Compass] {state}, {distance:F2} m from the head.");
     }
 
     private void TryDiscover()
@@ -91,7 +126,7 @@ internal sealed class CompassDisplay
                 _canvas = canvas;
                 _rect = canvas.GetComponent<RectTransform>();
                 _relayerCountdown = 0;
-                Log.LogInfo($"[Compass] '{CanvasName}' is now world-space, the compass under the HUD: canvas {_rect?.rect.size}.");
+                Log.LogInfo($"[Compass] '{CanvasName}' is now world-space, the compass at the player's feet: canvas {_rect?.rect.size}.");
                 return;
             }
         }
@@ -103,13 +138,7 @@ internal sealed class CompassDisplay
     private void Relayer()
     {
         _relayerCountdown = RelayerFrames;
-        int moved = 0;
         foreach (var t in _canvas!.GetComponentsInChildren<Transform>(true))
-        {
-            if (t == null || t.gameObject.layer == _layer) continue;
-            t.gameObject.layer = _layer;
-            moved++;
-        }
-        if (moved > 0) Log.LogInfo($"[Compass] {moved} object(s) moved onto the UI layer.");
+            if (t != null && t.gameObject.layer != _layer) t.gameObject.layer = _layer;
     }
 }

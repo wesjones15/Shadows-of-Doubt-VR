@@ -397,7 +397,7 @@ public class VRCamera : MonoBehaviour
 
             try { _hudRT.Tick(_leftCam, _caseBoardRT.ShowsBoard, _caseBoardRT.Anchor, _caseBoardRT.BoardExtent); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] HudRTPanels.Tick: {ex.GetType().Name}: {ex.Message}"); }
-            try { _compass.Tick(_hudRT); }
+            try { _compass.Tick(); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] CompassDisplay.Tick: {ex.Message}"); }
 
             try { _clueRT.Tick(_hudRT, _dialogueRT.OpenView); }
@@ -1020,7 +1020,7 @@ public class VRCamera : MonoBehaviour
                 try { _interactLabel.BeforeRender(_leftPointer.Label, _leftCam); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] InteractLabelPanel.BeforeRender: {ex.Message}"); }
 
-                try { _compass.BeforeRender(_hudRT, _leftCam); }
+                try { _compass.BeforeRender(_leftCam); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] CompassDisplay.BeforeRender: {ex.Message}"); }
 
                 // Directional route arrow: reposition in front of VR head.
