@@ -13,7 +13,7 @@ namespace SoDVR.VR;
 /// mechanically from VRCamera, not redesigned.
 ///
 /// <see cref="PositionCanvases"/> is a single foreach over every managed canvas with one long
-/// per-category if/else-if/continue chain (cursor → HUD →
+/// per-category if/else-if/continue chain (cursor →
 /// already-positioned skip → default), sharing locals across every branch and
 /// mutating cross-cutting VRCamera dictionaries throughout. It moves as one method rather than
 /// being split further — fine-grained sub-extraction would need the same kind of
@@ -28,9 +28,7 @@ internal sealed class CanvasPlacement
     private int  _placementIndex;     // incremental depth offset counter per placement cycle
 
     internal void PositionCanvases(
-        Transform vrOrigin, Transform hudAnchor,
         Dictionary<int, Graphic> managedFades, int frameCount,
-        Canvas? menuCanvasRef,
         Camera? leftCam, bool posesValid,
         Canvas? cursorCanvas,
         Dictionary<int, Canvas> managedCanvases, HashSet<int> nestedCanvasIds,
@@ -38,7 +36,7 @@ internal sealed class CanvasPlacement
         Dictionary<int, int> lastRescanFrame,
         Dictionary<int, (Vector3 offset, Quaternion rot)> gripDragAnchorOffsets,
         Dictionary<int, (Vector3 pos, Quaternion rot)> gripDragEnforce,
-        bool caseBoardOpen, bool caseBoardJustOpened, Transform caseBoardAnchor, bool caseBoardAnchorPlaced,
+        bool caseBoardJustOpened, Transform caseBoardAnchor, bool caseBoardAnchorPlaced,
         bool cursorHasTarget, Vector3 cursorTargetPos, Quaternion cursorTargetRot)
     {
         // Suppress FadeOverlay graphics every 4 frames (prevents black screen flash).
@@ -53,11 +51,6 @@ internal sealed class CanvasPlacement
             }
         }
 
-        // MenuCanvas's own hide-while-VR-settings-open + re-patch-on-open-transition behavior now
-        // lives in MenuRTPanel.Tick, which owns the canvas outright. menuCanvasRef is still read
-        // below (HUD auto-hide) — that's a plain read of state MenuRTPanel maintains, not a second
-        // write path competing with it.
-
         if (leftCam == null || !posesValid) return;
 
         // Head/body reference directions for placement.
@@ -65,34 +58,6 @@ internal sealed class CanvasPlacement
         float   headYaw = leftCam.transform.eulerAngles.y;
         Quaternion yawOnly = Quaternion.Euler(0f, headYaw, 0f);
         Vector3 forward = yawOnly * Vector3.forward;
-
-        // ── HUD anchor scale (controlled by VR Settings) ─────────────────
-        float hudSc = VRSettingsPanel.HudSize;
-        if (hudAnchor.localScale.x != hudSc)
-            hudAnchor.localScale = new Vector3(hudSc, hudSc, hudSc);
-
-        // ── HUD anchor rotation: laggy head-follow OR body-locked ─────────
-        // transform.rotation = VROrigin (snap-turn yaw only).
-        // yawOnly = world-space head yaw from OpenXR pose via _leftCam.
-        // localRotation toward headRelative makes the HUD swing to follow head yaw with lag.
-        if (VRSettingsPanel.HudLaggyFollow)
-        {
-            float headPitch = leftCam.transform.eulerAngles.x;
-            Quaternion pitchAndYaw = Quaternion.Euler(headPitch, headYaw, 0f);
-            Quaternion headRelative = Quaternion.Inverse(vrOrigin.rotation) * pitchAndYaw;
-            hudAnchor.localRotation = Quaternion.Slerp(
-                hudAnchor.localRotation, headRelative, Time.deltaTime * 4f);
-        }
-        else
-        {
-            hudAnchor.localRotation = Quaternion.identity;
-        }
-
-        // ── HUD auto-hide: hide when pause menu or case board is open ─────
-        bool menuOpen      = menuCanvasRef != null && menuCanvasRef.isActiveAndEnabled;
-        bool hudShouldShow = !menuOpen && !caseBoardOpen;
-        if (hudAnchor.gameObject.activeSelf != hudShouldShow)
-            hudAnchor.gameObject.SetActive(hudShouldShow);
 
         int cursorId = cursorCanvas != null ? cursorCanvas.GetInstanceID() : -1;
 
@@ -186,32 +151,6 @@ internal sealed class CanvasPlacement
                     Vector3 toHead = (headPos - cursorTargetPos).normalized;
                     canvas.transform.position = cursorTargetPos + toHead * 0.02f;
                     canvas.transform.rotation = cursorTargetRot;
-                }
-                continue;
-            }
-
-            // ── HUD (body-locked) ─────────────────────────────────────────────
-            // Parent to HUDanchor once; after that it follows body movement automatically.
-            if (catDefs.IsHUD)
-            {
-                if (!positionedCanvases.Contains(id) && CanvasCategoryInfo.IsCanvasVisible(canvas))
-                {
-                    try
-                    {
-                        canvas.transform.SetParent(hudAnchor, false);
-                        canvas.transform.localRotation = Quaternion.identity;
-                        positionedCanvases.Add(id);
-                        Log.LogInfo($"[CanvasPlacement] HUD parented '{canvas.gameObject.name}' to HUDAnchor");
-                    }
-                    catch (Exception ex) { Log.LogWarning($"[CanvasPlacement] HUD parent: {ex.Message}"); }
-                }
-                // Sync position from VR Settings every frame — adjustments apply immediately
-                if (positionedCanvases.Contains(id))
-                {
-                    canvas.transform.localPosition = new Vector3(
-                        VRSettingsPanel.HudHorizOffset,
-                        VRSettingsPanel.HudVertOffset,
-                        VRSettingsPanel.HudDistance);
                 }
                 continue;
             }

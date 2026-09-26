@@ -73,31 +73,15 @@ public static class VRSettingsPanel
     public static bool LeftLaserEnabled = true;   // left hand laser pointer on/off
     public static bool ItemHandRight    = false;  // false = left hand holds items, true = right
 
-    // HUD position/size settings (session only, not persisted)
-    private static int _hudDistIdx   = 20; // default 2.5 m (index in 0.5..3.5 by 0.1)
-    private static int _hudSizeIdx   = 1;  // default Normal
-    private static int _hudHeightIdx = 1;  // default -0.15 m
-    private static int _hudHorizIdx  = 2;  // default center
-
     // 31 values: 0.5, 0.6, ..., 3.5 (0.1 increments)
-    private static readonly float[]  _hudDistValues =
+    private static readonly float[]  _distValues =
         Enumerable.Range(5, 31).Select(i => (float)Math.Round(i * 0.1, 1)).ToArray();
-    private static readonly string[] _hudDistLabels =
+    private static readonly string[] _distLabels =
         Enumerable.Range(5, 31).Select(i => $"{i * 0.1:F1} m").ToArray();
-    private static readonly float[] _hudSizeValues   = { 0.75f, 1.0f, 1.25f };
-    private static readonly float[] _hudHeightValues = { -0.30f, -0.15f, 0.0f, 0.15f, 0.30f };
-    private static readonly float[] _hudHorizValues  = { -0.30f, -0.15f, 0.0f, 0.15f, 0.30f };
 
-    public static float HudDistance    => _hudDistValues[_hudDistIdx];
-    public static float HudSize        => _hudSizeValues[_hudSizeIdx];
-    public static float HudVertOffset  => _hudHeightValues[_hudHeightIdx];
-    public static float HudHorizOffset => _hudHorizValues[_hudHorizIdx];
-    public static bool  HudLaggyFollow = false;
-
-    // Menu/window distance — 31 values: 0.5..3.5 m in 0.1 m increments. Default 1.8 m (index 13).
+    // Menu/window distance. Default 1.8 m (index 13).
     private static int _menuDistIdx = 13;
-    // Re-use the same value/label arrays as HUD distance (same range, same increments).
-    public static float MenuDistance => _hudDistValues[_menuDistIdx];
+    public static float MenuDistance => _distValues[_menuDistIdx];
 
     // Turn mode: false = snap, true = smooth
     public static bool SmoothTurnEnabled = false;
@@ -141,12 +125,6 @@ public static class VRSettingsPanel
 
     private static void LoadVRSettings()
     {
-        // HUD
-        _hudDistIdx   = PlayerPrefs.GetInt("SoDVR.HudDistIdx",       20);
-        _hudSizeIdx   = PlayerPrefs.GetInt("SoDVR.HudSizeIdx",        1);
-        _hudHeightIdx = PlayerPrefs.GetInt("SoDVR.HudHeightIdx",      1);
-        _hudHorizIdx  = PlayerPrefs.GetInt("SoDVR.HudHorizIdx",       2);
-        HudLaggyFollow = PlayerPrefs.GetInt("SoDVR.HudLaggyFollow",   0) != 0;
         // Turn / movement
         SmoothTurnEnabled = PlayerPrefs.GetInt("SoDVR.SmoothTurn",    0) != 0;
         _snapAngleIdx     = PlayerPrefs.GetInt("SoDVR.SnapAngleIdx",  2);
@@ -155,26 +133,16 @@ public static class VRSettingsPanel
         _sprintMultIdx    = PlayerPrefs.GetInt("SoDVR.SprintMultIdx", 1);
         _menuDistIdx      = PlayerPrefs.GetInt("SoDVR.MenuDistIdx",   13);
         // Clamp indices in case the option count changes between versions
-        _hudDistIdx     = Math.Max(0, Math.Min(_hudDistIdx,     _hudDistValues.Length - 1));
-        _menuDistIdx    = Math.Max(0, Math.Min(_menuDistIdx,    _hudDistValues.Length - 1));
-        _hudSizeIdx     = Math.Max(0, Math.Min(_hudSizeIdx,     _hudSizeValues.Length - 1));
-        _hudHeightIdx   = Math.Max(0, Math.Min(_hudHeightIdx,   _hudHeightValues.Length - 1));
-        _hudHorizIdx    = Math.Max(0, Math.Min(_hudHorizIdx,    _hudHorizValues.Length - 1));
+        _menuDistIdx    = Math.Max(0, Math.Min(_menuDistIdx,    _distValues.Length - 1));
         _snapAngleIdx   = Math.Max(0, Math.Min(_snapAngleIdx,   _snapAngleValues.Length - 1));
         _smoothSpeedIdx = Math.Max(0, Math.Min(_smoothSpeedIdx, _smoothSpeedValues.Length - 1));
         _moveSpeedIdx   = Math.Max(0, Math.Min(_moveSpeedIdx,   _moveSpeedValues.Length - 1));
         _sprintMultIdx  = Math.Max(0, Math.Min(_sprintMultIdx,  _sprintMultValues.Length - 1));
-        Plugin.Log.LogInfo($"[VRSettings] VR settings loaded: dist={HudDistance:F1}m size={HudSize:F2} turn={( SmoothTurnEnabled ? "smooth" : "snap" )} snapAngle={SnapTurnAngle}° moveSpeed={MoveSpeed:F1}");
+        Plugin.Log.LogInfo($"[VRSettings] VR settings loaded: menuDist={MenuDistance:F1}m turn={( SmoothTurnEnabled ? "smooth" : "snap" )} snapAngle={SnapTurnAngle}° moveSpeed={MoveSpeed:F1}");
     }
 
     private static void SaveVRSettings()
     {
-        // HUD
-        PlayerPrefs.SetInt("SoDVR.HudDistIdx",     _hudDistIdx);
-        PlayerPrefs.SetInt("SoDVR.HudSizeIdx",     _hudSizeIdx);
-        PlayerPrefs.SetInt("SoDVR.HudHeightIdx",   _hudHeightIdx);
-        PlayerPrefs.SetInt("SoDVR.HudHorizIdx",    _hudHorizIdx);
-        PlayerPrefs.SetInt("SoDVR.HudLaggyFollow", HudLaggyFollow ? 1 : 0);
         // Turn / movement
         PlayerPrefs.SetInt("SoDVR.SmoothTurn",     SmoothTurnEnabled ? 1 : 0);
         PlayerPrefs.SetInt("SoDVR.SnapAngleIdx",   _snapAngleIdx);
@@ -650,38 +618,11 @@ public static class VRSettingsPanel
                 () => ItemHandRight,
                 v => ItemHandRight = v);
 
-            // ── HUD section header ────────────────────────────────────────────
-            AddSectionHeader(vrContent, ref vy, "─── HUD ───");
-
-            AddPrevNextRow(vrContent, ref vy, "HUD Distance",
-                _hudDistLabels,
-                () => _hudDistIdx,
-                v => { _hudDistIdx = v; SaveVRSettings(); });
-
-            AddPrevNextRow(vrContent, ref vy, "HUD Size",
-                new[] { "Small", "Normal", "Large" },
-                () => _hudSizeIdx,
-                v => { _hudSizeIdx = v; SaveVRSettings(); });
-
-            AddPrevNextRow(vrContent, ref vy, "HUD Height",
-                new[] { "-0.3 m", "-0.15 m", "0.0 m", "+0.15 m", "+0.3 m" },
-                () => _hudHeightIdx,
-                v => { _hudHeightIdx = v; SaveVRSettings(); });
-
-            AddPrevNextRow(vrContent, ref vy, "HUD H.Offset",
-                new[] { "-0.3 m", "-0.15 m", "Center", "+0.15 m", "+0.3 m" },
-                () => _hudHorizIdx,
-                v => { _hudHorizIdx = v; SaveVRSettings(); });
-
-            AddToggleRow(vrContent, ref vy, "HUD Follow",
-                () => HudLaggyFollow,
-                v => { HudLaggyFollow = v; SaveVRSettings(); });
-
             // ── Windows section header ────────────────────────────────────────
             AddSectionHeader(vrContent, ref vy, "─── WINDOWS ───");
 
             AddPrevNextRow(vrContent, ref vy, "Menu Distance",
-                _hudDistLabels,
+                _distLabels,
                 () => _menuDistIdx,
                 v => { _menuDistIdx = v; SaveVRSettings(); });
 

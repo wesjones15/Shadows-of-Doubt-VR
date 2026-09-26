@@ -1,5 +1,6 @@
 using System;
 using System.Text;
+using BepInEx.Configuration;
 using BepInEx.Logging;
 using UnityEngine;
 
@@ -9,8 +10,8 @@ namespace SoDVR.VR;
 /// The game's HUD on the RT pipeline. Every on-screen HUD canvas (status cards, messages,
 /// objectives, key hints...) is nested in GameCanvas, so one transparent render of GameCanvas
 /// holds the whole HUD in its flat layout; the canvases the case board, dialogue and map own are
-/// detached from it by their own panels. Shown for now as one see-through sheet that lazily follows
-/// the head — the step before each HUD piece gets its own view.
+/// detached from it by their own panels. Shown as one see-through sheet that lazily follows the
+/// head, placed by the [HUD] config section.
 /// </summary>
 internal sealed class HudRTPanels
 {
@@ -19,12 +20,18 @@ internal sealed class HudRTPanels
     private const string CanvasName = "GameCanvas";
     private const int DiscoveryRetryFrames = 90;
     private const float ScreenWorldWidth = 1.5f;
-    // How wide the flat screen looks at HUD Size "Normal", whatever the HUD distance.
+    // How wide the flat screen looks at Size 1, whatever the distance.
     private const float ScreenAngularWidthDegrees = 60f;
     // Looking around within this much of the HUD's heading leaves it still; beyond, it follows.
     private const float FollowDeadzoneDegrees = 25f;
     private const float FollowRate = 4f;
     private const int AlphaProbeAfterRenders = 60;
+
+    public const float DefaultDistance = 2.5f;
+    public const float DefaultVerticalOffset = -0.15f;
+    public static ConfigEntry<float>? Distance;
+    public static ConfigEntry<float>? Size;
+    public static ConfigEntry<float>? VerticalOffset;
 
     private readonly RTCanvasPanel _panel;
     private RTPanelView? _sheet;
@@ -57,11 +64,11 @@ internal sealed class HudRTPanels
         _headingYaw = FollowHeading(_headingYaw ?? headYaw, headYaw);
         var heading = Quaternion.Euler(0f, _headingYaw.Value, 0f);
 
-        float distance = VRSettingsPanel.HudDistance;
-        float width = 2f * distance * Mathf.Tan(0.5f * ScreenAngularWidthDegrees * VRSettingsPanel.HudSize * Mathf.Deg2Rad);
+        float distance = Distance?.Value ?? DefaultDistance;
+        float width = 2f * distance * Mathf.Tan(0.5f * ScreenAngularWidthDegrees * (Size?.Value ?? 1f) * Mathf.Deg2Rad);
         _sheet.Scale = width / ScreenWorldWidth;
         _sheet.SetPose(headPose.position + heading * new Vector3(
-            VRSettingsPanel.HudHorizOffset, VRSettingsPanel.HudVertOffset, distance), heading);
+            0f, VerticalOffset?.Value ?? DefaultVerticalOffset, distance), heading);
     }
 
     /// <summary>Eases the heading just far enough to bring the head back inside the deadzone.</summary>

@@ -46,7 +46,6 @@ public class VRCamera : MonoBehaviour
     private RenderTexture _leftRT     = null!;
     private RenderTexture _rightRT    = null!;
     private Transform     _gameCam    = null!;   // original game camera transform; we follow its world position
-    private Transform     _hudAnchor  = null!;   // body-locked HUD anchor: follows VROrigin pos+yaw only
 
     // Unity built-in UI layer. Every attempt to find a genuinely unused layer 8-31 failed — the
     // base game names all of them (see CameraRig.LogLayerAudit) — so this stays 5.
@@ -662,13 +661,6 @@ public class VRCamera : MonoBehaviour
         offsetGO.transform.SetParent(transform, false);
         _cameraOffset = offsetGO.transform;
 
-        // ── HUD anchor — body-locked (follows VROrigin pos+yaw, not head pitch/roll) ──
-        // Parented to VROrigin (this.transform), NOT to CameraOffset, so it tracks
-        // snap-turn rotation but never tracks head pitch/roll from xrLocateViews.
-        var hudAnchorGO = new GameObject("HUDAnchor");
-        hudAnchorGO.transform.SetParent(transform, false);
-        _hudAnchor = hudAnchorGO.transform;
-
         // ── Scene cameras — render EVERYTHING including UI layer ────────────────
         // One camera per eye, never a second camera contributing to the same frame: HDRP doesn't
         // support camera stacking (see postfx_immunity_investigation.md, Era 2e).
@@ -1024,9 +1016,7 @@ public class VRCamera : MonoBehaviour
         try
         {
             _canvasPlacement.PositionCanvases(
-                transform, _hudAnchor,
                 _managedFades, _frameCount,
-                _menuRTPanel.Canvas,
                 _leftCam, _posesValid,
                 _cursorCanvas,
                 _managedCanvases, _nestedCanvasIds,
@@ -1034,7 +1024,7 @@ public class VRCamera : MonoBehaviour
                 _lastRescanFrame,
                 _gripDragAnchorOffsets,
                 _gripDragEnforce,
-                _caseBoardRT.IsOpen, _caseBoardRT.JustOpened, _caseBoardRT.Anchor, _caseBoardRT.AnchorPlaced,
+                _caseBoardRT.JustOpened, _caseBoardRT.Anchor, _caseBoardRT.AnchorPlaced,
                 _cursorHasTarget, _cursorTargetPos, _cursorTargetRot);
         }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] PositionCanvases exception: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}"); }
