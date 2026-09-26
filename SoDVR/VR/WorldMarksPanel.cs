@@ -24,11 +24,11 @@ internal sealed class WorldMarksPanel
     private const int ContainerScanFrames = 60;
     private const float MarginPixels = 6f;
     private const int SlotColumns = 3;
-    private const int SlotRows = 4;
+    private const int SlotRows = 3;
     private const float SpeechAboveHeadMeters = 0.35f;
     private const float ReactionAboveHeadMeters = 0.5f;
     // The game draws reaction indicators about 13 pixels across — unreadable at HUD scale in VR.
-    private const float ReactionScale = 10f;
+    private const float ReactionScale = 5f;
     // A pointer target inside this much of the eye's viewport counts as in view.
     private const float InViewMargin = 0.05f;
     // How far from the sheet's centre an off-view pointer sits, as a fraction of the sheet.
@@ -224,15 +224,36 @@ internal sealed class WorldMarksPanel
         _enlargedScales[id] = rect.localScale;
     }
 
-    /// <summary>Moves the mark's pivot to the centre of slot <paramref name="slot"/> on the texture —
-    /// wherever the game tried to put it.</summary>
+    /// <summary>Moves the mark so its visible content is centred in slot <paramref name="slot"/> on the
+    /// texture — wherever the game tried to put it. Centring the content rather than the pivot
+    /// matters: a reaction indicator's pivot sits at its edge, and it overran its slot.</summary>
     private void PutInSlot(RectTransform rect, int slot)
     {
         var texture = _panel.Texture!;
         var camera = _panel.ProjectorCamera!;
         float cellW = (float)texture.width / SlotColumns, cellH = (float)texture.height / SlotRows;
-        var pixel = new Vector3((slot % SlotColumns + 0.5f) * cellW, (slot / SlotColumns + 0.5f) * cellH, _canvas!.planeDistance);
-        rect.position = camera.ScreenToWorldPoint(pixel);
+        var centre = new Vector2((slot % SlotColumns + 0.5f) * cellW, (slot / SlotColumns + 0.5f) * cellH);
+        rect.position = camera.ScreenToWorldPoint(new Vector3(centre.x, centre.y, _canvas!.planeDistance));
+        if (!TryContentBounds(rect, out var bounds)) return;
+        var pivot = camera.WorldToScreenPoint(rect.position);
+        var shift = centre - bounds.center;
+        rect.position = camera.ScreenToWorldPoint(new Vector3(pivot.x + shift.x, pivot.y + shift.y, pivot.z));
+    }
+
+    /// <summary>Where the mark's shown graphics actually land on the texture, including any part off it.</summary>
+    private bool TryContentBounds(Transform mark, out Rect bounds)
+    {
+        bounds = default;
+        bool any = false;
+        foreach (var graphic in mark.GetComponentsInChildren<UnityEngine.UI.Graphic>(false))
+        {
+            if (graphic == null || !graphic.enabled) continue;
+            var r = _panel.UnclampedPixelRectOf(graphic.rectTransform);
+            bounds = any ? Rect.MinMaxRect(Mathf.Min(bounds.xMin, r.xMin), Mathf.Min(bounds.yMin, r.yMin),
+                                           Mathf.Max(bounds.xMax, r.xMax), Mathf.Max(bounds.yMax, r.yMax)) : r;
+            any = true;
+        }
+        return any;
     }
 
     private static bool InView(Camera head, Vector3 target, out Vector2 viewport)
