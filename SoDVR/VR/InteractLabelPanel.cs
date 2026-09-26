@@ -6,7 +6,7 @@ using UnityEngine.UI;
 namespace SoDVR.VR;
 
 /// <summary>
-/// The name and actions of what the left hand points at, in the game's own tooltip box on a canvas
+/// The name and actions of what the left hand points at, in the game's decorated frame on a canvas
 /// of our own, drawn on a transparent RT panel just above the hit point and kept at the HUD's
 /// apparent size.
 /// </summary>
@@ -19,11 +19,15 @@ internal sealed class InteractLabelPanel
     private const int DiscoveryRetryFrames = 90;
     private const float MarginPixels = 8f;
     private const float AboveHitMeters = 0.08f;
+    private const float NameFontSize = 30f;
+    private const float ActionsFontSize = 24f;
+    // Room for most names on one line; longer ones wrap.
+    private const float MaxTextWidth = 640f;
 
     private readonly RTCanvasPanel _panel;
     private readonly int _layer;
     private RTPanelView? _view;
-    private GameTooltipBox? _box;
+    private GameFrameBox? _box;
     private float _gameScaleFactor = 1f;
     private string? _shown;
     private int _discoveryCooldown;
@@ -78,7 +82,7 @@ internal sealed class InteractLabelPanel
             UnityEngine.Object.DontDestroyOnLoad(root);
             var canvas = root.AddComponent<Canvas>();
             root.AddComponent<CanvasScaler>();
-            var box = GameTooltipBox.TryCreate(root.transform, _layer);
+            var box = GameFrameBox.TryCreate(root.transform, _layer, NameFontSize, ActionsFontSize, MaxTextWidth);
             if (box == null) { UnityEngine.Object.Destroy(root); return; }
 
             _panel.AttachSheet(canvas, HudRTPanels.ScreenWorldWidth / SheetSize.x, SheetSize, transparent: true);
@@ -86,8 +90,7 @@ internal sealed class InteractLabelPanel
             _view.Visible = false;
             _box = box;
             _gameScaleFactor = hud.Canvas.scaleFactor;
-            Log.LogInfo($"[InteractLabel] Tooltip box on its own RT panel: name in '{box.Main.name}', " +
-                        $"actions in '{(box.Detail != null ? box.Detail.name : "the same text")}', game UI scale {_gameScaleFactor:F2}.");
+            Log.LogInfo($"[InteractLabel] Label box on its own RT panel, game UI scale {_gameScaleFactor:F2}.");
         }
         catch (Exception ex)
         {

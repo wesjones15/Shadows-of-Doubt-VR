@@ -27,6 +27,8 @@ internal sealed class RadialMenuPanel
     private const float UnselectedAlpha = 0.45f;
     private const float SelectedScale = 1.1f;
     private const int DiscoveryRetryFrames = 90;
+    private const float LabelFontSize = 44f;
+    private const float MaxLabelWidth = 400f;
 
     private static readonly (SoloScreen screen, string label, Vector2 position)[] s_options =
     {
@@ -181,7 +183,7 @@ internal sealed class RadialMenuPanel
                 var slotRect = slot.AddComponent<RectTransform>();
                 slotRect.anchoredPosition = s_options[i].position;
                 groups[i] = slot.AddComponent<CanvasGroup>();
-                var box = GameTooltipBox.TryCreate(slot.transform, _layer);
+                var box = GameFrameBox.TryCreate(slot.transform, _layer, LabelFontSize, LabelFontSize, MaxLabelWidth);
                 if (box == null) { UnityEngine.Object.Destroy(root); return; }
                 box.SetText(s_options[i].label, "");
             }
@@ -197,7 +199,7 @@ internal sealed class RadialMenuPanel
             _view = _panel.CreateView("Radial", interactive: false);
             _view.Visible = false;
             _optionGroups = groups;
-            Log.LogInfo("[RadialMenu] Built from the game's tooltip box.");
+            Log.LogInfo("[RadialMenu] Built from the game's decorated frame.");
         }
         catch (Exception ex)
         {
