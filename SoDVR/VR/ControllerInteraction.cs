@@ -3,13 +3,12 @@ using System.Collections.Generic;
 using BepInEx.Logging;
 using UnityEngine;
 using UnityEngine.UI;
-using TMPro;
 
 namespace SoDVR.VR;
 
 /// <summary>
-/// Generic controller/cursor/laser/aim-dot layer — pose tracking, the HUD cursor reticle, both
-/// laser beams, the left-hand world-interact marker, and the ray→canvas depth scan that finds
+/// Generic controller/cursor/laser/aim-dot layer — pose tracking, the HUD cursor reticle, the
+/// right laser beam, and the ray→canvas depth scan that finds
 /// what the right controller is aiming at. None of this is case-board or menu-click specific;
 /// it's the plumbing any future interaction system still needs (a controller ray, a cursor,
 /// visual aim feedback), which is why it's split out separately from LegacyCanvasInteraction/
@@ -18,17 +17,6 @@ namespace SoDVR.VR;
 internal sealed class ControllerInteraction
 {
     private static ManualLogSource Log => Plugin.Log;
-
-    private Canvas? _leftDotCanvas;
-    private Image? _leftDotImage;
-    private bool _leftDotVisible;
-
-    /// <summary>What the left hand last pointed at, as the interact log reports it.</summary>
-    public static string AimTarget { get; private set; } = "nothing";
-
-    /// <summary>The name and actions of the interactable the left hand points at within reach, and
-    /// where — what the interact label shows; null when there is none.</summary>
-    public (string name, string actions, Vector3 point)? Label { get; private set; }
 
     private readonly List<GameObject> _aimDotPool = new();
     private readonly List<(float depth, Canvas canvas, Vector3 worldHit)> _aimDotHits = new();
@@ -39,13 +27,10 @@ internal sealed class ControllerInteraction
 
     public int PoseFrameCount { get; private set; }
 
-    /// <summary>Called once from BuildCameraRig after the left-hand marker GameObjects and the
-    /// aim-dot pool are constructed — construction itself stays in BuildCameraRig, this just
+    /// <summary>Called once from BuildCameraRig after the aim-dot pool is constructed — construction itself stays in BuildCameraRig, this just
     /// takes ownership of the references.</summary>
-    public void Discover(Canvas? leftDotCanvas, Image? leftDotImage, List<GameObject> aimDotPool)
+    public void Discover(List<GameObject> aimDotPool)
     {
-        _leftDotCanvas = leftDotCanvas;
-        _leftDotImage = leftDotImage;
         _aimDotPool.Clear();
         _aimDotPool.AddRange(aimDotPool);
     }
@@ -159,166 +144,6 @@ internal sealed class ControllerInteraction
             laserLine.SetPosition(0, laserStart);
             laserLine.SetPosition(1, laserEnd);
             if (!laserLine.enabled) laserLine.enabled = true;
-        }
-        catch { }
-    }
-
-    /// <summary>Left laser pointer: toggled via VR Settings "Left Laser" toggle.</summary>
-    public void UpdateLeftLaser(LineRenderer? leftLaserLine, GameObject? leftControllerGO)
-    {
-        if (leftLaserLine == null || leftControllerGO == null) return;
-        bool showLeft = VRSettings.LeftLaser;
-        if (showLeft)
-        {
-            try
-            {
-                Vector3 lStart = leftControllerGO.transform.position;
-                Vector3 lEnd   = lStart + leftControllerGO.transform.forward * 3.0f;
-                leftLaserLine.SetPosition(0, lStart);
-                leftLaserLine.SetPosition(1, lEnd);
-                if (!leftLaserLine.enabled) leftLaserLine.enabled = true;
-            }
-            catch { }
-        }
-        else if (leftLaserLine.enabled)
-        {
-            leftLaserLine.enabled = false;
-        }
-    }
-
-    /// <summary>
-    /// Left controller interaction marker: dot at hit point + floating label for interactables.
-    /// Runs every frame — independent of laser visibility (LineRenderers don't render in VR).
-    /// </summary>
-    public void UpdateLeftInteractMarker(GameObject? leftControllerGO, Canvas? menuCanvasRef,
-                                          Camera? gameCamRef, Camera? leftCam,
-                                          int interactionLayerMask, float baseInteractionRange)
-    {
-        Label = null;
-        if (leftControllerGO == null) return;
-        // Skip when VR Settings panel or pause menu is open
-        if (VRSettingsPanel.RootGO?.activeSelf == true) return;
-        bool menuOpen = menuCanvasRef != null && menuCanvasRef.isActiveAndEnabled;
-        // On a computer the game draws its own cursor, and the HUD shows the actions.
-        if (menuOpen || ComputerUse.InUse)
-        {
-            if (_leftDotVisible  && _leftDotCanvas != null) { _leftDotCanvas.gameObject.SetActive(false); _leftDotVisible = false; }
-            return;
-        }
-
-        try
-        {
-            // Ray origin: Camera.main position (head/eye level) — same as the game's
-            // InteractionController. Controller rotation only (not position).
-            Vector3 lStart = gameCamRef != null ? gameCamRef.transform.position
-                                                 : leftControllerGO.transform.position;
-            Vector3 lDir   = leftControllerGO.transform.forward;
-            float   lRange = 12.0f;  // same as game's raycast distance
-            bool    didHit = false;
-            bool    isInteractable = false;
-            InteractableController? hitIC = null;
-            RaycastHit lHit = default;
-
-            if (Physics.Raycast(new Ray(lStart, lDir), out lHit, lRange, interactionLayerMask))
-            {
-                didHit = true;
-                // Walk up hierarchy (max 6 levels) for InteractableController
-                try
-                {
-                    var tr = lHit.collider.transform;
-                    for (int i = 0; i < 6 && tr != null; i++)
-                    {
-                        var ic = tr.gameObject.GetComponent<InteractableController>();
-                        if (ic != null)
-                        {
-                            hitIC = ic;
-                            // Check if within interaction range (game's GetReachDistance)
-                            float reachDist = baseInteractionRange;
-                            try
-                            {
-                                if (ic.interactable != null)
-                                    reachDist = ic.interactable.GetReachDistance();
-                            }
-                            catch { }
-                            if (lHit.distance <= reachDist)
-                                isInteractable = true;
-                            break;
-                        }
-                        tr = tr.parent;
-                    }
-                }
-                catch { }
-            }
-
-            AimTarget = !didHit ? "nothing"
-                : hitIC == null ? $"'{lHit.collider.name}' (not interactable)"
-                : !isInteractable ? $"'{hitIC.name}' (out of reach at {lHit.distance:F1} m)"
-                : $"'{hitIC.name}'";
-
-            // ── Dot: WorldSpace canvas at hit point ──────────────────────
-            if (_leftDotCanvas != null)
-            {
-                if (didHit)
-                {
-                    _leftDotCanvas.transform.position = lHit.point + lHit.normal * 0.005f; // slight offset from surface
-                    // Billboard toward VR head
-                    if (leftCam != null)
-                        _leftDotCanvas.transform.rotation = leftCam.transform.rotation;
-                    // Color: green when interactable, cyan otherwise
-                    if (_leftDotImage != null)
-                    {
-                        _leftDotImage.color = isInteractable
-                            ? new Color(0f, 64f, 0f, 1f)   // HDR green
-                            : new Color(0f, 64f, 64f, 1f);  // HDR cyan
-                    }
-                    if (!_leftDotVisible) { _leftDotCanvas.gameObject.SetActive(true); _leftDotVisible = true; }
-                }
-                else if (_leftDotVisible)
-                {
-                    _leftDotCanvas.gameObject.SetActive(false);
-                    _leftDotVisible = false;
-                }
-            }
-
-            // ── Label: only when pointing at an interactable within range ─
-            if (isInteractable && hitIC != null)
-            {
-                string objName = "";
-                try
-                {
-                    if (hitIC.interactable != null)
-                        objName = hitIC.interactable.GetName();
-                    if (string.IsNullOrEmpty(objName))
-                        objName = hitIC.gameObject.name ?? "?";
-                }
-                catch { objName = hitIC.gameObject.name ?? "?"; }
-
-                // The game's current interactions follow Camera.main, which is aimed with this
-                // hand — so these are the actions for what the hand points at.
-                string actionText = "";
-                try
-                {
-                    var ic2 = InteractionController.Instance;
-                    if (ic2?.currentInteractions != null)
-                    {
-                        foreach (var kvp in ic2.currentInteractions)
-                        {
-                            if (kvp.Value?.currentSetting == null) continue;
-                            if (!kvp.Value.currentSetting.enabled || !kvp.Value.currentSetting.display) continue;
-                            string aText = kvp.Value.actionText ?? "";
-                            if (!string.IsNullOrEmpty(aText))
-                            {
-                                if (actionText.Length > 0) actionText += " | ";
-                                actionText += aText;
-                            }
-                        }
-                    }
-                }
-                catch { }
-
-                AimTarget = actionText.Length > 0 ? $"'{hitIC.name}' labelled {objName} | {actionText}" : $"'{hitIC.name}' labelled {objName}";
-                Label = (objName, actionText, lHit.point);
-            }
         }
         catch { }
     }

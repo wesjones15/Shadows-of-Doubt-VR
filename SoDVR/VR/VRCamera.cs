@@ -79,6 +79,7 @@ public class VRCamera : MonoBehaviour
     private LooseCanvasPanels _looseCanvases = null!;
     private RadialMenuPanel _radialMenu = null!;
     private readonly SoloScreens _soloScreens = new();
+    private readonly LeftHandPointer _leftPointer = new();
     private readonly PostFXOverlayCompositor _overlay = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
@@ -159,7 +160,6 @@ public class VRCamera : MonoBehaviour
     private GameObject?   _rightControllerGO;
     private GameObject?   _leftControllerGO;
     private LineRenderer? _laserLine;         // laser pointer beam from right controller
-    private LineRenderer? _leftLaserLine;     // laser pointer beam from left controller (interact)
 
     // ── Left hand raycast params (cached from game) ──────────────────
     private int   _interactionLayerMask = ~0;     // Toolbox.Instance.interactionRayLayerMask
@@ -775,70 +775,6 @@ public class VRCamera : MonoBehaviour
         }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] Laser beam creation failed: {ex.Message}"); }
 
-        // Left hand laser pointer — same style, toggled via VR Settings "Left Laser".
-        try
-        {
-            var leftLaserGO = new GameObject("VRLeftLaserBeam");
-            UnityEngine.Object.DontDestroyOnLoad(leftLaserGO);
-            leftLaserGO.transform.SetParent(leftCtrlGO.transform, false);
-            _leftLaserLine = leftLaserGO.AddComponent<LineRenderer>();
-            _leftLaserLine.useWorldSpace  = true;
-            _leftLaserLine.positionCount  = 2;
-            _leftLaserLine.startWidth     = 0.012f;
-            _leftLaserLine.endWidth       = 0.006f;
-            _leftLaserLine.numCapVertices = 4;
-            _leftLaserLine.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            _leftLaserLine.receiveShadows = false;
-            var leftLaserShader = Shader.Find("HDRP/Unlit") ?? Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default");
-            if (leftLaserShader != null)
-            {
-                var leftLaserMat = new Material(leftLaserShader);
-                leftLaserMat.name = "VRLeftLaserMat";
-                var leftLaserColor = new Color(0f, 4096f, 4096f, 1f); // same HDR cyan
-                leftLaserMat.color = leftLaserColor;
-                try { leftLaserMat.SetColor("_UnlitColor", leftLaserColor); } catch { }
-                try { leftLaserMat.SetColor("_BaseColor",  leftLaserColor); } catch { }
-                leftLaserMat.renderQueue = 5000;
-                _leftLaserLine.material = leftLaserMat;
-            }
-            _leftLaserLine.enabled = false;
-            Log.LogInfo("[VRCamera] VRLeftLaserBeam created");
-        }
-        catch (Exception ex) { Log.LogWarning($"[VRCamera] Left laser creation failed: {ex.Message}"); }
-
-        // Left hand interaction dot — tiny WorldSpace canvas with Image.
-        // 3D sphere primitives don't render in HDRP VR eye cameras; WorldSpace Canvas does.
-        Canvas? leftDotCanvas = null;
-        Image? leftDotImage = null;
-        try
-        {
-            var dotCanvasGO = new GameObject("VRLeftDotCanvas");
-            dotCanvasGO.layer = UILayer;
-            UnityEngine.Object.DontDestroyOnLoad(dotCanvasGO);
-            var dotCanvas = dotCanvasGO.AddComponent<Canvas>();
-            dotCanvas.renderMode = RenderMode.WorldSpace;
-            dotCanvas.sortingOrder = 201;
-            var dotCanvasRT = dotCanvasGO.GetComponent<RectTransform>();
-            dotCanvasRT.sizeDelta = new Vector2(20f, 20f);
-            dotCanvasGO.transform.localScale = Vector3.one * 0.001f; // 20px * 0.001 = 0.02m = 2cm
-
-            var dotImgGO = new GameObject("DotImg");
-            dotImgGO.layer = UILayer;
-            dotImgGO.transform.SetParent(dotCanvasGO.transform, false);
-            var dotImg = dotImgGO.AddComponent<Image>();
-            dotImg.raycastTarget = false;
-            dotImg.color = new Color(0f, 64f, 64f, 1f); // HDR cyan
-            var dotImgRT = dotImgGO.GetComponent<RectTransform>();
-            dotImgRT.anchorMin = Vector2.zero; dotImgRT.anchorMax = Vector2.one;
-            dotImgRT.sizeDelta = Vector2.zero;
-
-            leftDotCanvas = dotCanvas;
-            leftDotImage = dotImg;
-            dotCanvasGO.SetActive(false);
-            Log.LogInfo("[VRCamera] VRLeftDotCanvas created (WorldSpace canvas dot)");
-        }
-        catch (Exception ex) { Log.LogWarning($"[VRCamera] Left dot creation failed: {ex.Message}"); }
-
         // Cursor dot: ScreenSpaceOverlay canvas created here, converted to WorldSpace by
         // ScanAndConvertCanvases — same pipeline as all game canvases, giving HDRP registration.
         // NOT in _ownedCanvasIds so RescanCanvasAlpha applies the ZTest Always material patch.
@@ -935,7 +871,7 @@ public class VRCamera : MonoBehaviour
             Log.LogWarning($"[VRCamera] Aim dot pool creation failed: {ex.Message}");
         }
 
-        _controllerInteraction.Discover(leftDotCanvas, leftDotImage, _aimDotPool);
+        _controllerInteraction.Discover(_aimDotPool);
 
         // ── Phase 1: VR Settings Panel ───────────────────────────────────────────
         try
@@ -1078,7 +1014,7 @@ public class VRCamera : MonoBehaviour
 
                 try { _worldMarks.BeforeRender(_hudRT, _leftCam, _caseBoardRT.ShowsBoard); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] WorldMarksPanel.BeforeRender: {ex.Message}"); }
-                try { _interactLabel.BeforeRender(_controllerInteraction.Label, _leftCam); }
+                try { _interactLabel.BeforeRender(_leftPointer.Label, _leftCam); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] InteractLabelPanel.BeforeRender: {ex.Message}"); }
 
                 // Awareness compass: reposition and reorient for VR head view.
@@ -1134,6 +1070,7 @@ public class VRCamera : MonoBehaviour
                     _looseCanvases.AppendOverlay(_overlay);
                     _radialMenu.AppendOverlay(_overlay);
                     _keyboard.AppendOverlay(_overlay);
+                    _leftPointer.AppendOverlay(_overlay, _leftCam);
                     _rtPanelInput.AppendOverlay(_overlay);
                     _overlay.Composite(_rightCam, _rightRT);
                     _overlay.Composite(_leftCam, _leftRT);
@@ -1206,8 +1143,14 @@ public class VRCamera : MonoBehaviour
         catch (Exception ex) { Log.LogWarning($"[VRCamera] RTPanelGrip.Update: {ex.Message}"); }
         _legacyCanvases.UpdateGripDrag(rtOwnsGrip);
 
-        _controllerInteraction.UpdateLeftInteractMarker(_leftControllerGO, _menuRTPanel.Canvas, _gameCamRef,
-            _leftCam, _interactionLayerMask, _baseInteractionRange);
+        try
+        {
+            bool menuOpen = _menuRTPanel.Canvas != null && _menuRTPanel.Canvas.isActiveAndEnabled;
+            bool pointerHidden = menuOpen || ComputerUse.InUse || VRSettingsPanel.RootGO?.activeSelf == true;
+            bool rtLaserOnLeft = !_rtPanelInput.ActiveHandIsRight && (_rtPanelInput.HasFocus || _rtPanelInput.IsCapturing);
+            _leftPointer.Update(_leftControllerGO, _gameCamRef, _interactionLayerMask, _baseInteractionRange, pointerHidden, rtLaserOnLeft);
+        }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] LeftHandPointer.Update: {ex.Message}"); }
 
         _legacyCanvases.PreAimScan();
 
@@ -1243,13 +1186,11 @@ public class VRCamera : MonoBehaviour
             aim = default;
             if (_cursorRect != null && _cursorRect.gameObject.activeSelf) _cursorRect.gameObject.SetActive(false);
             if (_laserLine != null && _laserLine.enabled) _laserLine.enabled = false;
-            if (_leftLaserLine != null && _leftLaserLine.enabled) _leftLaserLine.enabled = false;
         }
         else
         {
             _controllerInteraction.UpdateCursorDot(_cursorRect, _cursorCanvas, _rightControllerGO);
             _controllerInteraction.UpdateLaser(_laserLine, _rightControllerGO, aim.HasTarget, aim.TargetPos);
-            _controllerInteraction.UpdateLeftLaser(_leftLaserLine, _leftControllerGO);
         }
         _cursorHasTarget    = aim.HasTarget;
         _cursorTargetCanvas = aim.TargetCanvas;

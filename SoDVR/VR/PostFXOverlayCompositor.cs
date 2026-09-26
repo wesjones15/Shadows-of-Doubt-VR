@@ -46,6 +46,9 @@ internal sealed class PostFXOverlayCompositor
     private readonly List<OverlayDraw> _panels = new();
     private readonly List<OverlayDraw> _topPanels = new();
     private readonly List<Matrix4x4> _lasers = new();
+    private readonly List<(Matrix4x4 transform, Material material)> _dots = new();
+    private readonly Dictionary<Color, Material> _dotMaterials = new();
+    private Mesh? _dotMesh;
     private CommandBuffer? _cb;
     private Mesh? _laserMesh;
     private Material? _laserMaterial;
@@ -56,6 +59,7 @@ internal sealed class PostFXOverlayCompositor
         _panels.Clear();
         _topPanels.Clear();
         _lasers.Clear();
+        _dots.Clear();
     }
 
     /// <param name="onTop">Drawn after every other panel, as the flat game draws its topmost canvas
@@ -73,9 +77,20 @@ internal sealed class PostFXOverlayCompositor
         _lasers.Add(Matrix4x4.TRS(origin, Quaternion.LookRotation(span / length), new Vector3(1f, 1f, length)));
     }
 
+    /// <summary>A flat round dot of <paramref name="diameter"/> metres at <paramref name="position"/>,
+    /// facing <paramref name="viewer"/>.</summary>
+    public void AddDot(Vector3 position, Vector3 viewer, float diameter, Color colour)
+    {
+        var material = DotMaterial(colour);
+        if (material == null) return;
+        var facing = position - viewer;
+        if (facing.sqrMagnitude < 1e-8f) return;
+        _dots.Add((Matrix4x4.TRS(position, Quaternion.LookRotation(facing), Vector3.one * diameter), material));
+    }
+
     public void Composite(Camera eye, RenderTexture target)
     {
-        if (_panels.Count == 0 && _topPanels.Count == 0 && _lasers.Count == 0) return;
+        if (_panels.Count == 0 && _topPanels.Count == 0 && _lasers.Count == 0 && _dots.Count == 0) return;
 
         _cb ??= new CommandBuffer { name = "SoDVR_PostFXOverlay" };
         _cb.Clear();
@@ -86,6 +101,9 @@ internal sealed class PostFXOverlayCompositor
         _sortEyePos = eye.transform.position;
         _panels.Sort(FarthestFirst);
         _topPanels.Sort(FarthestFirst);
+        // Dots mark world surfaces, so any panel in front of one covers it.
+        foreach (var (transform, material) in _dots)
+            _cb.DrawMesh(_dotMesh, transform, material, 0, 0);
         foreach (var draw in _panels)
             _cb.DrawMesh(draw.Mesh, draw.LocalToWorld, draw.Material, 0, 0);
         foreach (var draw in _topPanels)
@@ -128,6 +146,42 @@ internal sealed class PostFXOverlayCompositor
         };
         _laserMesh.triangles = new[] { 0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7 };
         return true;
+    }
+
+    private Material? DotMaterial(Color colour)
+    {
+        if (_dotMaterials.TryGetValue(colour, out var material)) return material;
+        var shader = Shader.Find("UI/Default");
+        if (shader == null) return null;
+        _dotMesh ??= BuildDisc();
+        material = new Material(shader) { name = "SoDVR_OverlayDotMat", color = colour };
+        _dotMaterials[colour] = material;
+        return material;
+    }
+
+    /// <summary>A unit-diameter disc in the XY plane.</summary>
+    private static Mesh BuildDisc()
+    {
+        const int segments = 20;
+        var vertices = new Vector3[segments + 1];
+        var colours = new Color[segments + 1];
+        var triangles = new int[segments * 3];
+        colours[0] = Color.white;
+        for (int i = 0; i < segments; i++)
+        {
+            float angle = i * Mathf.PI * 2f / segments;
+            vertices[i + 1] = new Vector3(Mathf.Cos(angle), Mathf.Sin(angle), 0f) * 0.5f;
+            colours[i + 1] = Color.white;
+            triangles[i * 3] = 0;
+            triangles[i * 3 + 1] = i + 1;
+            triangles[i * 3 + 2] = (i + 1) % segments + 1;
+        }
+        var mesh = new Mesh { name = "SoDVR_OverlayDotMesh" };
+        mesh.vertices = vertices;
+        mesh.uv = new Vector2[segments + 1];
+        mesh.colors = colours;
+        mesh.triangles = triangles;
+        return mesh;
     }
 
     private int FarthestFirst(OverlayDraw a, OverlayDraw b) =>

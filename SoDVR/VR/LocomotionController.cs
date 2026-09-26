@@ -460,7 +460,7 @@ internal sealed class LocomotionController
     /// Left trigger → world interaction via left controller aiming.
     /// On press edge: simulates left mouse button click.
     /// Camera.main rotation toward the left controller is handled elsewhere
-    /// (UpdateLeftInteractMarker), keyed off this same trigger state.
+    /// (VRCamera), keyed off this same trigger state.
     /// Suppressed while the pointer is on UI or a menu/case board is up: the simulated click lands
     /// on whatever flat-screen UI sits under the OS cursor (it opened the exit dialog from the
     /// pause menu).
@@ -483,7 +483,7 @@ internal sealed class LocomotionController
             const uint MOUSEEVENTF_LEFTUP   = 0x0004;
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
             mouse_event(MOUSEEVENTF_LEFTUP,   0, 0, 0, UIntPtr.Zero);
-            Log.LogInfo($"[Locomotion] Interact (LMB via left controller aim) at {ControllerInteraction.AimTarget}");
+            Log.LogInfo($"[Locomotion] Interact (LMB via left controller aim) at {LeftHandPointer.AimTarget}");
         }
         catch (Exception ex) { Log.LogWarning($"[Locomotion] UpdateInteract: {ex.Message}"); }
     }
