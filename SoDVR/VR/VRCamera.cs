@@ -557,16 +557,25 @@ public class VRCamera : MonoBehaviour
             catch { }
         }
 
-        // Final camera rotation: always point Camera.main at the left controller so the
+        // Final camera rotation: point Camera.main along the aiming hand (GameCameraAimHand) so the
         // game's InteractionRaycastCheck (which runs in a later Update()) reads controller
         // aim direction for action text, interact raycasts, etc.
         // This runs AFTER UpdatePose sets head rotation for case board cursor — the last
         // writer wins, and the game's interaction system is the final consumer before render.
-        if (_gameCamRef != null && _leftControllerGO != null)
+        if (_gameCamRef != null && GameCameraAimHand() is { } aimHand)
         {
-            try { _gameCamRef.transform.rotation = ComputerUse.AimFromSeat(_gameCamRef.transform.position, _leftControllerGO.transform.rotation); }
+            try { _gameCamRef.transform.rotation = ComputerUse.AimFromSeat(_gameCamRef.transform.position, aimHand.rotation); }
             catch { }
         }
+    }
+
+    /// <summary>The hand Camera.main is aimed with: the laser hand while its laser is on a panel, since
+    /// game UI that reads the camera then belongs to that hand; otherwise the left hand, whose world
+    /// pointer the game's interaction follows.</summary>
+    private Transform? GameCameraAimHand()
+    {
+        var hand = _rtPanelInput.HasFocus && _rtPanelInput.ActiveHandIsRight ? _rightControllerGO : _leftControllerGO;
+        return hand != null ? hand.transform : null;
     }
 
     private void BuildCameraRig()
@@ -799,9 +808,9 @@ public class VRCamera : MonoBehaviour
             // Setting it here (post-FrameEndStereo) means HDRP always uses head rotation
             // for rendering; Camera.main only sees controller rotation on the NEXT frame's
             // game Update() — which is when InteractionRaycastCheck reads it for action text.
-            if (_gameCamRef != null && _leftControllerGO != null)
+            if (_gameCamRef != null && GameCameraAimHand() is { } aimHand)
             {
-                try { _gameCamRef.transform.rotation = ComputerUse.AimFromSeat(_gameCamRef.transform.position, _leftControllerGO.transform.rotation); }
+                try { _gameCamRef.transform.rotation = ComputerUse.AimFromSeat(_gameCamRef.transform.position, aimHand.rotation); }
                 catch { }
             }
 
