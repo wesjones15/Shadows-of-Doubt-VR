@@ -32,8 +32,8 @@ internal sealed class CaseBoardRTController
     // Legacy front-to-back order: content panels in front of the navbar, the corkboard behind it.
     private const float ContentPanelDistanceInFront = 0.15f;
     private const float CorkboardDistanceInFront = -0.15f;
-    // Its text is small enough to blur at the board's depth; this brings it 1.5 m from the head.
-    private const float UpgradesDistanceInFront = 0.65f;
+    // Small text blurs at the board's depth; screens read up close come 1.5 m from the head.
+    private const float CloseContentDistanceInFront = 0.65f;
 
     private readonly CaseBoardPanel _navbar;
     private readonly CaseBoardPanel[] _panels;
@@ -57,12 +57,12 @@ internal sealed class CaseBoardRTController
         {
             _navbar,
             corkboard,
-            new CaseBoardPanel("BioDisplayCanvas", CaseBoardWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip,
+            new CaseBoardPanel("BioDisplayCanvas", CaseBoardWorldWidth, CloseContentDistanceInFront, draggable: true, quadLayer, input, grip,
                 regions: new[] { "InventoryDisplayArea", "SocialCreditArea" },
                 shownWhile: () => BioScreenController.Instance != null && BioScreenController.Instance.isOpen, transparent: true),
             new CaseBoardPanel("LocationDetailsCanvas", CaseBoardWorldWidth, ContentPanelDistanceInFront, draggable: true, quadLayer, input, grip,
                 transparent: true),
-            new CaseBoardPanel("UpgradesDisplayCanvas", PanelWorldWidth, UpgradesDistanceInFront, draggable: true, quadLayer, input, grip,
+            new CaseBoardPanel("UpgradesDisplayCanvas", PanelWorldWidth, CloseContentDistanceInFront, draggable: true, quadLayer, input, grip,
                 transparent: true),
         };
         _windows = new CaseBoardWindows(quadLayer, input, grip);
