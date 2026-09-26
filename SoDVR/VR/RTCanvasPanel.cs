@@ -56,13 +56,14 @@ internal sealed class RTCanvasPanel
     /// in charge, so the canvas is laid out exactly as the flat game lays it out.</summary>
     /// <param name="screenWorldWidth">World width the full screen width maps to; sets the
     /// metres-per-pixel every view is sized with.</param>
-    public void Attach(Canvas canvas, float screenWorldWidth)
+    /// <param name="transparent">See <see cref="CameraRig.SetupRTPanelProjectorCamera"/>.</param>
+    public void Attach(Canvas canvas, float screenWorldWidth, bool transparent = false)
     {
         // The CanvasScaler is deliberately left alone: in ScreenSpaceCamera it scales against the
         // projector's pixel size, which is the screen size, so the game's layout is untouched.
         // (Legacy disabled it only because WorldSpace canvases are sized by transform instead.)
         var size = ScreenSize();
-        AttachCore(canvas, size, screenWorldWidth / size.x);
+        AttachCore(canvas, size, screenWorldWidth / size.x, transparent);
     }
 
     /// <summary>Sheet layout: the canvas becomes a <paramref name="sheetSize"/> sheet of
@@ -73,10 +74,10 @@ internal sealed class RTCanvasPanel
         var scaler = canvas.GetComponent<CanvasScaler>();
         if (scaler != null) { try { scaler.enabled = false; } catch { } }
         if (Math.Abs(canvas.scaleFactor - 1f) > 0.001f) canvas.scaleFactor = 1f;
-        AttachCore(canvas, sheetSize, metersPerUnit);
+        AttachCore(canvas, sheetSize, metersPerUnit, false);
     }
 
-    private void AttachCore(Canvas canvas, Vector2Int size, float metersPerPixel)
+    private void AttachCore(Canvas canvas, Vector2Int size, float metersPerPixel, bool transparent)
     {
         Detach();
 
@@ -90,7 +91,7 @@ internal sealed class RTCanvasPanel
         }
 
         Texture = CameraRig.CreateRTPanelTexture(size.x, size.y, $"SoDVR_{_logTag}_RT");
-        ProjectorCamera = CameraRig.SetupRTPanelProjectorCamera(_logTag, canvas.gameObject.layer);
+        ProjectorCamera = CameraRig.SetupRTPanelProjectorCamera(_logTag, canvas.gameObject.layer, transparent);
         ProjectorCamera.targetTexture = Texture;
 
         canvas.renderMode = RenderMode.ScreenSpaceCamera;

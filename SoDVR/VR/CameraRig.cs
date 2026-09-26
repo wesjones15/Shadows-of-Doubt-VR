@@ -238,8 +238,11 @@ internal static class CameraRig
     /// directly; TAA only softened it. Caller still needs to set <c>targetTexture</c> once the
     /// panel's RenderTexture exists.
     /// </summary>
-    public static Camera SetupRTPanelProjectorCamera(string logTag, int cullingLayer)
+    /// <param name="transparent">Clear to transparent black, so the texture's alpha is the canvas's
+    /// own coverage and the panel shows the world through its empty parts.</param>
+    public static Camera SetupRTPanelProjectorCamera(string logTag, int cullingLayer, bool transparent = false)
     {
+        var clear = transparent ? Color.clear : Color.black;
         var camGO = new GameObject($"SoDVR_{logTag}_Camera");
         UnityEngine.Object.DontDestroyOnLoad(camGO);
         camGO.transform.position = NextProjectorIsolationPosition();
@@ -248,7 +251,7 @@ internal static class CameraRig
         cam.stereoTargetEye = StereoTargetEyeMask.None;
         cam.cullingMask = 1 << cullingLayer;
         cam.clearFlags = CameraClearFlags.SolidColor;
-        cam.backgroundColor = Color.black;
+        cam.backgroundColor = clear;
         cam.nearClipPlane = 0.01f;
         cam.farClipPlane = 10f;
 
@@ -259,7 +262,7 @@ internal static class CameraRig
             // HDAdditionalCameraData defaults clearColorMode to Sky, not transparent/solid, which
             // caused real problems twice earlier in this project.
             hd.clearColorMode     = HDAdditionalCameraData.ClearColorMode.Color;
-            hd.backgroundColorHDR = Color.black;
+            hd.backgroundColorHDR = clear;
             hd.clearDepth         = true;
             hd.antialiasing       = HDAdditionalCameraData.AntialiasingMode.None;
             // No scene HDRP Volume should influence a flat UI render — safe to zero out because
@@ -281,7 +284,7 @@ internal static class CameraRig
             hd.m_RenderingPathCustomFrameSettings = fs;
 
             Log.LogInfo($"[CameraRig] RT panel projector camera '{logTag}' HDRP setup: " +
-                        $"clearColorMode={hd.clearColorMode} customRS={hd.customRenderingSettings} " +
+                        $"clearColorMode={hd.clearColorMode} clear={clear} customRS={hd.customRenderingSettings} " +
                         $"cullingMask=0x{cam.cullingMask:X8}");
         }
         catch (Exception ex) { Log.LogWarning($"[CameraRig] RT panel projector camera '{logTag}' HDRP setup failed: {ex.Message}"); }
