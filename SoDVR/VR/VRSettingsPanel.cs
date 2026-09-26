@@ -612,7 +612,19 @@ public static class VRSettingsPanel
             for (int i = 0; i < controls.Count; i++)
             {
                 var s = controls[i];
-                if (s != null) sb.Append($"\n  '{s.identifier}' = {s.intValue}");
+                if (s == null) continue;
+                sb.Append($"\n  '{s.identifier}' = {s.intValue} (default {s.intDefault})");
+                try
+                {
+                    var slider = s.slider != null ? s.slider.slider : null;
+                    if (slider != null)
+                        sb.Append($" slider [{slider.minValue}..{slider.maxValue}] whole={slider.wholeNumbers} percent={s.slider!.isPercentage}");
+                    else if (s.dropdown != null && s.dropdown.dropdown != null)
+                        sb.Append($" dropdown ({s.dropdown.dropdown.options.Count} options)");
+                    else if (s.toggle != null)
+                        sb.Append(" toggle");
+                }
+                catch (Exception ex) { sb.Append($" (control: {ex.Message})"); }
             }
             Log.LogInfo(sb.ToString());
         }
