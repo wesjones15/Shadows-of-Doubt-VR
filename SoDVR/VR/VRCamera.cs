@@ -372,7 +372,7 @@ public class VRCamera : MonoBehaviour
             try { _keyboard.Tick(_leftCam); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] VRKeyboardPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
-            try { _hudRT.Tick(_leftCam); }
+            try { _hudRT.Tick(_leftCam, _caseBoardRT.IsOpen, _caseBoardRT.Anchor); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] HudRTPanels.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
             try { _clueRT.Tick(_hudRT, _dialogueRT.OpenView); }

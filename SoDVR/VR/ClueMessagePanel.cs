@@ -49,10 +49,9 @@ internal sealed class ClueMessagePanel
             return;
         }
 
-        var sheet = hud.Sheet;
         var rect = _panel.ContentPixelRect(_container, MarginPixels, out int count);
         bool besideDialogue = dialogueView != null;
-        bool showing = count > 0 && (besideDialogue || (sheet != null && sheet.Visible));
+        bool showing = count > 0 && (besideDialogue || hud.IsShowing);
         _view!.Visible = showing;
         if (!showing) { _wasBesideDialogue = null; return; }
         _view.SetPixelRect(rect);
@@ -66,11 +65,7 @@ internal sealed class ClueMessagePanel
             var besideTopAligned = new Vector3(0.5f * (dialogueSize.x + size.x) + GapMeters, 0.5f * (dialogueSize.y - size.y), 0f);
             _view.SetPose(dialogueView.Transform.position + rotation * besideTopAligned, rotation);
         }
-        else
-        {
-            _view.Scale = sheet!.Scale;
-            _view.SetCanvasPose(sheet.Transform.position, sheet.Transform.rotation);
-        }
+        else hud.PlaceLikeHud(_view);
 
         if (_wasBesideDialogue == besideDialogue) return;
         _wasBesideDialogue = besideDialogue;

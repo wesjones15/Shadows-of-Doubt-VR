@@ -1,5 +1,5 @@
 using System;
-using System.Text;
+using System.Collections.Generic;
 using BepInEx.Logging;
 using UnityEngine;
 
@@ -9,8 +9,13 @@ namespace SoDVR.VR;
 /// The game's HUD on the RT pipeline. Every on-screen HUD canvas (status cards, messages,
 /// objectives, key hints...) is nested in GameCanvas, so one transparent render of GameCanvas
 /// holds the whole HUD in its flat layout; the canvases the case board, dialogue and map own are
-/// detached from it by their own panels. Shown as one see-through sheet that lazily follows the
-/// head, placed by the [HUD] settings.
+/// detached from it by their own panels.
+///
+/// Walking, it's one see-through sheet that lazily follows the head, placed by the [HUD] settings.
+/// With the case board open, the HUD is laid out around the board at the board's own scale: each
+/// HUD element goes with the others on its side of the screen, and each side moves as one block
+/// just outside the board's edge — the sides hinged towards the player like a trifold board — so
+/// nothing covers the board or its navbar.
 /// </summary>
 internal sealed class HudRTPanels
 {
@@ -24,24 +29,51 @@ internal sealed class HudRTPanels
     // Looking around within this much of the HUD's heading leaves it still; beyond, it follows.
     private const float FollowDeadzoneDegrees = 25f;
     private const float FollowRate = 4f;
-    private const int AlphaProbeAfterRenders = 60;
+
+    // The canvases whose children are the HUD elements laid out around the board. The world marks
+    // (GameWorldDisplayCanvas) aren't screen HUD, and the rest of GameCanvas's direct children are
+    // transitions and dev overlays.
+    private static readonly string[] BoardElementCanvases =
+        { "StatusDisplayCanvas", "MessageSystemCanvas", "CentreDisplayCanvas", "ControlsDisplayCanvas", "InteractionProgressCanvas" };
+    private const float ElementMarginPixels = 6f;
+    // Elements whose centre is within this fraction of the screen width from a side belong to it.
+    private const float SideFraction = 0.35f;
+    private const float BoardGapMeters = 0.05f;
+    private const float FoldDegrees = 25f;
+
+    private enum Side { Left, Right, Top, Bottom }
+
+    private sealed class BoardElement
+    {
+        public BoardElement(Transform transform, RTPanelView view) { Transform = transform; View = view; }
+        public readonly Transform Transform;
+        public readonly RTPanelView View;
+        public Rect Rect;
+        public Side Side;
+        public bool Seen;
+    }
 
     private readonly RTCanvasPanel _panel;
     private RTPanelView? _sheet;
+    private readonly Dictionary<int, BoardElement> _boardElements = new();
     private int _discoveryCooldown;
     private float? _headingYaw;
-    private int _renders;
+    private bool _onBoard;
+    private Transform? _boardAnchor;
+    // Per side, how far the side's block moved (texture pixels) — for other panels placed like HUD.
+    private readonly Dictionary<Side, Vector2> _boardShifts = new();
 
     public Canvas? Canvas => _panel.Canvas;
     public Camera? Projector => _panel.ProjectorCamera;
-    public RTPanelView? Sheet => _sheet;
+    /// <summary>The HUD is on show (walking sheet, or laid out around the board).</summary>
+    public bool IsShowing { get; private set; }
 
     public HudRTPanels(int quadLayer, RTPanelInput input)
     {
         _panel = new RTCanvasPanel("HudRTPanels", quadLayer, input);
     }
 
-    public void Tick(Camera? head)
+    public void Tick(Camera? head, bool boardOpen, Transform boardAnchor)
     {
         if (!_panel.IsAttached)
         {
@@ -52,18 +84,54 @@ internal sealed class HudRTPanels
             return;
         }
 
-        bool showing = RTCanvasPanel.IsShowing(_panel.Canvas!) && head != null;
-        _sheet!.Visible = showing;
-        if (!showing) { _headingYaw = null; return; }
+        IsShowing = RTCanvasPanel.IsShowing(_panel.Canvas!) && head != null;
+        bool onBoard = IsShowing && boardOpen;
+        if (onBoard != _onBoard) Log.LogInfo($"[HudRTPanels] HUD {(onBoard ? "laid out around the case board" : "back on the walking sheet")}");
+        _onBoard = onBoard;
+        _boardAnchor = boardAnchor;
 
-        var headPose = head!.transform;
+        _sheet!.Visible = IsShowing && !onBoard;
+        if (onBoard) TickBoard(boardAnchor);
+        else HideBoardElements();
+
+        if (!IsShowing) { _headingYaw = null; return; }
+        if (!onBoard) TickSheet(head!);
+    }
+
+    public void Render() => _panel.Render();
+    public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay);
+
+    /// <summary>
+    /// Poses <paramref name="view"/> — a view of a screen-sized texture laid out like GameCanvas —
+    /// where its content would sit on the HUD right now. False when the HUD isn't showing.
+    /// </summary>
+    public bool PlaceLikeHud(RTPanelView view)
+    {
+        if (!IsShowing || _panel.Texture == null) return false;
+        if (!_onBoard)
+        {
+            view.Scale = _sheet!.Scale;
+            view.SetCanvasPose(_sheet.Transform.position, _sheet.Transform.rotation);
+            return true;
+        }
+        var side = SideOf(view.PixelRect);
+        if (!_boardShifts.TryGetValue(side, out var shift)) shift = ShiftClearOfBoard(side, view.PixelRect);
+        PlaceOnBoard(view, view.PixelRect, side, shift);
+        return true;
+    }
+
+    // ── Walking ───────────────────────────────────────────────────────────────────────────
+
+    private void TickSheet(Camera head)
+    {
+        var headPose = head.transform;
         float headYaw = headPose.eulerAngles.y;
         _headingYaw = FollowHeading(_headingYaw ?? headYaw, headYaw);
         var heading = Quaternion.Euler(0f, _headingYaw.Value, 0f);
 
         float distance = VRSettings.HudDistance;
         float width = 2f * distance * Mathf.Tan(0.5f * ScreenAngularWidthDegrees * VRSettings.HudSize * Mathf.Deg2Rad);
-        _sheet.Scale = width / ScreenWorldWidth;
+        _sheet!.Scale = width / ScreenWorldWidth;
         _sheet.SetPose(headPose.position + heading * new Vector3(
             0f, VRSettings.HudVerticalOffset, distance), heading);
     }
@@ -77,16 +145,129 @@ internal sealed class HudRTPanels
         return heading + excess * (1f - Mathf.Exp(-FollowRate * Time.unscaledDeltaTime));
     }
 
-    public void Render()
+    // ── Case board ────────────────────────────────────────────────────────────────────────
+
+    private void TickBoard(Transform anchor)
     {
-        _panel.Render();
-        if (_sheet == null || !_sheet.Visible || ++_renders != AlphaProbeAfterRenders) return;
-        try { LogAlphaProbe(); }
-        catch (Exception ex) { Log.LogWarning($"[HudRTPanels] Alpha probe: {ex.Message}"); }
-        LogStructure("after first renders");
+        foreach (var element in _boardElements.Values) element.Seen = false;
+        RemoveDestroyedElements();
+        CollectBoardElements();
+
+        var bounds = new Dictionary<Side, Rect>();
+        foreach (var element in _boardElements.Values)
+        {
+            if (!element.Seen) continue;
+            bounds[element.Side] = bounds.TryGetValue(element.Side, out var b)
+                ? Rect.MinMaxRect(Mathf.Min(b.xMin, element.Rect.xMin), Mathf.Min(b.yMin, element.Rect.yMin),
+                                  Mathf.Max(b.xMax, element.Rect.xMax), Mathf.Max(b.yMax, element.Rect.yMax))
+                : element.Rect;
+        }
+        _boardShifts.Clear();
+        foreach (var (side, b) in bounds) _boardShifts[side] = ShiftClearOfBoard(side, b);
+
+        foreach (var element in _boardElements.Values)
+        {
+            element.View.Visible = element.Seen;
+            if (!element.Seen) continue;
+            element.View.SetPixelRect(element.Rect);
+            PlaceOnBoard(element.View, element.Rect, element.Side, _boardShifts[element.Side]);
+        }
     }
 
-    public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay);
+    /// <summary>How far a block of HUD bounded by <paramref name="bounds"/> moves to sit just clear of
+    /// the board on its side. At board scale the board is exactly the texture: left of x=0, right of
+    /// x=width, above y=height, below y=0.</summary>
+    private Vector2 ShiftClearOfBoard(Side side, Rect bounds)
+    {
+        var texture = _panel.Texture!;
+        float gap = BoardGapMeters / BoardMetersPerPixel;
+        return side switch
+        {
+            Side.Left  => new Vector2(-gap - bounds.xMax, 0f),
+            Side.Right => new Vector2(texture.width + gap - bounds.xMin, 0f),
+            Side.Top   => new Vector2(0f, texture.height + gap - bounds.yMin),
+            _          => new Vector2(0f, -gap - bounds.yMax),
+        };
+    }
+
+    private float BoardMetersPerPixel => CaseBoardRTController.BoardWorldWidth / _panel.Texture!.width;
+
+    /// <summary>Every child of the HUD canvases with visible content, and which side it's on.</summary>
+    private void CollectBoardElements()
+    {
+        var root = _panel.Canvas!.transform;
+        foreach (var canvasName in BoardElementCanvases)
+        {
+            var canvas = root.Find(canvasName);
+            if (canvas == null || !canvas.gameObject.activeInHierarchy) continue;
+            for (int i = 0; i < canvas.childCount; i++)
+            {
+                var child = canvas.GetChild(i);
+                if (!child.gameObject.activeInHierarchy) continue;
+                var rect = _panel.ContentPixelRect(child, ElementMarginPixels, out int graphics);
+                if (graphics == 0) continue;
+
+                int id = child.GetInstanceID();
+                if (!_boardElements.TryGetValue(id, out var element))
+                {
+                    element = new BoardElement(child, _panel.CreateView($"{canvasName}/{child.name}", interactive: false));
+                    _boardElements[id] = element;
+                    Log.LogInfo($"[HudRTPanels] Board element '{canvasName}/{child.name}' on the {SideOf(rect)}: rect={rect}");
+                }
+                element.Rect = rect;
+                element.Side = SideOf(rect);
+                element.Seen = true;
+            }
+        }
+    }
+
+    private Side SideOf(Rect rect)
+    {
+        var texture = _panel.Texture!;
+        float cx = rect.center.x / texture.width;
+        if (cx < SideFraction) return Side.Left;
+        if (cx > 1f - SideFraction) return Side.Right;
+        return rect.center.y > 0.5f * texture.height ? Side.Top : Side.Bottom;
+    }
+
+    /// <summary>Places a HUD rect, moved by its side's shift, on the board: top and bottom in the
+    /// board's plane, the sides folded towards the player about the board's edges.</summary>
+    private void PlaceOnBoard(RTPanelView view, Rect rect, Side side, Vector2 shift)
+    {
+        var anchor = _boardAnchor!;
+        var texture = _panel.Texture!;
+        float mpp = BoardMetersPerPixel;
+        view.Scale = mpp / _panel.MetersPerPixel;
+
+        var center = rect.center + shift;
+        var fromBoardCentre = new Vector3((center.x - 0.5f * texture.width) * mpp, (center.y - 0.5f * texture.height) * mpp, 0f);
+        if (side is Side.Top or Side.Bottom)
+        {
+            view.SetPose(anchor.position + anchor.rotation * fromBoardCentre, anchor.rotation);
+            return;
+        }
+
+        float edgeX = (side == Side.Left ? -0.5f : 0.5f) * texture.width * mpp;
+        var fold = Quaternion.Euler(0f, side == Side.Left ? -FoldDegrees : FoldDegrees, 0f);
+        var hinge = new Vector3(edgeX, 0f, 0f);
+        var local = hinge + fold * (fromBoardCentre - hinge);
+        view.SetPose(anchor.position + anchor.rotation * local, anchor.rotation * fold);
+    }
+
+    private void RemoveDestroyedElements()
+    {
+        var gone = new List<int>();
+        foreach (var (id, element) in _boardElements)
+            if (element.Transform == null) { _panel.DestroyView(element.View); gone.Add(id); }
+        foreach (var id in gone) _boardElements.Remove(id);
+    }
+
+    private void HideBoardElements()
+    {
+        foreach (var element in _boardElements.Values) element.View.Visible = false;
+    }
+
+    // ── Discovery ─────────────────────────────────────────────────────────────────────────
 
     private void TryDiscover()
     {
@@ -103,9 +284,7 @@ internal sealed class HudRTPanels
                 _sheet = _panel.CreateView("Sheet", interactive: false);
                 _sheet.Visible = false;
                 _headingYaw = null;
-                _renders = 0;
                 Log.LogInfo("[HudRTPanels] GameCanvas on a transparent RT panel.");
-                LogStructure("at attach");
             }
             catch (Exception ex)
             {
@@ -120,67 +299,8 @@ internal sealed class HudRTPanels
     {
         _panel.Detach();
         _sheet = null;
+        _boardElements.Clear();
+        IsShowing = false;
         Log.LogInfo("[HudRTPanels] GameCanvas gone (scene reload?) — RT panel torn down, will rediscover.");
-    }
-
-    // ── Diagnostics (temporary: they confirm the HUD's layout and the transparency) ────────────
-
-    private void LogStructure(string when)
-    {
-        var canvas = _panel.Canvas;
-        if (canvas == null) return;
-        var sb = new StringBuilder($"[HudRTPanels] GameCanvas structure {when}:");
-        var root = canvas.transform;
-        for (int i = 0; i < root.childCount; i++)
-        {
-            var child = root.GetChild(i);
-            var rt = child as RectTransform;
-            sb.Append($"\n  '{child.name}' active={child.gameObject.activeInHierarchy}")
-              .Append(rt != null ? $" rect={_panel.PixelRectOf(rt)}" : "");
-        }
-        foreach (var nested in root.GetComponentsInChildren<Canvas>(true))
-        {
-            if (nested == canvas) continue;
-            sb.Append($"\n  canvas '{PathOf(nested.transform, root)}' root={nested.isRootCanvas} active={nested.gameObject.activeInHierarchy} " +
-                      $"override={nested.overrideSorting} order={nested.sortingOrder}");
-        }
-        Log.LogInfo(sb.ToString());
-    }
-
-    private void LogAlphaProbe()
-    {
-        var rt = _panel.Texture!;
-        var readback = new Texture2D(rt.width, rt.height, TextureFormat.RGBA32, false);
-        var previous = RenderTexture.active;
-        try
-        {
-            RenderTexture.active = rt;
-            readback.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
-            readback.Apply();
-        }
-        finally { RenderTexture.active = previous; }
-
-        var pixels = readback.GetPixels32();
-        int clear = 0, partial = 0, opaque = 0, sampled = 0;
-        byte brightestClear = 0;
-        for (int i = 0; i < pixels.Length; i += 7)
-        {
-            var c = pixels[i];
-            sampled++;
-            if (c.a == 0) { clear++; brightestClear = Math.Max(brightestClear, Math.Max(c.r, Math.Max(c.g, c.b))); }
-            else if (c.a == 255) opaque++;
-            else partial++;
-        }
-        var corner = pixels[rt.width + 1];
-        Log.LogInfo($"[HudRTPanels] Alpha probe: format={rt.format} corner=({corner.r},{corner.g},{corner.b},{corner.a}) " +
-                    $"sampled={sampled} clear={clear} partial={partial} opaque={opaque} brightestClearRGB={brightestClear}");
-        UnityEngine.Object.Destroy(readback);
-    }
-
-    private static string PathOf(Transform t, Transform root)
-    {
-        var path = t.name;
-        for (var p = t.parent; p != null && p != root; p = p.parent) path = p.name + "/" + path;
-        return path;
     }
 }

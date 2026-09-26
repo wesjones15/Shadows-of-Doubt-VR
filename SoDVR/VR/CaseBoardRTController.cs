@@ -23,6 +23,8 @@ internal sealed class CaseBoardRTController
     // Legacy category widths for the full screen width, so each panel reads at the size it always has.
     private const float PanelWorldWidth = 2.0f;
     private const float CaseBoardWorldWidth = 2.5f;
+    /// <summary>World width the board's full screen spans: the corkboard's extent, which the HUD keeps clear of.</summary>
+    public const float BoardWorldWidth = CaseBoardWorldWidth;
 
     // Legacy front-to-back order: content panels in front of the navbar, the corkboard behind it.
     private const float ContentPanelDistanceInFront = 0.15f;
