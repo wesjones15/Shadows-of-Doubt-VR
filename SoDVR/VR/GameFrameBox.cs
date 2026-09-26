@@ -1,4 +1,3 @@
-using System;
 using BepInEx.Logging;
 using TMPro;
 using UnityEngine;
@@ -7,18 +6,18 @@ using UnityEngine.UI;
 namespace SoDVR.VR;
 
 /// <summary>
-/// A box in the game's own decorated frame (the UI_ProgressBarBG frame of the dialogue window and
-/// clue messages) for text of our own: a title in the game's message red over a white detail line,
-/// both centred, in the game's interface font. The box grows to fit the title on one line, up to
-/// a maximum width past which the text wraps.
+/// A box in the game's own tooltip style (its purple background and border, from
+/// InterfaceControls.tooltipObjectPrefab) for text of our own: a large white title over a smaller
+/// detail line, both centred, in the game's interface font. The box grows to fit the title on one
+/// line, up to a maximum width past which the text wraps.
 /// </summary>
 internal sealed class GameFrameBox
 {
     private static ManualLogSource Log => Plugin.Log;
 
-    private const string FrameSprite = "UI_ProgressBarBG";
-    private const float PaddingX = 28f;
-    private const float PaddingY = 18f;
+    private const string BorderName = "Border";
+    private const float PaddingX = 36f;
+    private const float PaddingY = 24f;
     private const float LineGap = 4f;
     private static bool s_loggedSources;
 
@@ -37,42 +36,41 @@ internal sealed class GameFrameBox
 
     public GameObject Root => _frame.gameObject;
 
-    /// <summary>Null until the game's frame and font are loaded.</summary>
+    /// <summary>Null until the game's tooltip prefab is loaded.</summary>
     public static GameFrameBox? TryCreate(Transform parent, int layer, float titleSize, float detailSize, float maxTextWidth)
     {
-        var source = FindFrameImage();
+        Image? background, border;
         TMP_FontAsset? font;
-        Color red, white;
+        Color white;
         try
         {
             var controls = InterfaceControls.Instance;
-            font = controls?.tooltipObjectPrefab?.GetComponentInChildren<TextMeshProUGUI>(true)?.font;
-            if (controls == null) return null;
-            red = controls.messageRed;
+            var prefab = controls?.tooltipObjectPrefab;
+            if (controls == null || prefab == null) return null;
+            background = prefab.GetComponent<Image>();
+            border = prefab.transform.Find(BorderName)?.GetComponent<Image>();
+            font = prefab.GetComponentInChildren<TextMeshProUGUI>(true)?.font;
             white = controls.defaultTextColour;
         }
         catch { return null; }
-        if (source == null || font == null) return null;
+        if (background == null || font == null) return null;
 
-        var frameGO = new GameObject("FrameBox") { layer = layer };
-        frameGO.transform.SetParent(parent, false);
-        var frame = frameGO.AddComponent<Image>();
-        frame.sprite = source.sprite;
-        frame.type = source.type;
-        frame.material = source.material;
-        frame.color = source.color;
-        frame.pixelsPerUnitMultiplier = source.pixelsPerUnitMultiplier;
-        frame.fillCenter = source.fillCenter;
-        frame.raycastTarget = false;
-
-        var title = AddText(frameGO.transform, "Title", layer, font, titleSize, red);
-        var detail = AddText(frameGO.transform, "Detail", layer, font, detailSize, white);
+        var frame = CopyImage(background, "Box", parent, layer);
+        if (border != null)
+        {
+            var edge = CopyImage(border, BorderName, frame.transform, layer).rectTransform;
+            edge.anchorMin = Vector2.zero;
+            edge.anchorMax = Vector2.one;
+            edge.sizeDelta = Vector2.zero;
+        }
+        var title = AddText(frame.transform, "Title", layer, font, titleSize, white);
+        var detail = AddText(frame.transform, "Detail", layer, font, detailSize, white);
 
         if (!s_loggedSources)
         {
             s_loggedSources = true;
-            Log.LogInfo($"[GameFrameBox] Frame from '{source.name}' (sprite '{source.sprite?.name}', type {source.type}, colour {source.color}, " +
-                        $"material '{source.material?.name}'), font '{font.name}', title {red}, detail {white}.");
+            Log.LogInfo($"[GameFrameBox] Tooltip style: background sprite '{background.sprite?.name}' colour {background.color}, " +
+                        $"border '{border?.sprite?.name}', font '{font.name}', text {white}.");
         }
         return new GameFrameBox(frame.rectTransform, title, detail, maxTextWidth);
     }
@@ -113,21 +111,18 @@ internal sealed class GameFrameBox
         return text;
     }
 
-    /// <summary>A live image drawn with the frame, preferring the dialogue window's.</summary>
-    private static Image? FindFrameImage()
+    private static Image CopyImage(Image source, string name, Transform parent, int layer)
     {
-        Image? found = null;
-        try
-        {
-            foreach (var image in Resources.FindObjectsOfTypeAll<Image>())
-            {
-                if (image == null || image.sprite == null || image.sprite.name != FrameSprite) continue;
-                if (!image.gameObject.scene.IsValid()) continue;
-                found = image;
-                if (image.canvas != null && image.canvas.rootCanvas.name == "DialogCanvas") break;
-            }
-        }
-        catch (Exception ex) { Log.LogWarning($"[GameFrameBox] Frame search: {ex.Message}"); }
-        return found;
+        var go = new GameObject(name) { layer = layer };
+        go.transform.SetParent(parent, false);
+        var image = go.AddComponent<Image>();
+        image.sprite = source.sprite;
+        image.type = source.type;
+        image.material = source.material;
+        image.color = source.color;
+        image.pixelsPerUnitMultiplier = source.pixelsPerUnitMultiplier;
+        image.fillCenter = source.fillCenter;
+        image.raycastTarget = false;
+        return image;
     }
 }

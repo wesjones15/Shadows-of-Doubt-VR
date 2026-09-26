@@ -19,10 +19,10 @@ internal sealed class InteractLabelPanel
     private const int DiscoveryRetryFrames = 90;
     private const float MarginPixels = 8f;
     private const float AboveHitMeters = 0.08f;
-    private const float NameFontSize = 30f;
-    private const float ActionsFontSize = 24f;
+    private const float NameFontSize = 42f;
+    private const float ActionsFontSize = 26f;
     // Room for most names on one line; longer ones wrap.
-    private const float MaxTextWidth = 640f;
+    private const float MaxTextWidth = 820f;
 
     private readonly RTCanvasPanel _panel;
     private readonly int _layer;
