@@ -71,27 +71,25 @@ internal static class ComputerUse
         catch { return Vector3.zero; }
     }
 
-    /// <summary>The computer aims its cursor with a ray from the game camera; while it does, the camera
-    /// stands where the pulled-back player is, so the cursor lands where the controller points.</summary>
-    [HarmonyPatch(typeof(ComputerController), "Update")]
-    private static class CursorFromPulledBackView
+    /// <summary>The game camera's aim for a controller pointing <paramref name="aim"/>: the computer
+    /// aims its cursor (and its clicks) along the camera's forward from the seat, so the camera looks
+    /// at where the controller's ray from the pulled-back view meets the screen. The camera itself
+    /// stays at the seat — everything the game reads from it agrees, whenever it reads.</summary>
+    public static Quaternion AimFromSeat(Vector3 seat, Quaternion aim)
     {
-        private static void Prefix(ComputerController __instance, out Vector3? __state)
-        {
-            __state = null;
-            var game = VRCamera.GameCamera;
-            if (game == null || __instance != s_computer) return;
-            var pullback = ViewPullback(game.transform.position);
-            if (pullback == Vector3.zero) return;
-            __state = game.transform.position;
-            game.transform.position += pullback;
-        }
+        var pullback = ViewPullback(seat);
+        if (pullback == Vector3.zero || ScreenBounds is not { } bounds) return aim;
+        var screen = new Plane(pullback.normalized, bounds.center);
+        var ray = new Ray(seat + pullback, aim * Vector3.forward);
+        if (!screen.Raycast(ray, out float distance)) return aim;
+        return Quaternion.LookRotation(ray.GetPoint(distance) - seat, aim * Vector3.up);
+    }
 
-        private static void Postfix(Vector3? __state)
-        {
-            var game = VRCamera.GameCamera;
-            if (__state != null && game != null) game.transform.position = __state.Value;
-        }
+    [HarmonyPatch(typeof(ComputerController), nameof(ComputerController.OnClickOnOSElement))]
+    private static class LogClicks
+    {
+        private static void Prefix(ComputerOSUIComponent __0)
+            => Log.LogInfo($"[ComputerUse] Click on '{(__0 != null ? __0.name : "nothing")}'");
     }
 
     public static void Tick()

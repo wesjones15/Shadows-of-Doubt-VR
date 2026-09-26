@@ -659,7 +659,7 @@ public class VRCamera : MonoBehaviour
         // writer wins, and the game's interaction system is the final consumer before render.
         if (_gameCamRef != null && _leftControllerGO != null)
         {
-            try { _gameCamRef.transform.rotation = _leftControllerGO.transform.rotation; }
+            try { _gameCamRef.transform.rotation = ComputerUse.AimFromSeat(_gameCamRef.transform.position, _leftControllerGO.transform.rotation); }
             catch { }
         }
     }
@@ -1190,7 +1190,7 @@ public class VRCamera : MonoBehaviour
             // game Update() — which is when InteractionRaycastCheck reads it for action text.
             if (_gameCamRef != null && _leftControllerGO != null)
             {
-                try { _gameCamRef.transform.rotation = _leftControllerGO.transform.rotation; }
+                try { _gameCamRef.transform.rotation = ComputerUse.AimFromSeat(_gameCamRef.transform.position, _leftControllerGO.transform.rotation); }
                 catch { }
             }
 
