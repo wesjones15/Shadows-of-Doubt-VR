@@ -26,6 +26,7 @@ internal static class RTOwnedCanvases
         "DialogCanvas",
         "MinimapCanvas",
         ConversationSpeechPanel.CanvasName,
+        VRKeyboardPanel.CanvasName,
     };
 
     public static bool IsOwned(string canvasName) => s_names.Contains(canvasName);

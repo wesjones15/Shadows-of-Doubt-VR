@@ -32,12 +32,17 @@ internal readonly struct RTPointerInput
 }
 
 /// <summary>What a click needs from outside the RT pipeline: a prompt legacy-canvas scan, since a
-/// click can open a canvas the legacy pipeline still owns.</summary>
+/// click can open a canvas the legacy pipeline still owns, and the VR keyboard for a text box.</summary>
 internal readonly struct RTPanelClickContext
 {
     public readonly Action RequestForceScan;
+    public readonly Action<TMP_InputField> InputFieldActivated;
 
-    public RTPanelClickContext(Action requestForceScan) => RequestForceScan = requestForceScan;
+    public RTPanelClickContext(Action requestForceScan, Action<TMP_InputField> inputFieldActivated)
+    {
+        RequestForceScan = requestForceScan;
+        InputFieldActivated = inputFieldActivated;
+    }
 }
 
 /// <summary>
@@ -325,6 +330,7 @@ internal sealed class RTPanelPointer
             {
                 EventSystem.current?.SetSelectedGameObject(walker.gameObject);
                 tmpIF.ActivateInputField();
+                ctx.InputFieldActivated(tmpIF);
                 break;
             }
             walker = walker.parent;
