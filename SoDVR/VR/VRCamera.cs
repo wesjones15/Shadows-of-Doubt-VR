@@ -69,6 +69,7 @@ public class VRCamera : MonoBehaviour
     private VRKeyboardPanel _keyboard = null!;
     private HudRTPanels _hudRT = null!;
     private ClueMessagePanel _clueRT = null!;
+    private WorldMarksPanel _worldMarks = null!;
     private VRSettingsRTPanel _vrSettingsRT = null!;
     private readonly PostFXOverlayCompositor _overlay = new();
     // Render throttle: call Camera.Render() every N stereo frames.
@@ -234,6 +235,7 @@ public class VRCamera : MonoBehaviour
         _keyboard = new VRKeyboardPanel(UILayer, _rtPanelInput, _rtPanelGrip);
         _hudRT = new HudRTPanels(UILayer, _rtPanelInput);
         _clueRT = new ClueMessagePanel(UILayer, _rtPanelInput);
+        _worldMarks = new WorldMarksPanel(UILayer, _rtPanelInput);
         _vrSettingsRT = new VRSettingsRTPanel(UILayer, _rtPanelInput, _rtPanelGrip);
         Log.LogInfo("[VRCamera] Awake — polling for SYNCHRONIZED state before swapchain setup.");
     }
@@ -377,6 +379,9 @@ public class VRCamera : MonoBehaviour
 
             try { _clueRT.Tick(_hudRT, _dialogueRT.OpenView); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] ClueMessagePanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
+
+            try { _worldMarks.Tick(_hudRT); }
+            catch (Exception ex) { Log.LogWarning($"[VRCamera] WorldMarksPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
             try { _vrSettingsRT.Tick(_leftCam); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] VRSettingsRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
@@ -1102,9 +1107,8 @@ public class VRCamera : MonoBehaviour
                     }
                 }
 
-                // UIPointerController positions run in Update; we override AFTER all Updates
-                // complete (LateUpdate) so our write wins over the game's garbage projection.
-                _hud.UpdatePointers(_leftCam, _controllerInteraction.PoseFrameCount);
+                try { _worldMarks.BeforeRender(_hudRT, _leftCam, _caseBoardRT.IsOpen); }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] WorldMarksPanel.BeforeRender: {ex.Message}"); }
 
                 // Awareness compass: reposition and reorient for VR head view.
                 _hud.UpdateCompass(_leftCam);
@@ -1116,6 +1120,8 @@ public class VRCamera : MonoBehaviour
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] HudRTPanels.Render: {ex.Message}"); }
                 try { _clueRT.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] ClueMessagePanel.Render: {ex.Message}"); }
+                try { _worldMarks.Render(); }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] WorldMarksPanel.Render: {ex.Message}"); }
                 try { _menuRTPanel.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.Render: {ex.Message}"); }
                 try { _tooltipRTPanel.Render(); }
@@ -1140,6 +1146,7 @@ public class VRCamera : MonoBehaviour
                     _overlay.BeginFrame();
                     _hudRT.AppendOverlay(_overlay);
                     _clueRT.AppendOverlay(_overlay);
+                    _worldMarks.AppendOverlay(_overlay);
                     _menuRTPanel.AppendOverlay(_overlay);
                     _tooltipRTPanel.AppendOverlay(_overlay);
                     _caseBoardRT.AppendOverlay(_overlay);

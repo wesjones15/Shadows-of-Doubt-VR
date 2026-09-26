@@ -120,6 +120,26 @@ internal sealed class HudRTPanels
         return true;
     }
 
+    /// <summary>
+    /// Poses <paramref name="view"/> (of a screen-sized texture at <see cref="ScreenWorldWidth"/>)
+    /// with its centre at <paramref name="pixel"/> of the walking sheet. False unless the sheet is up.
+    /// </summary>
+    public bool PlaceOnSheet(RTPanelView view, Vector2 pixel)
+    {
+        if (_sheet == null || !_sheet.Visible || _panel.Texture == null) return false;
+        var texture = _panel.Texture;
+        var fromCentre = (pixel - new Vector2(texture.width, texture.height) * 0.5f) * _sheet.MetersPerPixel;
+        var rotation = _sheet.Transform.rotation;
+        view.Scale = _sheet.Scale;
+        view.SetPose(_sheet.Transform.position + rotation * new Vector3(fromCentre.x, fromCentre.y, 0f), rotation);
+        return true;
+    }
+
+    /// <summary>Metres per texture pixel that make HUD content look as big as on the sheet, at
+    /// <paramref name="distance"/> from the eyes.</summary>
+    public static float SheetMetersPerPixelAt(float distance, int textureWidth) =>
+        2f * distance * Mathf.Tan(0.5f * ScreenAngularWidthDegrees * VRSettings.HudSize * Mathf.Deg2Rad) / textureWidth;
+
     // ── Walking ───────────────────────────────────────────────────────────────────────────
 
     private void TickSheet(Camera head)
