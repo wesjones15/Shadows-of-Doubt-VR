@@ -347,7 +347,6 @@ public class VRCamera : MonoBehaviour
         if ((++_canvasTick >= UICanvasScanRate || forceScan) && _sceneLoadGrace == 0)
         {
             _canvasTick = 0;
-            FirstPersonLayerProbe.Tick(_leftCam);
             try { _looseCanvases.Discover(); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] LooseCanvasPanels.Discover: {ex.Message}"); }
             try

@@ -31,7 +31,6 @@ internal sealed class LooseCanvasPanels
     private readonly RTPanelInput _input;
     private readonly RTPanelGrip _grip;
     private readonly Dictionary<int, LoosePanel> _panels = new();
-    private readonly HashSet<int> _logged = new();
     // Head-yaw-relative pose each canvas was last left at, by name: it outlives the canvas.
     private readonly Dictionary<string, (Vector3 offset, Quaternion rotation)> _layouts = new(StringComparer.Ordinal);
 
@@ -55,8 +54,6 @@ internal sealed class LooseCanvasPanels
             int id = canvas.GetInstanceID();
             if (_panels.ContainsKey(id)) continue;
             var rejection = Rejection(canvas);
-            if (_logged.Add(id))
-                Log.LogInfo($"[LooseCanvas] Seen '{canvas.name}' (parent '{(canvas.transform.parent != null ? canvas.transform.parent.name : "root")}', {canvas.renderMode}): {rejection ?? "claimed"}");
             if (rejection != null) continue;
             try
             {
