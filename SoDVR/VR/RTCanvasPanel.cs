@@ -39,7 +39,7 @@ internal sealed class RTCanvasPanel
         _input = input;
     }
 
-    private const int AdditiveSweepFrames = 10;
+    private const int AdditiveSweepFrames = 3;
     private bool _transparent;
     private int _additiveSweepCountdown;
 
@@ -151,7 +151,7 @@ internal sealed class RTCanvasPanel
         if (ProjectorCamera == null || Texture == null || !AnyViewVisible()) return;
         try
         {
-            // The game spawns UI all the time (messages, menus), so glows are caught as they appear.
+            // The game spawns UI all the time (messages, menus), so decals are caught as they appear.
             if (_transparent && Canvas != null && --_additiveSweepCountdown <= 0)
             {
                 _additiveSweepCountdown = AdditiveSweepFrames;
