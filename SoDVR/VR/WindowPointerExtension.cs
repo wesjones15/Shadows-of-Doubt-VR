@@ -15,6 +15,9 @@ namespace SoDVR.VR;
 /// is on screen, which for an RT window is far off the board. So the pin's board position is
 /// remembered when the note is unpinned and restored when it's pinned again (or, with nothing to
 /// restore, the pin goes to the middle of the visible board).
+///
+/// A wallet's items (its cash, cards and keys) are taken by a click: the press is handled here and
+/// the item's own control (EvidenceWalletControls) is pressed directly on release.
 /// </summary>
 internal sealed class WindowPointerExtension : IRTPointerExtension
 {
@@ -25,6 +28,7 @@ internal sealed class WindowPointerExtension : IRTPointerExtension
 
     private readonly InfoWindow? _window;
     private RectTransform? _pressedPinButton;
+    private EvidenceWalletControls? _pressedWalletItem;
     private Vector2? _rememberedPinPosition;
     private int _repinFramesLeft;
 
@@ -34,6 +38,8 @@ internal sealed class WindowPointerExtension : IRTPointerExtension
 
     public bool TryTakePress(GameObject? hitGo, in RTPointerSample sample)
     {
+        _pressedWalletItem = WalletItemAt(hitGo);
+        if (_pressedWalletItem != null) return true;
         var pinButton = _window != null ? _window.pinButton : null;
         if (hitGo == null || pinButton == null || !hitGo.transform.IsChildOf(pinButton.transform)) return false;
         _pressedPinButton = pinButton.GetComponent<RectTransform>();
@@ -44,6 +50,7 @@ internal sealed class WindowPointerExtension : IRTPointerExtension
 
     public void EndPress(in RTPointerSample sample)
     {
+        if (_pressedWalletItem != null) { ReleaseWalletItem(sample); return; }
         var button = _pressedPinButton;
         _pressedPinButton = null;
         if (button == null || _window == null) return;
@@ -103,7 +110,39 @@ internal sealed class WindowPointerExtension : IRTPointerExtension
 
     public void OnAltButton(bool press, bool held, bool release, GameObject? hitGo, in RTPointerSample sample) { }
 
-    public void Cancel() => _pressedPinButton = null;
+    public void Cancel()
+    {
+        _pressedPinButton = null;
+        _pressedWalletItem = null;
+    }
+
+    /// <summary>The wallet item whose button <paramref name="hitGo"/> is on or inside, if any.</summary>
+    private static EvidenceWalletControls? WalletItemAt(GameObject? hitGo)
+    {
+        if (hitGo == null) return null;
+        for (var t = hitGo.transform; t != null; t = t.parent)
+        {
+            var controls = t.GetComponent<EvidenceWalletControls>();
+            var button = controls != null ? controls.button : null;
+            if (button != null && hitGo.transform.IsChildOf(button.transform)) return controls;
+            if (t.GetComponent<InfoWindow>() != null) break;
+        }
+        return null;
+    }
+
+    private void ReleaseWalletItem(in RTPointerSample sample)
+    {
+        var item = _pressedWalletItem!;
+        _pressedWalletItem = null;
+        var rect = item.button != null ? item.button.GetComponent<RectTransform>() : null;
+        if (rect != null && !RectTransformUtility.RectangleContainsScreenPoint(rect, sample.ScreenPosition, sample.EventCamera)) return;
+        try
+        {
+            item.OnButtonPress();
+            Log.LogInfo($"[WindowPointerExtension] Wallet item '{item.name}' pressed in '{_window?.gameObject.name}'.");
+        }
+        catch (Exception ex) { Log.LogWarning($"[WindowPointerExtension] Wallet item '{item.name}': {ex.Message}"); }
+    }
 
     /// <summary>The corkboard pin standing for this window: the one whose case element is the
     /// window's pinned case element.</summary>
