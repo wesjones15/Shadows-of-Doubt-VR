@@ -155,7 +155,7 @@ public static class VRSettingsPanel
             var closeLblRT   = closeLblGO.AddComponent<RectTransform>();
             closeLblRT.anchorMin = Vector2.zero; closeLblRT.anchorMax = Vector2.one; closeLblRT.sizeDelta = Vector2.zero;
             var closeLbl = closeLblGO.AddComponent<TextMeshProUGUI>();
-            closeLbl.text = "\u2715"; closeLbl.fontSize = 32; closeLbl.color = Color.white;
+            closeLbl.text = "X"; closeLbl.fontSize = 32; closeLbl.color = Color.white;
             closeLbl.alignment = TextAlignmentOptions.Center; closeLbl.raycastTarget = false;
 
             // ── Tab row ───────────────────────────────────────────────────────
@@ -907,7 +907,7 @@ public static class VRSettingsPanel
         prevRT.anchoredPosition = new Vector2(-213f, 0f);
         prevImg.color = ColNavBtn;
         _staticImgRefs.Add((prevImg, ColNavBtn));
-        AddNavBtnLabel(prevGO.transform, "\u25C4");
+        AddNavBtnLabel(prevGO.transform, "\u25C0");
 
         var valGO   = MakeGO("Val", rowGO.transform);
         var valRT   = valGO.AddComponent<RectTransform>();
@@ -926,7 +926,7 @@ public static class VRSettingsPanel
         nextRT.anchoredPosition = new Vector2(-33f, 0f);
         nextImg.color = ColNavBtn;
         _staticImgRefs.Add((nextImg, ColNavBtn));
-        AddNavBtnLabel(nextGO.transform, "\u25BA");
+        AddNavBtnLabel(nextGO.transform, "\u25B6");
 
         int curIdx = 0;
         try { curIdx = ClampIdx(getter(), options.Length - 1); } catch { }
