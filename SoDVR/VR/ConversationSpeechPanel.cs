@@ -107,7 +107,7 @@ internal sealed class ConversationSpeechPanel
             var canvas = home.gameObject.name == CanvasName ? home : ModCanvas.CreateLike(home, CanvasName);
             if (anchor.parent != canvas.transform) anchor.SetParent(canvas.transform, false);
 
-            _panel.Attach(canvas, _screenWorldWidth);
+            _panel.Attach(canvas, _screenWorldWidth, transparent: true);
             _view = _panel.CreateView("Speech");
             _view.Visible = false;
             _anchor = anchor;
