@@ -68,6 +68,7 @@ public class VRCamera : MonoBehaviour
     private MinimapRTPanel _minimapRT = null!;
     private VRKeyboardPanel _keyboard = null!;
     private HudRTPanels _hudRT = null!;
+    private ClueMessagePanel _clueRT = null!;
     private readonly PostFXOverlayCompositor _overlay = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
@@ -232,6 +233,7 @@ public class VRCamera : MonoBehaviour
         _minimapRT = new MinimapRTPanel(UILayer, _rtPanelInput, _rtPanelGrip);
         _keyboard = new VRKeyboardPanel(UILayer, _rtPanelInput, _rtPanelGrip);
         _hudRT = new HudRTPanels(UILayer, _rtPanelInput);
+        _clueRT = new ClueMessagePanel(UILayer, _rtPanelInput);
         Log.LogInfo("[VRCamera] Awake — polling for SYNCHRONIZED state before swapchain setup.");
     }
 
@@ -370,6 +372,9 @@ public class VRCamera : MonoBehaviour
 
             try { _hudRT.Tick(_leftCam); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] HudRTPanels.Tick: {ex.GetType().Name}: {ex.Message}"); }
+
+            try { _clueRT.Tick(_hudRT, _dialogueRT.OpenView); }
+            catch (Exception ex) { Log.LogWarning($"[VRCamera] ClueMessagePanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
         }
 
         // F8: re-centre all canvases in front of the current head pose.
@@ -1105,6 +1110,8 @@ public class VRCamera : MonoBehaviour
 
                 try { _hudRT.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] HudRTPanels.Render: {ex.Message}"); }
+                try { _clueRT.Render(); }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] ClueMessagePanel.Render: {ex.Message}"); }
                 try { _menuRTPanel.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.Render: {ex.Message}"); }
                 try { _tooltipRTPanel.Render(); }
@@ -1126,6 +1133,7 @@ public class VRCamera : MonoBehaviour
                 {
                     _overlay.BeginFrame();
                     _hudRT.AppendOverlay(_overlay);
+                    _clueRT.AppendOverlay(_overlay);
                     _menuRTPanel.AppendOverlay(_overlay);
                     _tooltipRTPanel.AppendOverlay(_overlay);
                     _caseBoardRT.AppendOverlay(_overlay);

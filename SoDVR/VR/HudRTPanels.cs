@@ -19,7 +19,7 @@ internal sealed class HudRTPanels
 
     private const string CanvasName = "GameCanvas";
     private const int DiscoveryRetryFrames = 90;
-    private const float ScreenWorldWidth = 1.5f;
+    public const float ScreenWorldWidth = 1.5f;
     // How wide the flat screen looks at Size 1, whatever the distance.
     private const float ScreenAngularWidthDegrees = 60f;
     // Looking around within this much of the HUD's heading leaves it still; beyond, it follows.
@@ -38,6 +38,10 @@ internal sealed class HudRTPanels
     private int _discoveryCooldown;
     private float? _headingYaw;
     private int _renders;
+
+    public Canvas? Canvas => _panel.Canvas;
+    public Camera? Projector => _panel.ProjectorCamera;
+    public RTPanelView? Sheet => _sheet;
 
     public HudRTPanels(int quadLayer, RTPanelInput input)
     {

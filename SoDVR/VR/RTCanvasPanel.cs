@@ -369,6 +369,9 @@ internal sealed class RTPanelView
     /// <summary>World size of the quad, from the pixel rect at the panel's scale.</summary>
     public Vector2 WorldSize => PixelRect.size * (_metersPerPixel * _scale);
 
+    /// <summary>World size of one texture pixel on this view.</summary>
+    public float MetersPerPixel => _metersPerPixel * _scale;
+
     private float _scale = 1f;
 
     /// <summary>Size multiplier on the panel's metres-per-pixel, for this view alone.</summary>

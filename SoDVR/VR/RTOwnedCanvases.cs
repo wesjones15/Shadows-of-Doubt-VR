@@ -27,6 +27,7 @@ internal static class RTOwnedCanvases
         "MinimapCanvas",
         ConversationSpeechPanel.CanvasName,
         VRKeyboardPanel.CanvasName,
+        ClueMessagePanel.CanvasName,
         // The HUD: GameCanvas and the HUD canvases nested in it (the legacy scanner has treated
         // those as roots of their own).
         "GameCanvas",
