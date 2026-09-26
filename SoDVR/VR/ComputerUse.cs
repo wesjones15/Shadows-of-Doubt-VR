@@ -1,5 +1,6 @@
 using System;
 using BepInEx.Logging;
+using HarmonyLib;
 using UnityEngine;
 
 namespace SoDVR.VR;
@@ -36,6 +37,42 @@ internal static class ComputerUse
     }
 
     private static ComputerController? s_computer;
+
+    // The game seats the player close enough to the screen for a mouse; aiming a controller at it
+    // wants more room.
+    private const float ViewPullbackMeters = 0.3f;
+
+    /// <summary>How far to pull the view back from the screen while a computer is in use.</summary>
+    public static Vector3 ViewPullback(Vector3 cameraPosition)
+    {
+        if (ScreenBounds is not { } bounds) return Vector3.zero;
+        var away = cameraPosition - bounds.center;
+        away.y = 0f;
+        return away.sqrMagnitude < 0.0001f ? Vector3.zero : away.normalized * ViewPullbackMeters;
+    }
+
+    /// <summary>The computer aims its cursor with a ray from the game camera; while it does, the camera
+    /// stands where the pulled-back player is, so the cursor lands where the controller points.</summary>
+    [HarmonyPatch(typeof(ComputerController), "Update")]
+    private static class CursorFromPulledBackView
+    {
+        private static void Prefix(ComputerController __instance, out Vector3? __state)
+        {
+            __state = null;
+            var game = VRCamera.GameCamera;
+            if (game == null || __instance != s_computer) return;
+            var pullback = ViewPullback(game.transform.position);
+            if (pullback == Vector3.zero) return;
+            __state = game.transform.position;
+            game.transform.position += pullback;
+        }
+
+        private static void Postfix(Vector3? __state)
+        {
+            var game = VRCamera.GameCamera;
+            if (__state != null && game != null) game.transform.position = __state.Value;
+        }
+    }
 
     public static void Tick()
     {

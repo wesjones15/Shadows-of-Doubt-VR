@@ -465,7 +465,7 @@ public class VRCamera : MonoBehaviour
         // Follow the game character's camera position each frame.
         // Retry finding a game camera every 60 frames in case it wasn't available at rig build time.
         if (_gameCam == null && (_frameCount % 60) == 0) TryFindGameCamera();
-        if (_gameCam != null) transform.position = _gameCam.position;
+        if (_gameCam != null) transform.position = _gameCam.position + ComputerUse.ViewPullback(_gameCam.position);
 
         // Sync game camera rotation to VR head so that WorldToScreenPoint/ScreenPointToRay
         // through Camera.main matches the VR view.  The game's case board cursor system
