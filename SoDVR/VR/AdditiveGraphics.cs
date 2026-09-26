@@ -18,7 +18,8 @@ internal static class AdditiveGraphics
 {
     private static ManualLogSource Log => Plugin.Log;
 
-    private static readonly HashSet<string> DecalNames = new(StringComparer.Ordinal) { "LensFlare" };
+    // By sprite, not object name: the navbar has a second copy named 'LensFlare (1)'.
+    private static readonly HashSet<string> DecalSprites = new(StringComparer.Ordinal) { "UI_LensFlareRed" };
 
     private static readonly HashSet<string> s_logged = new();
 
@@ -33,11 +34,11 @@ internal static class AdditiveGraphics
             catch { continue; }
             if (shader.IndexOf("Additive", StringComparison.OrdinalIgnoreCase) < 0) continue;
 
-            bool decal = DecalNames.Contains(graphic.name);
+            string sprite = "";
+            try { sprite = graphic.TryCast<Image>()?.sprite?.name ?? graphic.mainTexture?.name ?? ""; } catch { }
+            bool decal = DecalSprites.Contains(sprite);
             if (decal && graphic.enabled) graphic.enabled = false;
             if (!s_logged.Add($"{root.name}/{graphic.name}")) continue;
-            string sprite = "";
-            try { sprite = (graphic as Image)?.sprite?.name ?? graphic.mainTexture?.name ?? ""; } catch { }
             Log.LogInfo($"[AdditiveGraphics] '{root.name}' '{graphic.name}' sprite='{sprite}' size={graphic.rectTransform.rect.size} " +
                         (decal ? "— decal, hidden" : "— drawn as the game draws it"));
         }
