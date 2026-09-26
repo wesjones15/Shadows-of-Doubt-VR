@@ -40,7 +40,7 @@ internal static class VRSettings
         s_itemHandRight = config.Bind("Controls", "ItemHandRight", false,
             "Hold items in the right hand instead of the left.");
 
-        s_menuDistance = config.Bind("Windows", "MenuDistance", 1.8f,
+        s_menuDistance = config.Bind("Windows", "MenuDistance", 1.5f,
             "How far in front of the head menus and windows open, in metres.");
 
         s_hudDistance = config.Bind("HUD", "Distance", 2.5f,
