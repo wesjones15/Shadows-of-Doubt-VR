@@ -282,6 +282,7 @@ internal static class CameraRig
             mask.mask[(uint)FrameSettingsField.ExposureControl] = true;
             hd.renderingPathCustomFrameSettingsOverrideMask = mask;
             hd.m_RenderingPathCustomFrameSettings = fs;
+            if (transparent) TransparentUIRender.Install(hd, cam);
 
             Log.LogInfo($"[CameraRig] RT panel projector camera '{logTag}' HDRP setup: " +
                         $"clearColorMode={hd.clearColorMode} clear={clear} customRS={hd.customRenderingSettings} " +
