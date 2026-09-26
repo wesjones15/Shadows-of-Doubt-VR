@@ -172,6 +172,7 @@ internal sealed class RTPanelInput
 
     private static float ReadScroll()
     {
+        if (RTPanelGrip.HoldsStick(true)) return 0f;
         if (!OpenXRManager.GetThumbstickState(true, out float _, out float y)) return 0f;
         return Mathf.Abs(y) > ScrollDeadZone ? y * ScrollPerSecond * Time.deltaTime : 0f;
     }

@@ -32,6 +32,9 @@ internal sealed class RTPanelGrip
     private static ManualLogSource Log => Plugin.Log;
 
     private const float MaxGrabDistance = 15f;
+    private const float MinReach = 0.2f;
+    private const float StickDeadZone = 0.2f;
+    private const float PushPullMetersPerSecond = 1.5f;
 
     private readonly List<IRTGripTarget> _targets = new();
     private IRTGripTarget? _dragging;
@@ -52,6 +55,12 @@ internal sealed class RTPanelGrip
         _targets.Remove(target);
         if (_dragging == target) _dragging = null;
     }
+
+    /// <summary>The hand grip-dragging a panel, if any: its stick pushes the panel away and pulls it
+    /// closer, so nothing else acts on that stick meanwhile.</summary>
+    public static bool? DraggingHandIsRight { get; private set; }
+
+    public static bool HoldsStick(bool rightHand) => DraggingHandIsRight == rightHand;
 
     public void Update(GameObject? rightControllerGO, GameObject? leftControllerGO, bool activeHandIsRight)
     {
@@ -75,12 +84,13 @@ internal sealed class RTPanelGrip
 
         if (pressed && _dragging == null)
         {
-            TryBeginDrag(ctrl, ray);
             _draggingWithRightHand = useRight;
+            TryBeginDrag(ctrl, ray);
         }
 
         if (gripNow && _dragging != null)
         {
+            PushPull(useRight);
             Quaternion newRot = ctrl.rotation * _rotationOffset;
             Vector3 newHit = ctrl.position + ctrl.rotation * _hitOffsetFromController;
             _dragging.SetGripPose(newHit - newRot * _hitOffsetFromTarget, newRot);
@@ -102,12 +112,24 @@ internal sealed class RTPanelGrip
         _hitOffsetFromController = Quaternion.Inverse(ctrl.rotation) * (hit - ctrl.position);
         _hitOffsetFromTarget = Quaternion.Inverse(best.GripRotation) * (hit - best.GripPosition);
         _rotationOffset = Quaternion.Inverse(ctrl.rotation) * best.GripRotation;
+        DraggingHandIsRight = _draggingWithRightHand;
         Log.LogInfo($"[RTPanelGrip] Grab '{best.GripName}' dist={bestDist:F2}");
+    }
+
+    /// <summary>Stick up pushes the grabbed point further along the aim, down pulls it closer.</summary>
+    private void PushPull(bool rightHand)
+    {
+        if (!OpenXRManager.GetThumbstickState(rightHand, out float _, out float y) || Mathf.Abs(y) < StickDeadZone) return;
+        float reach = _hitOffsetFromController.magnitude;
+        if (reach < 1e-4f) return;
+        float target = Mathf.Clamp(reach + y * PushPullMetersPerSecond * Time.unscaledDeltaTime, MinReach, MaxGrabDistance);
+        _hitOffsetFromController *= target / reach;
     }
 
     private void EndDrag()
     {
         if (_dragging == null) return;
+        DraggingHandIsRight = null;
         _dragging.OnGripReleased();
         Log.LogInfo($"[RTPanelGrip] Release '{_dragging.GripName}'");
         _dragging = null;

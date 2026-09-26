@@ -146,6 +146,7 @@ internal sealed class LocomotionController
         // Nor in the void room: there is no world to turn to look at.
         if (inVoidMode) return;
 
+        if (RTPanelGrip.HoldsStick(true)) return;
         if (!OpenXRManager.GetThumbstickState(true, out float tx, out float _)) return;
 
         if (VRSettings.SmoothTurn)
@@ -215,6 +216,8 @@ internal sealed class LocomotionController
             }
         }
 
+        // While the left hand grip-drags a panel, its stick moves the panel instead.
+        if (RTPanelGrip.HoldsStick(false)) return;
         if (!OpenXRManager.GetThumbstickState(false, out float lx, out float ly)) return;
         if (Mathf.Abs(lx) <= MoveDeadZone && Mathf.Abs(ly) <= MoveDeadZone)
             return; // idle — gravity is handled by UpdateJump's idle Move()

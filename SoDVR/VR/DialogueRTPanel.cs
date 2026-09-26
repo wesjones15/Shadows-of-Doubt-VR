@@ -167,6 +167,7 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
     /// <summary>Right stick up/down steps the selection from anywhere, repeating while held.</summary>
     private void StepWithStick()
     {
+        if (RTPanelGrip.HoldsStick(true)) return;
         OpenXRManager.GetThumbstickState(true, out float _, out float y);
         // Stick up moves up the list.
         int direction = y > StickThreshold ? -1 : y < -StickThreshold ? 1 : 0;
