@@ -28,8 +28,7 @@ internal sealed class ConversationSpeechPanel
     private RectTransform? _anchor;
     private int _discoveryCooldown;
     private bool _wasShowingAlone;
-    private bool _hadChildren;
-    private int _poseLogs;
+    private bool _loggedTurnedBubble;
 
     public ConversationSpeechPanel(int quadLayer, RTPanelInput input, float screenWorldWidth)
     {
@@ -50,15 +49,10 @@ internal sealed class ConversationSpeechPanel
             return;
         }
 
+        FlattenBubbles();
         var rect = _panel.ContentPixelRect(_anchor, ContentMarginPixels, out int count);
         bool showing = count > 0;
-        if (showing != _view!.Visible || (_anchor.childCount > 0) != _hadChildren)
-        {
-            _hadChildren = _anchor.childCount > 0;
-            Log.LogInfo($"[ConversationSpeech] TEMP showing={showing} children={_anchor.childCount} graphics={count} rect={rect} " +
-                        $"dialogueView={(dialogueView != null ? dialogueView.Transform.position.ToString() : "none")}");
-        }
-        _view.Visible = showing;
+        _view!.Visible = showing;
         if (!showing) { _wasShowingAlone = false; return; }
         _view.SetPixelRect(rect);
 
@@ -67,9 +61,6 @@ internal sealed class ConversationSpeechPanel
             var rotation = dialogueView.Transform.rotation;
             float lift = 0.5f * (dialogueView.WorldSize.y + _view.WorldSize.y) + GapMeters;
             _view.SetPose(dialogueView.Transform.position + rotation * (Vector3.up * lift), rotation);
-            if (_poseLogs++ < 3)
-                Log.LogInfo($"[ConversationSpeech] TEMP pose={_view.Transform.position} size={_view.WorldSize} rot={rotation.eulerAngles} " +
-                            $"visible={_view.Visible} dialogue={dialogueView.Transform.position} dialogueSize={dialogueView.WorldSize}");
             _wasShowingAlone = false;
         }
         else if (!_wasShowingAlone)
@@ -81,7 +72,30 @@ internal sealed class ConversationSpeechPanel
         }
     }
 
-    public void Render() => _panel.Render();
+    public void Render()
+    {
+        FlattenBubbles();
+        _panel.Render();
+    }
+
+    /// <summary>The game turns each speech bubble to face its camera, which in VR follows the left
+    /// controller — seen flat on our canvas that shows as foreshortened, past 90° mirrored text.
+    /// Subtitles lie flat on the panel instead.</summary>
+    private void FlattenBubbles()
+    {
+        if (_anchor == null) return;
+        for (int i = 0; i < _anchor.childCount; i++)
+        {
+            var bubble = _anchor.GetChild(i);
+            if (bubble.localRotation == Quaternion.identity) continue;
+            if (!_loggedTurnedBubble)
+            {
+                _loggedTurnedBubble = true;
+                Log.LogInfo($"[ConversationSpeech] Bubble '{bubble.name}' was turned {bubble.localEulerAngles} — laid flat");
+            }
+            bubble.localRotation = Quaternion.identity;
+        }
+    }
     public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay);
 
     private void TryDiscover()
