@@ -60,6 +60,7 @@ internal sealed class HudRTPanels
     private float? _headingYaw;
     private bool _onBoard;
     private Transform? _boardAnchor;
+    private Rect _boardExtent;
     // Per side, how far the side's block moved (texture pixels) — for other panels placed like HUD.
     private readonly Dictionary<Side, Vector2> _boardShifts = new();
 
@@ -73,7 +74,8 @@ internal sealed class HudRTPanels
         _panel = new RTCanvasPanel("HudRTPanels", quadLayer, input);
     }
 
-    public void Tick(Camera? head, bool boardOpen, Transform boardAnchor)
+    /// <param name="boardExtent">The case board's outline, anchor-local metres (<see cref="CaseBoardRTController.BoardExtent"/>).</param>
+    public void Tick(Camera? head, bool boardOpen, Transform boardAnchor, Rect boardExtent)
     {
         if (!_panel.IsAttached)
         {
@@ -86,9 +88,10 @@ internal sealed class HudRTPanels
 
         IsShowing = RTCanvasPanel.IsShowing(_panel.Canvas!) && head != null;
         bool onBoard = IsShowing && boardOpen;
-        if (onBoard != _onBoard) Log.LogInfo($"[HudRTPanels] HUD {(onBoard ? "laid out around the case board" : "back on the walking sheet")}");
+        if (onBoard != _onBoard) Log.LogInfo($"[HudRTPanels] HUD {(onBoard ? $"laid out around the case board (outline {boardExtent})" : "back on the walking sheet")}");
         _onBoard = onBoard;
         _boardAnchor = boardAnchor;
+        _boardExtent = boardExtent;
 
         _sheet!.Visible = IsShowing && !onBoard;
         if (onBoard) TickBoard(boardAnchor);
@@ -195,19 +198,30 @@ internal sealed class HudRTPanels
     }
 
     /// <summary>How far a block of HUD bounded by <paramref name="bounds"/> moves to sit just clear of
-    /// the board on its side. At board scale the board is exactly the texture: left of x=0, right of
-    /// x=width, above y=height, below y=0.</summary>
+    /// the board's outline on its side (texture pixels at board scale).</summary>
     private Vector2 ShiftClearOfBoard(Side side, Rect bounds)
     {
-        var texture = _panel.Texture!;
+        var board = BoardPixels;
         float gap = BoardGapMeters / BoardMetersPerPixel;
         return side switch
         {
-            Side.Left  => new Vector2(-gap - bounds.xMax, 0f),
-            Side.Right => new Vector2(texture.width + gap - bounds.xMin, 0f),
-            Side.Top   => new Vector2(0f, texture.height + gap - bounds.yMin),
-            _          => new Vector2(0f, -gap - bounds.yMax),
+            Side.Left  => new Vector2(board.xMin - gap - bounds.xMax, 0f),
+            Side.Right => new Vector2(board.xMax + gap - bounds.xMin, 0f),
+            Side.Top   => new Vector2(0f, board.yMax + gap - bounds.yMin),
+            _          => new Vector2(0f, board.yMin - gap - bounds.yMax),
         };
+    }
+
+    /// <summary>The board's outline in texture pixels at board scale (the texture centre being the anchor).</summary>
+    private Rect BoardPixels
+    {
+        get
+        {
+            var texture = _panel.Texture!;
+            float mpp = BoardMetersPerPixel;
+            return Rect.MinMaxRect(_boardExtent.xMin / mpp + 0.5f * texture.width, _boardExtent.yMin / mpp + 0.5f * texture.height,
+                                   _boardExtent.xMax / mpp + 0.5f * texture.width, _boardExtent.yMax / mpp + 0.5f * texture.height);
+        }
     }
 
     private float BoardMetersPerPixel => CaseBoardRTController.BoardWorldWidth / _panel.Texture!.width;
@@ -267,7 +281,7 @@ internal sealed class HudRTPanels
             return;
         }
 
-        float edgeX = (side == Side.Left ? -0.5f : 0.5f) * texture.width * mpp;
+        float edgeX = side == Side.Left ? _boardExtent.xMin : _boardExtent.xMax;
         var fold = Quaternion.Euler(0f, side == Side.Left ? -FoldDegrees : FoldDegrees, 0f);
         var hinge = new Vector3(edgeX, 0f, 0f);
         var local = hinge + fold * (fromBoardCentre - hinge);

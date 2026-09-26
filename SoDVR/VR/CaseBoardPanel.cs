@@ -42,6 +42,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     private readonly Func<bool>? _shownWhile;
     private readonly bool _wholeCanvas;
     private readonly bool _transparent;
+    private readonly float _viewScale;
     private readonly List<Region> _regions = new();
 
     private int _discoveryCooldown;
@@ -65,13 +66,15 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     /// <param name="shownWhile">The game's own "this is open" state, for a panel that fades out after
     /// closing: the panel hides the moment it turns false instead of waiting out the fade.</param>
     /// <param name="transparent">See <see cref="CameraRig.SetupRTPanelProjectorCamera"/>.</param>
+    /// <param name="viewScale">How much bigger than the flat layout to show it, about its own centre.</param>
     public CaseBoardPanel(string canvasName, float screenWorldWidth, float distanceInFrontOfAnchor,
         bool draggable, int quadLayer, RTPanelInput input, RTPanelGrip grip,
         IRTPointerExtension? pointerExtension = null, string[]? regions = null, Func<bool>? shownWhile = null,
-        bool wholeCanvas = false, bool transparent = false)
+        bool wholeCanvas = false, bool transparent = false, float viewScale = 1f)
     {
         _wholeCanvas = wholeCanvas;
         _transparent = transparent;
+        _viewScale = viewScale;
         _shownWhile = shownWhile;
         _pointerExtension = pointerExtension;
         _canvasName = canvasName;
@@ -167,7 +170,19 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     private void PlaceView(Region region)
     {
         var slide = _poseRotation * (Vector3.right * (region.OffsetPixels * _panel.MetersPerPixel));
+        // Laid out where the flat game puts it, then grown about its own centre.
+        region.View.Scale = 1f;
         region.View.SetCanvasPose(_posePosition + slide, _poseRotation);
+        region.View.Scale = _viewScale;
+    }
+
+    /// <summary>The views showing now, for a panel that doesn't move off the board (not draggable) —
+    /// the outline the HUD keeps clear of.</summary>
+    public IEnumerable<RTPanelView> FixedVisibleViews()
+    {
+        if (_draggable) yield break;
+        foreach (var region in _regions)
+            if (region.View.Visible) yield return region.View;
     }
 
     private bool AnyContent()

@@ -27,6 +27,9 @@ internal sealed class CaseBoardRTController
     public const float BoardWorldWidth = CaseBoardWorldWidth;
 
     // Legacy front-to-back order: content panels in front of the navbar, the corkboard behind it.
+    // The navbar reads small at board distance; shown bigger about its own centre.
+    private const float NavbarScale = 2f;
+
     private const float ContentPanelDistanceInFront = 0.15f;
     private const float CorkboardDistanceInFront = -0.15f;
 
@@ -45,7 +48,7 @@ internal sealed class CaseBoardRTController
     public CaseBoardRTController(int quadLayer, RTPanelInput input, RTPanelGrip grip)
     {
         _navbar = new CaseBoardPanel("ActionPanelCanvas", PanelWorldWidth, 0f, draggable: false, quadLayer, input, grip,
-            transparent: true);
+            transparent: true, viewScale: NavbarScale);
         var corkboard = new CaseBoardPanel("CaseCanvas", CaseBoardWorldWidth, CorkboardDistanceInFront, draggable: false, quadLayer, input, grip,
             _corkboardInput, wholeCanvas: true);
         _panels = new[]
@@ -92,6 +95,31 @@ internal sealed class CaseBoardRTController
         _relayoutPending = false;
         foreach (var panel in _panels) panel.Tick(open, relayout, _anchor);
         _windows.Tick(relayout, _anchor);
+        if (open) BoardExtent = MeasureBoardExtent();
+    }
+
+    /// <summary>The board's outline in the anchor's plane (metres, anchor-local x/y): the corkboard
+    /// and navbar as they show now. Draggable panels and windows are left out — they go wherever
+    /// the player puts them.</summary>
+    public Rect BoardExtent { get; private set; }
+
+    private Rect MeasureBoardExtent()
+    {
+        var inverse = Quaternion.Inverse(_anchor.rotation);
+        Rect? extent = null;
+        foreach (var panel in _panels)
+            foreach (var view in panel.FixedVisibleViews())
+            {
+                var centre = inverse * (view.Transform.position - _anchor.position);
+                var half = view.WorldSize * 0.5f;
+                var r = Rect.MinMaxRect(centre.x - half.x, centre.y - half.y, centre.x + half.x, centre.y + half.y);
+                extent = extent is { } e
+                    ? Rect.MinMaxRect(Mathf.Min(e.xMin, r.xMin), Mathf.Min(e.yMin, r.yMin), Mathf.Max(e.xMax, r.xMax), Mathf.Max(e.yMax, r.yMax))
+                    : r;
+            }
+        if (extent != null) return extent.Value;
+        float height = BoardWorldWidth * Screen.height / Mathf.Max(1, Screen.width);
+        return new Rect(-0.5f * BoardWorldWidth, -0.5f * height, BoardWorldWidth, height);
     }
 
     /// <summary>F8: re-place the board in front of the current head pose.</summary>
