@@ -7,8 +7,8 @@ namespace SoDVR.VR;
 
 /// <summary>
 /// The game's 3D awareness compass (the ring and its awareness icons, in the 3DUI canvas) just
-/// under the walking HUD, facing the head as a whole. The game still decides when it shows (it fades
-/// in with something to be aware of). The flat game hangs
+/// under the walking HUD, as the game orients it (a level disc pointing north). The game still decides
+/// when it shows (it fades in with something to be aware of). The flat game hangs
 /// 3DUI in front of its camera, which in VR is suppressed and aimed with the left controller; here
 /// the canvas is world-space and the compass is placed each frame after the game has updated it. It
 /// is real geometry, not flat UI, so it stays 3D rather than going through an RT panel, and its
@@ -25,6 +25,7 @@ internal sealed class CompassDisplay
     private const int RelayerFrames = 5;
     private const float GapMeters = 0.02f;
     private const float FallbackRadiusMeters = 0.15f;
+    private const float DistanceMeters = 1.0f;
 
     private readonly int _layer;
     private Canvas? _canvas;
@@ -49,7 +50,7 @@ internal sealed class CompassDisplay
     }
 
     /// <summary>Per LateUpdate, after the game has written the compass for its own camera: moves it
-    /// just under the walking HUD and turns it, ring and icons to face the head.</summary>
+    /// just under the walking HUD and turns its icons to face the head.</summary>
     public void BeforeRender(HudRTPanels hud, Camera? head)
     {
         if (_canvas == null || _rect == null || head == null) return;
@@ -61,25 +62,25 @@ internal sealed class CompassDisplay
         t.localScale = Vector3.one * (sheet.size.x / Mathf.Max(1f, _rect.rect.width));
         t.SetPositionAndRotation(sheet.position, sheet.rotation);
 
+        // The compass is a flat disc the game keeps level and pointing north, like a real compass on a
+        // table: it is placed where the eye looks just under the sheet's bottom edge, but near enough
+        // that the eye looks down onto it rather than across it. Its own orientation is left to the game.
         var renderer = ui.compassMeshRend;
-        float radius = renderer != null ? Mathf.Max(renderer.bounds.extents.x, renderer.bounds.extents.y) : FallbackRadiusMeters;
-        var up = sheet.rotation * Vector3.up;
-        var position = sheet.position - up * (0.5f * sheet.size.y + GapMeters + radius);
-
-        // The flat game hangs the compass off its camera, which here is aimed with the left hand:
-        // left alone it turns edge-on whenever the hand points away from where the player looks.
+        float radius = renderer != null ? Mathf.Max(renderer.bounds.extents.x, renderer.bounds.extents.z) : FallbackRadiusMeters;
         var headPos = head.transform.position;
-        var facing = Quaternion.LookRotation(position - headPos, up);
-        var container = ui.compassContainer.transform;
-        container.SetPositionAndRotation(position, facing);
-        var ring = ui.backgroundTransform;
-        if (ring != null) ring.rotation = facing;
+        var up = sheet.rotation * Vector3.up;
+        var sheetBottom = sheet.position - up * (0.5f * sheet.size.y + GapMeters);
+        var position = headPos + (sheetBottom - headPos).normalized * DistanceMeters - Vector3.up * radius;
+        ui.compassContainer.transform.position = position;
+
+        // The icons face the game camera, which is aimed with the left hand; they face the head instead.
+        var headRotation = head.transform.rotation;
         var icons = ui.awarenessIcons;
         if (icons != null)
             for (int i = 0; i < icons.Count; i++)
             {
                 var image = icons[i]?.imageTransform;
-                if (image != null) image.rotation = facing;
+                if (image != null) image.rotation = headRotation;
             }
 
         LogShown(ui, renderer, Vector3.Distance(headPos, position));
@@ -93,7 +94,7 @@ internal sealed class CompassDisplay
         if (shown == _wasShown) return;
         _wasShown = shown;
         Log.LogInfo($"[Compass] {(shown ? "Shown" : "Hidden")} by the game: {distance:F2} m from the head, " +
-                    $"mesh {(renderer == null ? "none" : $"enabled={renderer.enabled} size={renderer.bounds.size}")}.");
+                    $"mesh {(renderer == null ? "none" : $"enabled={renderer.enabled} size={renderer.bounds.size}")}, ring up {(ui.backgroundTransform != null ? ui.backgroundTransform.up.ToString() : "?")}.");
     }
 
     private void TryDiscover()
