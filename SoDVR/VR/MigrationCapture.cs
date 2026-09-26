@@ -17,12 +17,15 @@ internal static class MigrationCapture
 
     private const int OptionsSettleFrames = 15;
     private const int MapCursorLogFrames = 60;
+    private const int SpeechLogFrames = 45;
 
     private static bool _dialogMode;
     private static int _dialogLogAt = -1;
     private static bool _mapShowing;
     private static int _mapLogAt = -1;
     private static int _mapCursorCountdown;
+    private static float _lastZoom = -1f;
+    private static int _zoomChangeLogs;
 
     public static void Tick(int frame)
     {
@@ -42,6 +45,7 @@ internal static class MigrationCapture
             Log.LogInfo($"[Capture] dialogMode → {mode} type={ic.dialogType} canvasGroupAlpha={(group != null ? group.alpha : -1f):F2}");
             if (mode) _dialogLogAt = frame + OptionsSettleFrames;
         }
+        if (mode && frame % SpeechLogFrames == 0) LogSpeechBubbles();
         if (frame != _dialogLogAt) return;
 
         var options = ic.dialogOptions;
@@ -65,6 +69,30 @@ internal static class MigrationCapture
         {
             var canvas = bubble.GetComponentInParent<Canvas>();
             Log.LogInfo($"[Capture] speech bubble '{PathOf(bubble.transform)}' canvas='{(canvas != null ? canvas.rootCanvas.name : "none")}'");
+        }
+    }
+
+    /// <summary>Where each reply bubble under the moved speech anchor ends up on its projector's
+    /// texture, and whether it's drawn — to find why the subtitle panel shows nothing.</summary>
+    private static void LogSpeechBubbles()
+    {
+        var anchor = InterfaceController.Instance?.speechDisplayAnchor;
+        if (anchor == null) return;
+        var root = anchor.GetComponentInParent<Canvas>()?.rootCanvas;
+        var cam = root != null ? root.worldCamera : null;
+        Log.LogInfo($"[Capture] speech anchor '{PathOf(anchor)}' children={anchor.childCount} root='{root?.name}' mode={root?.renderMode} " +
+                    $"cam='{cam?.name}' anchorLocal={anchor.localPosition} anchorWorld={anchor.position} rootWorld={root?.transform.position} scale={(root != null ? root.transform.localScale.x : -1f):F4}");
+        for (int i = 0; i < anchor.childCount; i++)
+        {
+            var child = anchor.GetChild(i);
+            var screen = cam != null ? cam.WorldToScreenPoint(child.position) : Vector3.zero;
+            var graphic = child.GetComponentInChildren<Graphic>();
+            float alpha = -1f;
+            try { if (graphic != null) alpha = graphic.color.a * graphic.canvasRenderer.GetInheritedAlpha(); } catch { }
+            var group = child.GetComponent<CanvasGroup>();
+            Log.LogInfo($"[Capture]   bubble '{child.name}' active={child.gameObject.activeInHierarchy} local={child.localPosition} " +
+                        $"world={child.position} screen={screen} alpha={alpha:F2} group={(group != null ? group.alpha : -1f):F2} " +
+                        $"rect={Describe(child.GetComponent<RectTransform>())}");
         }
     }
 
@@ -95,11 +123,26 @@ internal static class MigrationCapture
             LogRaycasters(map.contentCanvas);
         }
 
+        LogZoomChange(map, showing);
+
         if (!showing || --_mapCursorCountdown > 0) return;
         _mapCursorCountdown = MapCursorLogFrames;
         var node = map.mapCursorNode;
         Log.LogInfo($"[Capture] map cursorPos={map.cursorPos} cursorNode={(node != null ? node.nodeCoord.ToString() : "null")} " +
                     $"anchored={map.contentRect.anchoredPosition} zoom={map.zoomController.zoom:F3}");
+    }
+
+    /// <summary>Every frame the map's zoom moves, with the frame number — set against MapInput's own
+    /// "Zoom →" lines it shows whether anything else is writing it.</summary>
+    private static void LogZoomChange(MapController map, bool showing)
+    {
+        if (!showing) { _zoomChangeLogs = 0; return; }
+        var zc = map.zoomController;
+        if (zc == null || Mathf.Approximately(zc.zoom, _lastZoom)) return;
+        _lastZoom = zc.zoom;
+        if (_zoomChangeLogs++ >= 80) return;
+        Log.LogInfo($"[Capture] f{Time.frameCount} map zoom={zc.zoom:F3} desired={zc.desiredZoom:F3} scale={map.contentRect.localScale.x:F3} " +
+                    $"desktop={InterfaceController.Instance?.showDesktopMap} firstPerson={map.displayFirstPerson}");
     }
 
     private static void LogRaycasters(Canvas? contentCanvas)
