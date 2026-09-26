@@ -20,7 +20,7 @@ internal sealed class HudRTPanels
     private const int DiscoveryRetryFrames = 90;
     // The legacy HUD's width for the full screen.
     private const float ScreenWorldWidth = 1.5f;
-    private const int AlphaProbeAfterRenders = 300;
+    private const int AlphaProbeAfterRenders = 60;
 
     private readonly RTCanvasPanel _panel;
     private RTPanelView? _sheet;
