@@ -19,6 +19,7 @@ internal static class TransparentUIRender
 
     // UI shaders carry no LightMode tag; this is the tag SRPs match untagged passes by.
     private static readonly ShaderTagId UnlitTag = new("SRPDefaultUnlit");
+    private static readonly int DepthStencilId = Shader.PropertyToID("_SoDVRTransparentUIDepthStencil");
     private static readonly HashSet<string> s_loggedFirstRender = new();
     private static int s_warnings;
 
@@ -38,16 +39,24 @@ internal static class TransparentUIRender
             var culling = context.Cull(ref cullingParameters);
             context.SetupCameraProperties(camera);
 
+            // The panel texture has no depth buffer; UI Masks clip by stencil, so they need one (a
+            // notebook's scroll list ran past its box without).
+            var target = camera.targetTexture;
             var cmd = new CommandBuffer { name = "SoDVR transparent UI" };
-            cmd.SetRenderTarget(camera.targetTexture);
+            cmd.GetTemporaryRT(DepthStencilId, target.width, target.height, 24, FilterMode.Point, RenderTextureFormat.Depth);
+            cmd.SetRenderTarget(new RenderTargetIdentifier(target), new RenderTargetIdentifier(DepthStencilId));
             cmd.ClearRenderTarget(true, true, Color.clear);
             context.ExecuteCommandBuffer(cmd);
-            cmd.Release();
+            cmd.Clear();
 
             var sorting = new SortingSettings(camera) { criteria = SortingCriteria.CommonTransparent };
             var drawing = new DrawingSettings(UnlitTag, sorting);
             var filtering = new FilteringSettings(new Il2CppSystem.Nullable<RenderQueueRange>(RenderQueueRange.all), camera.cullingMask);
             context.DrawRenderers(culling, ref drawing, ref filtering);
+
+            cmd.ReleaseTemporaryRT(DepthStencilId);
+            context.ExecuteCommandBuffer(cmd);
+            cmd.Release();
             context.Submit();
 
             if (!s_loggedFirstRender.Add(camera.name)) return;
