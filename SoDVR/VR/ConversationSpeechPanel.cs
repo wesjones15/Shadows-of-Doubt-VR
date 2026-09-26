@@ -1,8 +1,6 @@
 using System;
 using BepInEx.Logging;
 using UnityEngine;
-using UnityEngine.SceneManagement;
-using UnityEngine.UI;
 
 namespace SoDVR.VR;
 
@@ -106,7 +104,7 @@ internal sealed class ConversationSpeechPanel
             var home = anchor != null ? anchor.GetComponentInParent<Canvas>()?.rootCanvas : null;
             if (anchor == null || home == null) return;
 
-            var canvas = home.gameObject.name == CanvasName ? home : CreateCanvasLike(home);
+            var canvas = home.gameObject.name == CanvasName ? home : ModCanvas.CreateLike(home, CanvasName);
             if (anchor.parent != canvas.transform) anchor.SetParent(canvas.transform, false);
 
             _panel.Attach(canvas, _screenWorldWidth);
@@ -120,32 +118,6 @@ internal sealed class ConversationSpeechPanel
             Log.LogWarning($"[ConversationSpeech] Setup failed: {ex.Message}");
             Teardown();
         }
-    }
-
-    private static Canvas CreateCanvasLike(Canvas gameCanvas)
-    {
-        var go = new GameObject(CanvasName);
-        go.layer = gameCanvas.gameObject.layer;
-        // Same lifetime as the anchor's old home, so a scene change never leaves the game holding a
-        // destroyed anchor, nor destroys ours from under it.
-        if (gameCanvas.gameObject.scene.name == "DontDestroyOnLoad") UnityEngine.Object.DontDestroyOnLoad(go);
-        else SceneManager.MoveGameObjectToScene(go, gameCanvas.gameObject.scene);
-
-        var canvas = go.AddComponent<Canvas>();
-        CopyScaler(gameCanvas, go.AddComponent<CanvasScaler>());
-        return canvas;
-    }
-
-    private static void CopyScaler(Canvas from, CanvasScaler to)
-    {
-        var source = from.GetComponent<CanvasScaler>();
-        if (source == null) return;
-        to.uiScaleMode = source.uiScaleMode;
-        to.referenceResolution = source.referenceResolution;
-        to.screenMatchMode = source.screenMatchMode;
-        to.matchWidthOrHeight = source.matchWidthOrHeight;
-        to.scaleFactor = source.scaleFactor;
-        to.referencePixelsPerUnit = source.referencePixelsPerUnit;
     }
 
     private void Teardown()
