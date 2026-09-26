@@ -169,6 +169,8 @@ internal sealed class MapPointerExtension : IRTPointerExtension
         float target = Mathf.Clamp(zoom.zoom * Mathf.Exp(delta * ZoomPerScrollUnit), zoom.zoomLimit.x, zoom.zoomLimit.y);
         if (Mathf.Approximately(target, zoom.zoom)) return;
         var scaleBefore = content.localScale;
+        // The desktop map eases zoom towards desiredZoom every frame; set both or it pulls back.
+        zoom.desiredZoom = target;
         zoom.SetZoom(target);
 
         if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(content, sample.ScreenPosition, sample.EventCamera, out var after))
@@ -178,8 +180,8 @@ internal sealed class MapPointerExtension : IRTPointerExtension
         var drift = parent.InverseTransformPoint(content.TransformPoint(after)) - parent.InverseTransformPoint(content.TransformPoint(before));
         SetContentPosition(content.anchoredPosition + new Vector2(drift.x, drift.y));
 
-        if (_loggedZooms++ < 5)
-            Log.LogInfo($"[MapInput] Zoom → {target:F3}: zoom={zoom.zoom:F3} desired={zoom.desiredZoom:F3} scale {scaleBefore.x:F3}→{content.localScale.x:F3} " +
+        if (_loggedZooms++ < 20)
+            Log.LogInfo($"[MapInput] f{Time.frameCount} Zoom → {target:F3}: zoom={zoom.zoom:F3} desired={zoom.desiredZoom:F3} scale {scaleBefore.x:F3}→{content.localScale.x:F3} " +
                         $"size={content.rect.size} anchored={content.anchoredPosition}");
     }
 
