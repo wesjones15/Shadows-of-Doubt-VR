@@ -38,7 +38,7 @@ internal sealed class CaseBoardWindows
 
     // Default placement for a new window, in board-anchor space: in front of the navbar (where
     // legacy put WindowCanvas, at menu distance), each further window cascaded right/down/nearer.
-    private static readonly Vector3 FirstWindowOffset = new(-0.35f, -0.05f, -0.35f);
+    public static readonly Vector3 FirstWindowOffset = new(-0.35f, -0.05f, -0.35f);
     private static readonly Vector3 CascadeStep = new(0.25f, -0.06f, -0.02f);
     private const int CascadeLength = 5;
 

@@ -46,6 +46,9 @@ internal sealed class CaseBoardRTController
     // Set whenever the anchor moves (open, F8); consumed by the next Tick, since F8 is handled
     // after this frame's Tick has already run.
     private bool _relayoutPending;
+    private bool _wasSolo;
+    private bool _solo;
+    private readonly Transform _soloWindowAnchor;
 
     public CaseBoardRTController(int quadLayer, RTPanelInput input, RTPanelGrip grip)
     {
@@ -70,6 +73,10 @@ internal sealed class CaseBoardRTController
         var anchorGO = new GameObject("SoDVR_CaseBoardAnchor");
         Object.DontDestroyOnLoad(anchorGO);
         _anchor = anchorGO.transform;
+
+        var soloWindowAnchorGO = new GameObject("SoDVR_SoloWindowAnchor");
+        Object.DontDestroyOnLoad(soloWindowAnchorGO);
+        _soloWindowAnchor = soloWindowAnchorGO.transform;
     }
 
     /// <summary>Starts a string link from <paramref name="source"/> that follows the laser until the
@@ -89,18 +96,42 @@ internal sealed class CaseBoardRTController
 
     /// <summary>Per-Update: board-open edge, anchor capture, every panel's discovery/visibility/
     /// layout. Skipped by the caller during the post-scene-load grace period.</summary>
-    public void Tick(Camera? leftCam)
+    public void Tick(Camera? leftCam, SoloScreens solo)
     {
         bool open = IsOpen;
         if (open && !_wasOpen && leftCam != null) PlaceAnchor(leftCam);
         _wasOpen = open;
 
+        bool soloActive = solo.Active != null;
+        bool soloStarted = soloActive && !_wasSolo;
+        // Back from a single screen: everything returns to its board layout.
+        if (_wasSolo && !soloActive) _relayoutPending = true;
+        _wasSolo = soloActive;
+        _solo = soloActive;
+
         bool relayout = _relayoutPending;
         _relayoutPending = false;
-        foreach (var panel in _panels) panel.Tick(open, relayout, _anchor);
-        _windows.Tick(relayout, _anchor);
-        if (open) BoardExtent = MeasureBoardExtent();
+        var soloCanvas = solo.CaseBoardCanvas;
+        foreach (var panel in _panels)
+        {
+            if (!soloActive) panel.Tick(open, relayout, _anchor);
+            else if (panel.CanvasName == soloCanvas) panel.TickSolo(solo.Position, solo.Rotation);
+            else panel.Tick(false, relayout, _anchor);
+        }
+
+        if (solo.Active == SoloScreen.Notebook)
+        {
+            // Placed so the first window opened lands on the single screen's spot.
+            _soloWindowAnchor.SetPositionAndRotation(solo.Position - solo.Rotation * CaseBoardWindows.FirstWindowOffset, solo.Rotation);
+            _windows.Tick(soloStarted, _soloWindowAnchor);
+        }
+        else _windows.Tick(relayout, _anchor);
+        if (ShowsBoard) BoardExtent = MeasureBoardExtent();
     }
+
+    /// <summary>True while the board itself shows: open, and not hidden behind a single screen
+    /// the radial menu opened (the game may open the board along with it).</summary>
+    public bool ShowsBoard => IsOpen && !_solo;
 
     /// <summary>The board's outline in the anchor's plane (metres, anchor-local x/y): the corkboard
     /// and navbar as they show now. Draggable panels and windows are left out — they go wherever

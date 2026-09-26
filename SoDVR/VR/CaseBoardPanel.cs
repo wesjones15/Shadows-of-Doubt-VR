@@ -54,6 +54,9 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     private Vector3 _posePosition;
     private Quaternion _poseRotation = Quaternion.identity;
     private (Vector3 offset, Quaternion rotation)? _anchorLocalLayout;
+    private bool _solo;
+    private bool _soloPlaced;
+    private Vector2 _contentCentrePixels;
 
     /// <param name="screenWorldWidth">World width of the full screen width — the legacy category
     /// width, so the panel reads at the size it always has.</param>
@@ -92,23 +95,49 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     }
 
     public Canvas? Canvas => _panel.Canvas;
+    public string CanvasName => _canvasName;
 
     /// <param name="relayout">The anchor just moved (board opened, or recentred): re-place from
     /// the remembered layout.</param>
     public void Tick(bool boardOpen, bool relayout, Transform anchor)
     {
+        _solo = false;
+        _soloPlaced = false;
         _anchor = anchor;
-        if (!_panel.IsAttached)
-        {
-            if (_regions.Count > 0) Teardown();
-            if (--_discoveryCooldown > 0) return;
-            _discoveryCooldown = DiscoveryRetryFrames;
-            TryDiscover();
-            return;
-        }
-
+        if (!EnsureAttached()) return;
         if (relayout) PlaceFromLayout(anchor);
+        UpdateViews(boardOpen);
+    }
 
+    /// <summary>Shown by itself, its content centred on the given pose — the radial menu's single
+    /// screen. Where it is dragged to then is not remembered: the board layout stays as it was.</summary>
+    public void TickSolo(Vector3 position, Quaternion rotation)
+    {
+        _solo = true;
+        if (!EnsureAttached()) return;
+        UpdateViews(true);
+        if (_soloPlaced || !AnyContent()) return;
+        _soloPlaced = true;
+        _poseRotation = rotation;
+        var textureCentre = new Vector2(_panel.Texture!.width, _panel.Texture.height) * 0.5f;
+        var offset = (_contentCentrePixels - textureCentre) * _panel.MetersPerPixel;
+        _posePosition = position - rotation * new Vector3(offset.x, offset.y, 0f);
+        foreach (var region in _regions)
+            if (region.View.Visible) PlaceView(region);
+    }
+
+    private bool EnsureAttached()
+    {
+        if (_panel.IsAttached) return true;
+        if (_regions.Count > 0) Teardown();
+        if (--_discoveryCooldown > 0) return false;
+        _discoveryCooldown = DiscoveryRetryFrames;
+        TryDiscover();
+        return false;
+    }
+
+    private void UpdateViews(bool boardOpen)
+    {
         bool showing = boardOpen && RTCanvasPanel.IsShowing(_panel.Canvas!) && ShownWhile();
         if (showing && (!_wasShowing || --_refreshCountdown <= 0))
         {
@@ -135,6 +164,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     {
         var canvas = _panel.Canvas!.transform;
         float? previousRight = null;
+        Rect? content = null;
         foreach (var region in _regions)
         {
             Rect rect;
@@ -160,7 +190,12 @@ internal sealed class CaseBoardPanel : IRTGripTarget
             region.View.SetPixelRect(rect);
             region.OffsetPixels = previousRight.HasValue ? previousRight.Value - rect.xMin : 0f;
             previousRight = rect.xMax + region.OffsetPixels;
+            var placed = new Rect(rect.x + region.OffsetPixels, rect.y, rect.width, rect.height);
+            content = content is { } c
+                ? Rect.MinMaxRect(Mathf.Min(c.xMin, placed.xMin), Mathf.Min(c.yMin, placed.yMin), Mathf.Max(c.xMax, placed.xMax), Mathf.Max(c.yMax, placed.yMax))
+                : placed;
         }
+        if (content is { } all) _contentCentrePixels = all.center;
     }
 
     private bool ShownWhile()
@@ -178,7 +213,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
             region.View.Scale = width / (region.View.PixelRect.width * region.View.BaseMetersPerPixel);
         var slide = _poseRotation * (Vector3.right * (region.OffsetPixels * _panel.MetersPerPixel));
         region.View.SetCanvasPose(_posePosition + slide, _poseRotation);
-        if (_bottomAboveAnchor == null || _anchor == null) return;
+        if (_bottomAboveAnchor == null || _anchor == null || _solo) return;
 
         // Where the flat layout puts it across, but raised to sit on the given height.
         var view = region.View;
@@ -232,7 +267,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
 
     public void OnGripReleased()
     {
-        if (_anchor == null) return;
+        if (_anchor == null || _solo) return;
         var inverseAnchor = Quaternion.Inverse(_anchor.rotation);
         _anchorLocalLayout = (inverseAnchor * (_posePosition - _anchor.position), inverseAnchor * _poseRotation);
     }
