@@ -26,10 +26,10 @@ internal sealed class CaseBoardRTController
     /// <summary>World width the board's full screen spans: the corkboard's extent, which the HUD keeps clear of.</summary>
     public const float BoardWorldWidth = CaseBoardWorldWidth;
 
-    // Legacy front-to-back order: content panels in front of the navbar, the corkboard behind it.
-    // The navbar reads small at board distance; shown bigger about its own centre.
-    private const float NavbarScale = 2f;
+    // The navbar sits just above the corkboard rather than over its top edge, where the flat layout puts it.
+    private const float NavbarGapMeters = 0.03f;
 
+    // Legacy front-to-back order: content panels in front of the navbar, the corkboard behind it.
     private const float ContentPanelDistanceInFront = 0.15f;
     private const float CorkboardDistanceInFront = -0.15f;
 
@@ -48,7 +48,7 @@ internal sealed class CaseBoardRTController
     public CaseBoardRTController(int quadLayer, RTPanelInput input, RTPanelGrip grip)
     {
         _navbar = new CaseBoardPanel("ActionPanelCanvas", PanelWorldWidth, 0f, draggable: false, quadLayer, input, grip,
-            transparent: true, viewScale: NavbarScale);
+            transparent: true, bottomAboveAnchor: () => CorkboardHalfHeight + NavbarGapMeters);
         var corkboard = new CaseBoardPanel("CaseCanvas", CaseBoardWorldWidth, CorkboardDistanceInFront, draggable: false, quadLayer, input, grip,
             _corkboardInput, wholeCanvas: true);
         _panels = new[]
@@ -120,9 +120,11 @@ internal sealed class CaseBoardRTController
                     : r;
             }
         if (extent != null) return extent.Value;
-        float height = BoardWorldWidth * Screen.height / Mathf.Max(1, Screen.width);
-        return new Rect(-0.5f * BoardWorldWidth, -0.5f * height, BoardWorldWidth, height);
+        return new Rect(-0.5f * BoardWorldWidth, -CorkboardHalfHeight, BoardWorldWidth, 2f * CorkboardHalfHeight);
     }
+
+    /// <summary>Half the corkboard's height: it shows the whole screen at the board's width.</summary>
+    private static float CorkboardHalfHeight => 0.5f * BoardWorldWidth * Screen.height / Mathf.Max(1, Screen.width);
 
     /// <summary>F8: re-place the board in front of the current head pose.</summary>
     public void Recenter(Camera? leftCam)

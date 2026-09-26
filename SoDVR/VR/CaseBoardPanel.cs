@@ -42,7 +42,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     private readonly Func<bool>? _shownWhile;
     private readonly bool _wholeCanvas;
     private readonly bool _transparent;
-    private readonly float _viewScale;
+    private readonly Func<float>? _bottomAboveAnchor;
     private readonly List<Region> _regions = new();
 
     private int _discoveryCooldown;
@@ -66,15 +66,16 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     /// <param name="shownWhile">The game's own "this is open" state, for a panel that fades out after
     /// closing: the panel hides the moment it turns false instead of waiting out the fade.</param>
     /// <param name="transparent">See <see cref="CameraRig.SetupRTPanelProjectorCamera"/>.</param>
-    /// <param name="viewScale">How much bigger than the flat layout to show it, about its own centre.</param>
+    /// <param name="bottomAboveAnchor">Raise the panel so its bottom edge sits this high above the anchor
+    /// (metres) — where the flat layout would overlap something else on the board.</param>
     public CaseBoardPanel(string canvasName, float screenWorldWidth, float distanceInFrontOfAnchor,
         bool draggable, int quadLayer, RTPanelInput input, RTPanelGrip grip,
         IRTPointerExtension? pointerExtension = null, string[]? regions = null, Func<bool>? shownWhile = null,
-        bool wholeCanvas = false, bool transparent = false, float viewScale = 1f)
+        bool wholeCanvas = false, bool transparent = false, Func<float>? bottomAboveAnchor = null)
     {
         _wholeCanvas = wholeCanvas;
         _transparent = transparent;
-        _viewScale = viewScale;
+        _bottomAboveAnchor = bottomAboveAnchor;
         _shownWhile = shownWhile;
         _pointerExtension = pointerExtension;
         _canvasName = canvasName;
@@ -170,10 +171,14 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     private void PlaceView(Region region)
     {
         var slide = _poseRotation * (Vector3.right * (region.OffsetPixels * _panel.MetersPerPixel));
-        // Laid out where the flat game puts it, then grown about its own centre.
-        region.View.Scale = 1f;
         region.View.SetCanvasPose(_posePosition + slide, _poseRotation);
-        region.View.Scale = _viewScale;
+        if (_bottomAboveAnchor == null || _anchor == null) return;
+
+        // Where the flat layout puts it across, but raised to sit on the given height.
+        var view = region.View;
+        var local = Quaternion.Inverse(_anchor.rotation) * (view.Transform.position - _anchor.position);
+        local.y = _bottomAboveAnchor() + 0.5f * view.WorldSize.y;
+        view.SetPose(_anchor.position + _anchor.rotation * local, view.Transform.rotation);
     }
 
     /// <summary>The views showing now, for a panel that doesn't move off the board (not draggable) —
