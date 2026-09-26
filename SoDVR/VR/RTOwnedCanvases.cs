@@ -27,6 +27,16 @@ internal static class RTOwnedCanvases
         "MinimapCanvas",
         ConversationSpeechPanel.CanvasName,
         VRKeyboardPanel.CanvasName,
+        // The HUD: GameCanvas and the HUD canvases nested in it (the legacy scanner has treated
+        // those as roots of their own).
+        "GameCanvas",
+        "StatusDisplayCanvas",
+        "CentreDisplayCanvas",
+        "MessageSystemCanvas",
+        "InteractionProgressCanvas",
+        "OverlayCanvas",
+        "GameWorldDisplayCanvas",
+        "ControlsDisplayCanvas",
     };
 
     public static bool IsOwned(string canvasName) => s_names.Contains(canvasName);

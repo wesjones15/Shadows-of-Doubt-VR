@@ -110,11 +110,13 @@ internal sealed class RTCanvasPanel
                     $"scaler={(scaler == null ? "none" : $"{scaler.uiScaleMode} enabled={scaler.enabled}")} layer={canvas.gameObject.layer}");
     }
 
-    public RTPanelView CreateView(string name, Func<GameObject, bool>? onBeforeClick = null, IRTPointerExtension? extension = null)
+    /// <param name="interactive">False for a view only looked at: the laser passes through it.</param>
+    public RTPanelView CreateView(string name, Func<GameObject, bool>? onBeforeClick = null, IRTPointerExtension? extension = null,
+        bool interactive = true)
     {
         if (Canvas == null || Texture == null) throw new InvalidOperationException($"[{_logTag}] CreateView before Attach");
         var view = new RTPanelView($"{_logTag}/{name}", _quadLayer, Canvas, Texture, MetersPerPixel, onBeforeClick, extension);
-        _input.Register(view.Pointer);
+        if (interactive) _input.Register(view.Pointer);
         _views.Add(view);
         return view;
     }
