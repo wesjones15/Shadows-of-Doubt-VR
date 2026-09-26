@@ -185,11 +185,16 @@ internal sealed class MapPointerExtension : IRTPointerExtension
                         $"size={content.rect.size} anchored={content.anchoredPosition}");
     }
 
+    /// <summary>Moves the map content, kept covering the viewport. Not the game's
+    /// ClampMapScrollPosition: on the case-board map it comes back mirrored, and feeding that in
+    /// flipped the map from side to side every frame of a zoom.</summary>
     private static void SetContentPosition(Vector2 position)
     {
         var map = MapController.Instance;
-        if (map == null || map.contentRect == null) return;
-        map.contentRect.anchoredPosition = map.ClampMapScrollPosition(position);
+        var content = map?.contentRect;
+        if (map == null || content == null || map.viewport == null) return;
+        content.anchoredPosition = position;
+        content.anchoredPosition += ScrollCover.Shift(content, map.viewport);
         var scroll = map.scrollRect;
         if (scroll != null) scroll.velocity = Vector2.zero;
     }

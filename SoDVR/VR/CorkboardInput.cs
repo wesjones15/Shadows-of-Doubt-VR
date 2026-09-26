@@ -130,7 +130,7 @@ internal sealed class CorkboardInput : IRTPointerExtension
     /// <summary>A press on empty board pans it: the board's content is moved so the point grabbed
     /// stays under the laser. The game's scroll area doesn't pan from pointer events alone (drag
     /// events reach it and it doesn't move), so its content position is driven directly and kept
-    /// covering the viewport (<see cref="CoverShift"/>). Buttons and strings on the board keep the
+    /// covering the viewport (<see cref="ScrollCover.Shift"/>). Buttons and strings on the board keep the
     /// ordinary path.</summary>
     private bool TryBeginPan(GameObject? hitGo, in RTPointerSample sample)
     {
@@ -157,7 +157,7 @@ internal sealed class CorkboardInput : IRTPointerExtension
         if (_panContent == null || _panViewport == null) return;
         if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(_panViewport, sample.ScreenPosition, sample.EventCamera, out var local)) return;
         _panContent.anchoredPosition = _panContentStart + (local - _panStartLocal);
-        _panContent.anchoredPosition += CoverShift(_panContent, _panViewport);
+        _panContent.anchoredPosition += ScrollCover.Shift(_panContent, _panViewport);
         if (_panScroll != null) _panScroll.velocity = Vector2.zero;
     }
 
@@ -171,28 +171,6 @@ internal sealed class CorkboardInput : IRTPointerExtension
         ExecuteEvents.ExecuteHierarchy(_panPressedGo, ped, ExecuteEvents.pointerDownHandler);
         ExecuteEvents.ExecuteHierarchy(_panPressedGo, ped, ExecuteEvents.pointerUpHandler);
         ExecuteEvents.ExecuteHierarchy(_panPressedGo, ped, ExecuteEvents.pointerClickHandler);
-    }
-
-    /// <summary>How far to move the board content (in the viewport's own units, which is what
-    /// anchoredPosition moves in) so it still covers the whole viewport — the cork's edges can't be
-    /// dragged into view. Content smaller than the viewport (zoomed far out) is centred instead.</summary>
-    private static Vector2 CoverShift(RectTransform content, RectTransform viewport)
-    {
-        var r = content.rect;
-        Vector3 a = viewport.InverseTransformPoint(content.TransformPoint(new Vector3(r.xMin, r.yMin, 0f)));
-        Vector3 b = viewport.InverseTransformPoint(content.TransformPoint(new Vector3(r.xMax, r.yMax, 0f)));
-        var v = viewport.rect;
-        return new Vector2(
-            AxisCoverShift(Mathf.Min(a.x, b.x), Mathf.Max(a.x, b.x), v.xMin, v.xMax),
-            AxisCoverShift(Mathf.Min(a.y, b.y), Mathf.Max(a.y, b.y), v.yMin, v.yMax));
-    }
-
-    private static float AxisCoverShift(float contentMin, float contentMax, float viewMin, float viewMax)
-    {
-        if (contentMax - contentMin <= viewMax - viewMin) return (viewMin + viewMax - contentMin - contentMax) * 0.5f;
-        if (contentMin > viewMin) return viewMin - contentMin;
-        if (contentMax < viewMax) return viewMax - contentMax;
-        return 0f;
     }
 
     private static ScrollRect? ScrollRectAbove(Transform t)
