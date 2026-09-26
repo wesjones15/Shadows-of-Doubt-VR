@@ -28,7 +28,7 @@ internal sealed class WorldMarksPanel
     private const float SpeechAboveHeadMeters = 0.35f;
     private const float ReactionAboveHeadMeters = 0.5f;
     // The game draws reaction indicators about 13 pixels across — unreadable at HUD scale in VR.
-    private const float ReactionScale = 5f;
+    private const float ReactionScale = 2f;
     // A pointer target inside this much of the eye's viewport counts as in view.
     private const float InViewMargin = 0.05f;
     // How far from the sheet's centre an off-view pointer sits, as a fraction of the sheet.
