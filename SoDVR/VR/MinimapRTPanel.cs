@@ -196,7 +196,7 @@ internal sealed class MinimapRTPanel : IRTGripTarget
             if (canvas == null || canvas.gameObject.name != CanvasName) continue;
             try
             {
-                _panel.Attach(canvas, ScreenWorldWidth);
+                _panel.Attach(canvas, ScreenWorldWidth, transparent: true);
                 _window = canvas.transform.Find(WindowPath)?.GetComponent<RectTransform>();
                 _frame = canvas.transform.Find(FramePath)?.GetComponent<RectTransform>();
                 if (_window == null) throw new InvalidOperationException($"no '{WindowPath}' under the canvas");
