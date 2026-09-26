@@ -108,7 +108,8 @@ internal sealed class LooseCanvasPanels
 
     private sealed class LoosePanel : IRTGripTarget
     {
-        private const int MinContentGraphics = 5;
+        // Any drawn graphic: the press-any-key screen has only four (background, prompt, logo, spinner).
+        private const int MinContentGraphics = 1;
         private const int ContentRefreshFrames = 6;
         private const int OverlayRefreshFrames = 60;
         private const float ContentMarginPixels = 8f;
