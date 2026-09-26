@@ -77,6 +77,8 @@ public class VRCamera : MonoBehaviour
     private InteractLabelPanel _interactLabel = null!;
     private VRSettingsRTPanel _vrSettingsRT = null!;
     private LooseCanvasPanels _looseCanvases = null!;
+    private RadialMenuPanel _radialMenu = null!;
+    private readonly SoloScreens _soloScreens = new();
     private readonly PostFXOverlayCompositor _overlay = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
@@ -245,6 +247,7 @@ public class VRCamera : MonoBehaviour
         _interactLabel = new InteractLabelPanel(UILayer, _rtPanelInput);
         _vrSettingsRT = new VRSettingsRTPanel(UILayer, _rtPanelInput, _rtPanelGrip);
         _looseCanvases = new LooseCanvasPanels(UILayer, _rtPanelInput, _rtPanelGrip);
+        _radialMenu = new RadialMenuPanel(UILayer, _rtPanelInput);
         Log.LogInfo("[VRCamera] Awake — polling for SYNCHRONIZED state before swapchain setup.");
     }
 
@@ -375,19 +378,23 @@ public class VRCamera : MonoBehaviour
             try { _tooltipRTPanel.Tick(_leftCam, _uiPointerPoint); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] TooltipRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
-            try { _caseBoardRT.Tick(_leftCam); }
+            try { _soloScreens.Tick(_caseBoardRT.IsOpen); }
+            catch (Exception ex) { Log.LogWarning($"[VRCamera] SoloScreens.Tick: {ex.Message}"); }
+            try { _radialMenu.Tick(); }
+            catch (Exception ex) { Log.LogWarning($"[VRCamera] RadialMenuPanel.Tick: {ex.Message}"); }
+            try { _caseBoardRT.Tick(_leftCam, _soloScreens); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] CaseBoardRTController.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
             try { _dialogueRT.Tick(_leftCam, _hudRT); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] DialogueRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
-            try { _minimapRT.Tick(_leftCam, transform, _caseBoardRT.IsOpen, _caseBoardRT.Anchor); }
+            try { _minimapRT.Tick(_leftCam, transform, _caseBoardRT.ShowsBoard, _caseBoardRT.Anchor); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] MinimapRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
             try { _keyboard.Tick(_leftCam); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] VRKeyboardPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
-            try { _hudRT.Tick(_leftCam, _caseBoardRT.IsOpen, _caseBoardRT.Anchor, _caseBoardRT.BoardExtent); }
+            try { _hudRT.Tick(_leftCam, _caseBoardRT.ShowsBoard, _caseBoardRT.Anchor, _caseBoardRT.BoardExtent); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] HudRTPanels.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
             try { _clueRT.Tick(_hudRT, _dialogueRT.OpenView); }
@@ -615,7 +622,8 @@ public class VRCamera : MonoBehaviour
                 _locomotion.UpdateJump(caseBoardOpenForInput, pointerOnUI, _movementDiscoveryDone, _sceneLoadGrace);
                 _locomotion.UpdateInteract(pointerOnUI || isPausedForLocomotion);
                 _locomotion.UpdateCrouch();
-                _locomotion.UpdateYButton();
+                try { _radialMenu.Update(_leftControllerGO, _leftCam, _soloScreens, _caseBoardRT.IsOpen); }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] RadialMenuPanel.Update: {ex.Message}"); }
                 _locomotion.UpdateSprint();
 
                 _locomotion.UpdateNotebook(vrSettingsOpenForInput, caseBoardOpenForInput, _dialogueRT.IsOpen,
@@ -1068,7 +1076,7 @@ public class VRCamera : MonoBehaviour
                     }
                 }
 
-                try { _worldMarks.BeforeRender(_hudRT, _leftCam, _caseBoardRT.IsOpen); }
+                try { _worldMarks.BeforeRender(_hudRT, _leftCam, _caseBoardRT.ShowsBoard); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] WorldMarksPanel.BeforeRender: {ex.Message}"); }
                 try { _interactLabel.BeforeRender(_controllerInteraction.Label, _leftCam); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] InteractLabelPanel.BeforeRender: {ex.Message}"); }
@@ -1103,6 +1111,8 @@ public class VRCamera : MonoBehaviour
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] VRSettingsRTPanel.Render: {ex.Message}"); }
                 try { _looseCanvases.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] LooseCanvasPanels.Render: {ex.Message}"); }
+                try { _radialMenu.Render(); }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] RadialMenuPanel.Render: {ex.Message}"); }
 
                 // No GL.invertCulling — HDRP flipYMode handles both Y-flip and culling.
                 _rightCam.Render();
@@ -1122,6 +1132,7 @@ public class VRCamera : MonoBehaviour
                     _minimapRT.AppendOverlay(_overlay);
                     _vrSettingsRT.AppendOverlay(_overlay);
                     _looseCanvases.AppendOverlay(_overlay);
+                    _radialMenu.AppendOverlay(_overlay);
                     _keyboard.AppendOverlay(_overlay);
                     _rtPanelInput.AppendOverlay(_overlay);
                     _overlay.Composite(_rightCam, _rightRT);
