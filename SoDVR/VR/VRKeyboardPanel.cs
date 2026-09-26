@@ -326,7 +326,7 @@ internal sealed class VRKeyboardPanel : IRTGripTarget, IRTPointerExtension
                     x += KeyPixels + GapPixels;
                 }
                 // Spelled out: the game font has no ⌫ glyph.
-                if (r == 0) AddKey(_board, "Bksp", x, y, BackspaceKeys, ActionKeyColour, Backspace);
+                if (r == 0) AddKey(_board, "bksp", x, y, BackspaceKeys, ActionKeyColour, Backspace);
             }
 
             float lastY = rowTop - 4 * (KeyPixels + GapPixels) - KeyPixels * 0.5f;
