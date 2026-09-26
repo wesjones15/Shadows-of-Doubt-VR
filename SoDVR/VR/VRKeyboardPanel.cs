@@ -14,7 +14,7 @@ namespace SoDVR.VR;
 /// own keyboard only opens in gamepad mode) offers one in VR. It opens when a text box gets focus —
 /// clicked, or focused by the game itself as the save popup does — and types straight into it. The
 /// preview line takes a press to place the cursor and a drag to select, as the flat game does. Done
-/// does what Enter does; ✕ just closes the keyboard. Its own canvas on an RT panel, drawn above every
+/// does what Enter does and closes the keyboard. Its own canvas on an RT panel, drawn above every
 /// other panel, placed low and tilted up like a laptop keyboard, and grip-draggable.
 /// </summary>
 internal sealed class VRKeyboardPanel : IRTGripTarget, IRTPointerExtension
@@ -26,6 +26,7 @@ internal sealed class VRKeyboardPanel : IRTGripTarget, IRTPointerExtension
     private const float GapPixels = 10f;
     private const float PreviewPixels = 80f;
     private const float PaddingPixels = 20f;
+    private const float BackspaceKeys = 1.75f;
     // Keys about 4 cm across: easy to hit with the laser.
     private const float MetersPerPixel = 0.00038f;
     private const float MarginPixels = 4f;
@@ -35,7 +36,6 @@ internal sealed class VRKeyboardPanel : IRTGripTarget, IRTPointerExtension
     private static readonly Color PanelColour = new(0.07f, 0.08f, 0.12f, 0.96f);
     private static readonly Color KeyColour = new(0.20f, 0.22f, 0.30f, 1f);
     private static readonly Color ActionKeyColour = new(0.16f, 0.30f, 0.45f, 1f);
-    private static readonly Color CloseKeyColour = new(0.55f, 0.18f, 0.18f, 1f);
 
     // Unshifted / shifted per character key.
     private static readonly string[][] Rows =
@@ -79,7 +79,7 @@ internal sealed class VRKeyboardPanel : IRTGripTarget, IRTPointerExtension
     }
 
     /// <summary>A text box was clicked on an RT panel: open for it even if it already had focus
-    /// (the keyboard may have been closed with ✕ since).</summary>
+    /// (the keyboard may have been closed with Done since).</summary>
     public void OpenFor(TMP_InputField field, Camera? head) => Open(field, head);
 
     public void Tick(Camera? head)
@@ -294,9 +294,9 @@ internal sealed class VRKeyboardPanel : IRTGripTarget, IRTPointerExtension
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
             scaler.scaleFactor = 1f;
 
-            // The number row is the widest: twelve characters and backspace.
-            const int widestRowKeys = 13;
-            float width = PaddingPixels * 2 + widestRowKeys * KeyPixels + (widestRowKeys - 1) * GapPixels;
+            // The number row is the widest: twelve characters and a wide backspace.
+            const float widestRowKeys = 12f + BackspaceKeys;
+            float width = PaddingPixels * 2 + widestRowKeys * KeyPixels + 12 * GapPixels;
             float height = PaddingPixels * 2 + PreviewPixels + GapPixels + 5 * KeyPixels + 5 * GapPixels;
             _board = MakeRect("Board", root.transform, new Vector2(width, height), Vector2.zero);
             AddImage(_board, PanelColour, raycast: true);
@@ -325,7 +325,8 @@ internal sealed class VRKeyboardPanel : IRTGripTarget, IRTPointerExtension
                     _characterKeys.Add((label, keys));
                     x += KeyPixels + GapPixels;
                 }
-                if (r == 0) AddKey(_board, "⌫", x, y, 1f, ActionKeyColour, Backspace);
+                // Spelled out: the game font has no ⌫ glyph.
+                if (r == 0) AddKey(_board, "Bksp", x, y, BackspaceKeys, ActionKeyColour, Backspace);
             }
 
             float lastY = rowTop - 4 * (KeyPixels + GapPixels) - KeyPixels * 0.5f;
@@ -335,15 +336,13 @@ internal sealed class VRKeyboardPanel : IRTGripTarget, IRTPointerExtension
             bx += 1.5f * KeyPixels + GapPixels;
             AddKey(_board, "◀", bx, lastY, 1f, ActionKeyColour, () => MoveCursor(-1));
             bx += KeyPixels + GapPixels;
-            AddKey(_board, "", bx, lastY, 5f, KeyColour, () => Type(" "));
-            bx += 5f * KeyPixels + GapPixels;
+            AddKey(_board, "", bx, lastY, 6.5f, KeyColour, () => Type(" "));
+            bx += 6.5f * KeyPixels + GapPixels;
             AddKey(_board, "▶", bx, lastY, 1f, ActionKeyColour, () => MoveCursor(1));
             bx += KeyPixels + GapPixels;
             AddKey(_board, "Clear", bx, lastY, 1.5f, ActionKeyColour, Clear);
             bx += 1.5f * KeyPixels + GapPixels;
             AddKey(_board, "Done", bx, lastY, 1.5f, ActionKeyColour, Done);
-            bx += 1.5f * KeyPixels + GapPixels;
-            AddKey(_board, "✕", bx, lastY, 1f, CloseKeyColour, Close);
 
             _panel.Attach(canvas, MetersPerPixel * ScreenWidth());
             _view = _panel.CreateView("Keys", extension: this);
