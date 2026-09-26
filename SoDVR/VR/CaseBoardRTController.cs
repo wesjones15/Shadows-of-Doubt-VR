@@ -13,9 +13,8 @@ internal sealed class CaseBoardRTController
 {
     private static ManualLogSource Log => Plugin.Log;
 
-    // Legacy layout, kept so the board opens where it always has: the navbar canvas centre 2.15 m
-    // ahead (CaseBoard distance 2.3 m minus 0.15 m).
-    private const float NavbarDistance = 2.15f;
+    // The board's anchor ahead of the head; the corkboard sits 0.15 m behind it, 2.0 m away.
+    private const float NavbarDistance = 1.85f;
 
     // Legacy category widths for the full screen width, so each panel reads at the size it always has.
     private const float PanelWorldWidth = 2.0f;
@@ -30,7 +29,7 @@ internal sealed class CaseBoardRTController
     private const float ContentPanelDistanceInFront = 0.15f;
     private const float CorkboardDistanceInFront = -0.15f;
     // Small text blurs at the board's depth; screens read up close come 1.5 m from the head.
-    private const float CloseContentDistanceInFront = 0.65f;
+    private const float CloseContentDistanceInFront = 0.35f;
 
     private readonly CaseBoardPanel _navbar;
     private readonly CaseBoardPanel[] _panels;

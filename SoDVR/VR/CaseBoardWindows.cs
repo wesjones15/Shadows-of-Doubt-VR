@@ -36,9 +36,9 @@ internal sealed class CaseBoardWindows
     private const float WindowMarginPixels = 6f;
     private const float GripMargin = 1.3f;
 
-    // Default placement for a new window, in board-anchor space: in front of the navbar (where
-    // legacy put WindowCanvas, at menu distance), each further window cascaded right/down/nearer.
-    public static readonly Vector3 FirstWindowOffset = new(-0.35f, -0.05f, -0.35f);
+    // Default placement for a new window, in board-anchor space: well in front of the board, 1.2 m
+    // from the head where notes read comfortably, each further window cascaded right/down/nearer.
+    public static readonly Vector3 FirstWindowOffset = new(-0.35f, -0.05f, -0.65f);
     private static readonly Vector3 CascadeStep = new(0.25f, -0.06f, -0.02f);
     private const int CascadeLength = 5;
 
