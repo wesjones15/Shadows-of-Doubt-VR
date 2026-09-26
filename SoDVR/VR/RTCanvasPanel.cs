@@ -367,7 +367,27 @@ internal sealed class RTPanelView
     public Rect PixelRect { get; private set; }
 
     /// <summary>World size of the quad, from the pixel rect at the panel's scale.</summary>
-    public Vector2 WorldSize => PixelRect.size * _metersPerPixel;
+    public Vector2 WorldSize => PixelRect.size * (_metersPerPixel * _scale);
+
+    private float _scale = 1f;
+
+    /// <summary>Size multiplier on the panel's metres-per-pixel, for this view alone.</summary>
+    public float Scale
+    {
+        get => _scale;
+        set
+        {
+            if (Mathf.Approximately(value, _scale)) return;
+            _scale = value;
+            ApplySize();
+        }
+    }
+
+    private void ApplySize()
+    {
+        var size = WorldSize;
+        _quad.transform.localScale = new Vector3(size.x, size.y, 1f);
+    }
 
     public bool Visible
     {
@@ -391,8 +411,7 @@ internal sealed class RTPanelView
             pixelRect.x / _texture.width, pixelRect.y / _texture.height,
             pixelRect.width / _texture.width, pixelRect.height / _texture.height));
         Pointer.SetPixelRect(pixelRect);
-        var size = WorldSize;
-        _quad.transform.localScale = new Vector3(size.x, size.y, 1f);
+        ApplySize();
     }
 
     public void SetPose(Vector3 position, Quaternion rotation)
@@ -405,7 +424,7 @@ internal sealed class RTPanelView
     /// the canvas's centre — so several views of one canvas keep the canvas's own layout.</summary>
     public void SetCanvasPose(Vector3 canvasCenter, Quaternion rotation)
     {
-        Vector2 offset = (PixelRect.center - new Vector2(_texture.width, _texture.height) * 0.5f) * _metersPerPixel;
+        Vector2 offset = (PixelRect.center - new Vector2(_texture.width, _texture.height) * 0.5f) * (_metersPerPixel * _scale);
         SetPose(canvasCenter + rotation * new Vector3(offset.x, offset.y, 0f), rotation);
     }
 
