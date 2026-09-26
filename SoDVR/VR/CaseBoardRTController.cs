@@ -7,9 +7,11 @@ namespace SoDVR.VR;
 /// Coordinates the case board's RT panels. Owns the one verified board-open signal
 /// (<c>ActionPanelCanvas.activeInHierarchy</c> — see caseboard_findings.md §6) and the board anchor:
 /// a transform captured in front of the player each time the board opens, which every case-board
-/// panel is laid out relative to.
+/// panel is laid out relative to. Grip-dragging the navbar moves the anchor, so the whole board and
+/// everything laid out on it moves as one; where it was left, relative to the head's facing, is where
+/// it opens next.
 /// </summary>
-internal sealed class CaseBoardRTController
+internal sealed class CaseBoardRTController : IRTGripTarget
 {
     private static ManualLogSource Log => Plugin.Log;
 
@@ -24,6 +26,8 @@ internal sealed class CaseBoardRTController
 
     // The navbar sits just above the corkboard rather than over its top edge, where the flat layout puts it.
     private const float NavbarGapMeters = 0.03f;
+    // Forgiving grab on the thin navbar, as the other panels' grip margins are.
+    private const float NavbarGripMargin = 1.3f;
 
     // Legacy front-to-back order: content panels in front of the navbar, the corkboard behind it.
     private const float ContentPanelDistanceInFront = 0.15f;
@@ -42,6 +46,9 @@ internal sealed class CaseBoardRTController
     // Set whenever the anchor moves (open, F8); consumed by the next Tick, since F8 is handled
     // after this frame's Tick has already run.
     private bool _relayoutPending;
+    // Where the player last left the board, relative to the head's position and heading.
+    private (Vector3 offset, Quaternion rotation)? _headLayout;
+    private Camera? _head;
     private bool _wasSolo;
     private bool _solo;
     private readonly Transform _soloWindowAnchor;
@@ -65,6 +72,7 @@ internal sealed class CaseBoardRTController
                 transparent: true),
         };
         _windows = new CaseBoardWindows(quadLayer, input, grip);
+        grip.Register(this);
 
         var anchorGO = new GameObject("SoDVR_CaseBoardAnchor");
         Object.DontDestroyOnLoad(anchorGO);
@@ -94,6 +102,7 @@ internal sealed class CaseBoardRTController
     /// layout. Skipped by the caller during the post-scene-load grace period.</summary>
     public void Tick(Camera? leftCam, SoloScreens solo)
     {
+        _head = leftCam;
         bool open = IsOpen;
         if (open && !_wasOpen && leftCam != null) PlaceAnchor(leftCam);
         _wasOpen = open;
@@ -174,14 +183,49 @@ internal sealed class CaseBoardRTController
         _windows.AppendOverlay(overlay);
     }
 
+    // ── IRTGripTarget: the navbar is the board's handle ─────────────────────────────────────
+
+    public string GripName => "CaseBoard";
+    public Vector3 GripPosition => _anchor.position;
+    public Quaternion GripRotation => _anchor.rotation;
+
+    public bool TryGripHit(Ray ray, out float distance)
+    {
+        distance = 0f;
+        if (!ShowsBoard) return false;
+        float best = float.MaxValue;
+        foreach (var view in _navbar.FixedVisibleViews())
+            if (view.RaycastWithMargin(ray, NavbarGripMargin, out float d) && d < best) best = d;
+        if (best == float.MaxValue) return false;
+        distance = best;
+        return true;
+    }
+
+    /// <summary>The board stays upright: only its heading follows the hand.</summary>
+    public void SetGripPose(Vector3 position, Quaternion rotation)
+    {
+        _anchor.SetPositionAndRotation(position, Quaternion.Euler(0f, rotation.eulerAngles.y, 0f));
+        _relayoutPending = true;
+    }
+
+    public void OnGripReleased()
+    {
+        if (_head == null) return;
+        var headYaw = Quaternion.Euler(0f, _head.transform.eulerAngles.y, 0f);
+        var inverse = Quaternion.Inverse(headYaw);
+        _headLayout = (inverse * (_anchor.position - _head.transform.position), inverse * _anchor.rotation);
+        Log.LogInfo($"[CaseBoardRT] Board left at {_headLayout.Value.offset} from the head; it opens there from now on.");
+    }
+
     private void PlaceAnchor(Camera leftCam)
     {
         Quaternion yawOnly = Quaternion.Euler(0f, leftCam.transform.eulerAngles.y, 0f);
-        _anchor.position = leftCam.transform.position + yawOnly * Vector3.forward * NavbarDistance;
-        _anchor.rotation = yawOnly;
+        var layout = _headLayout ?? (Vector3.forward * NavbarDistance, Quaternion.identity);
+        _anchor.position = leftCam.transform.position + yawOnly * layout.offset;
+        _anchor.rotation = yawOnly * layout.rotation;
         _anchorPlaced = true;
         _openedFrame = Time.frameCount;
         _relayoutPending = true;
-        Log.LogInfo($"[CaseBoardRT] Board anchor placed at dist={NavbarDistance:F2}m yaw={yawOnly.eulerAngles.y:F1}°");
+        Log.LogInfo($"[CaseBoardRT] Board anchor placed at {layout.offset} from the head, yaw={_anchor.eulerAngles.y:F1}°");
     }
 }
