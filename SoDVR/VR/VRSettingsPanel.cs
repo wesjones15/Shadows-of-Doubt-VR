@@ -66,7 +66,7 @@ public static class VRSettingsPanel
     private static readonly Color ColNavBtn      = new(0.26f, 0.32f, 0.55f, 1f); // indigo
     private static readonly Color ColClose       = new(0.70f, 0.22f, 0.20f, 1f); // red
 
-    // The values the VR tab's ◄/► rows step through. A value set in the config file between them
+    // The values the VR tab's ◀/▶ rows step through. A value set in the config file between them
     // shows as the nearest one.
     private static readonly float[] DistanceOptions =
         Enumerable.Range(5, 31).Select(i => (float)Math.Round(i * 0.1, 1)).ToArray();
@@ -775,7 +775,7 @@ public static class VRSettingsPanel
         contentRT.anchoredPosition = Vector2.zero;
         contentRT.sizeDelta        = new Vector2(0f, 100f);
 
-        // Scroll arrows at LEFT corners of the pane — avoids overlap with ◄/► nav buttons
+        // Scroll arrows at LEFT corners of the pane — avoids overlap with ◀/▶ nav buttons
         // which are anchored to the right edge of every row.
         AddScrollArrow(name + "Up",   paneGO.transform, up: true,  contentRT);
         AddScrollArrow(name + "Down", paneGO.transform, up: false, contentRT);
@@ -788,7 +788,7 @@ public static class VRSettingsPanel
         var go  = MakeGO(name, parent);
         var img = go.AddComponent<Image>();
         var rt  = go.GetComponent<RectTransform>();
-        // Anchored to LEFT edge so the arrow never overlaps the right-side ◄/► buttons.
+        // Anchored to LEFT edge so the arrow never overlaps the right-side ◀/▶ buttons.
         rt.anchorMin = new Vector2(0f, up ? 1f : 0f);
         rt.anchorMax = new Vector2(0f, up ? 1f : 0f);
         rt.pivot     = new Vector2(0f, up ? 1f : 0f);
@@ -891,13 +891,13 @@ public static class VRSettingsPanel
 
         AddRowLabel(rowGO.transform, label);
 
-        // Layout (right-anchored): [◄ 50] [value 120] [► 50] with 8px gaps, 8px from right
-        //   ► right edge:  -8
-        //   ► left edge:   -58    anchoredPos.x = -33
+        // Layout (right-anchored): [◀ 50] [value 120] [▶ 50] with 8px gaps, 8px from right
+        //   ▶ right edge:  -8
+        //   ▶ left edge:   -58    anchoredPos.x = -33
         //   value right:  -63
         //   value left:   -183   anchoredPos.x = -123
-        //   ◄ right edge: -188
-        //   ◄ left edge:  -238   anchoredPos.x = -213
+        //   ◀ right edge: -188
+        //   ◀ left edge:  -238   anchoredPos.x = -213
 
         var prevGO  = MakeGO("Prev", rowGO.transform);
         var prevImg = prevGO.AddComponent<Image>();
