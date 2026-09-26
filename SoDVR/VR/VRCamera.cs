@@ -76,6 +76,7 @@ public class VRCamera : MonoBehaviour
     private WorldMarksPanel _worldMarks = null!;
     private InteractLabelPanel _interactLabel = null!;
     private VRSettingsRTPanel _vrSettingsRT = null!;
+    private LooseCanvasPanels _looseCanvases = null!;
     private readonly PostFXOverlayCompositor _overlay = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
@@ -243,6 +244,7 @@ public class VRCamera : MonoBehaviour
         _worldMarks = new WorldMarksPanel(UILayer, _rtPanelInput);
         _interactLabel = new InteractLabelPanel(UILayer, _rtPanelInput);
         _vrSettingsRT = new VRSettingsRTPanel(UILayer, _rtPanelInput, _rtPanelGrip);
+        _looseCanvases = new LooseCanvasPanels(UILayer, _rtPanelInput, _rtPanelGrip);
         Log.LogInfo("[VRCamera] Awake — polling for SYNCHRONIZED state before swapchain setup.");
     }
 
@@ -342,6 +344,8 @@ public class VRCamera : MonoBehaviour
         if ((++_canvasTick >= UICanvasScanRate || forceScan) && _sceneLoadGrace == 0)
         {
             _canvasTick = 0;
+            try { _looseCanvases.Discover(); }
+            catch (Exception ex) { Log.LogWarning($"[VRCamera] LooseCanvasPanels.Discover: {ex.Message}"); }
             try
             {
                 CanvasConversionScanner.ScanAndConvertCanvases(
@@ -395,6 +399,8 @@ public class VRCamera : MonoBehaviour
 
             try { _vrSettingsRT.Tick(_leftCam); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] VRSettingsRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
+            try { _looseCanvases.Tick(_leftCam); }
+            catch (Exception ex) { Log.LogWarning($"[VRCamera] LooseCanvasPanels.Tick: {ex.Message}"); }
         }
 
         // F8: re-centre all canvases in front of the current head pose.
@@ -1094,6 +1100,8 @@ public class VRCamera : MonoBehaviour
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] VRKeyboardPanel.Render: {ex.Message}"); }
                 try { _vrSettingsRT.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] VRSettingsRTPanel.Render: {ex.Message}"); }
+                try { _looseCanvases.Render(); }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] LooseCanvasPanels.Render: {ex.Message}"); }
 
                 // No GL.invertCulling — HDRP flipYMode handles both Y-flip and culling.
                 _rightCam.Render();
@@ -1112,6 +1120,7 @@ public class VRCamera : MonoBehaviour
                     _dialogueRT.AppendOverlay(_overlay);
                     _minimapRT.AppendOverlay(_overlay);
                     _vrSettingsRT.AppendOverlay(_overlay);
+                    _looseCanvases.AppendOverlay(_overlay);
                     _keyboard.AppendOverlay(_overlay);
                     _rtPanelInput.AppendOverlay(_overlay);
                     _overlay.Composite(_rightCam, _rightRT);

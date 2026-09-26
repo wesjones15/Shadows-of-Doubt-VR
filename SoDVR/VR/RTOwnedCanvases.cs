@@ -43,13 +43,23 @@ internal static class RTOwnedCanvases
         "ControlsDisplayCanvas",
     };
 
-    public static bool IsOwned(string canvasName) => s_names.Contains(canvasName);
+    // Canvases claimed one by one as they are found: ones with no stable name of their own.
+    private static readonly HashSet<int> s_claimed = new();
+
+    public static void Claim(Canvas canvas) => s_claimed.Add(canvas.GetInstanceID());
+
+    public static bool IsOwned(Canvas canvas) =>
+        s_names.Contains(canvas.gameObject.name) || s_claimed.Contains(canvas.GetInstanceID());
 
     /// <summary>True if <paramref name="t"/> is an owned canvas or anything inside one.</summary>
     public static bool Contains(Transform t)
     {
         for (var tr = t; tr != null; tr = tr.parent)
-            if (s_names.Contains(tr.gameObject.name) && tr.GetComponent<Canvas>() != null) return true;
+        {
+            if (s_claimed.Count == 0 && !s_names.Contains(tr.gameObject.name)) continue;
+            var canvas = tr.GetComponent<Canvas>();
+            if (canvas != null && IsOwned(canvas)) return true;
+        }
         return false;
     }
 }

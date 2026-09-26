@@ -66,7 +66,7 @@ internal static class CanvasConversionScanner
             string cname = canvas.gameObject.name ?? "";
 
             // Owned outright by an RT panel — never converted, never added to managedCanvases.
-            if (RTOwnedCanvases.IsOwned(cname)) continue;
+            if (RTOwnedCanvases.IsOwned(canvas)) continue;
 
             // Skip transient map-component canvases (high-churn, hundreds spawned/destroyed)
             if (cname.IndexOf("MapDuct",    StringComparison.OrdinalIgnoreCase) >= 0 ||
