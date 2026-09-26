@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using BepInEx.Logging;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -15,24 +16,18 @@ namespace SoDVR.VR;
 /// MenuCanvas is the pause menu too — the game reuses one Canvas for both (see v1_findings.md §2),
 /// so this class owns both states; there is no separate "PauseCanvas" to migrate later.
 ///
-/// Sole owner of MenuCanvas: CanvasConversionScanner skips it by name so the old WorldSpace pipeline
-/// never touches it, and this class reimplements the pieces that pipeline used to provide for it
-/// (Settings-button patch, hide-while-VR-settings-open, the no-CanvasGroup content-visibility check)
-/// rather than leaving the old system running alongside this one with exemptions. Pointer interaction
-/// goes through its own RTPanelPointer, registered with the shared RTPanelInput arbiter.
+/// Also redirects the menu's Settings button to the VR Settings panel and hides the menu while that
+/// panel is open. Pointer interaction goes through its own RTPanelPointer, registered with the shared
+/// RTPanelInput arbiter.
 /// </summary>
 internal sealed class MenuRTPanel
 {
     private static ManualLogSource Log => Plugin.Log;
 
     private const string CanvasName = "MenuCanvas";
-    private const int DiscoveryRetryFrames = 90; // matches CanvasConversionScanner's UICanvasScanRate cadence
-    private const int MinActiveGraphicsForInteractable = 5; // mirrors CanvasConversionScanner's threshold
+    private const int DiscoveryRetryFrames = 90;
+    private const int MinActiveGraphicsForInteractable = 5;
 
-    // This panel's own world width — deliberately NOT CanvasCategoryInfo's shared Menu default
-    // (1.2m): that default is still used by the other WorldSpace Menu-category canvases
-    // (controlsCanvas, etc), and CLAUDE.md's own lesson from the prior repo is that panels must
-    // not share one sizing policy. This panel owns its own size independent of that pipeline.
     private const float PanelWorldWidth = 1.6f;
 
     private readonly int _quadLayer;
@@ -77,11 +72,8 @@ internal sealed class MenuRTPanel
 
     /// <summary>
     /// True while MenuCanvas is actually showing the main menu or the pause menu, as opposed to
-    /// sitting dormant with only its ~3 decorative Graphics active during normal gameplay. Same
-    /// no-CanvasGroup active-Graphics-count heuristic CanvasCategoryInfo.IsCanvasEffectivelyHidden
-    /// uses for every other canvas, reimplemented here directly (not via that shared method) because
-    /// that method depends on a cache CanvasConversionScanner populates only for canvases it manages
-    /// — MenuCanvas no longer is one.
+    /// sitting dormant with only its ~3 decorative Graphics active during normal gameplay (it has no
+    /// CanvasGroup to say so).
     /// </summary>
     public bool IsShowing
     {
@@ -132,7 +124,7 @@ internal sealed class MenuRTPanel
         {
             try
             {
-                var patchedId = CanvasConversionScanner.PatchMenuSettingsButton(_canvas);
+                var patchedId = RedirectSettingsButton(_canvas);
                 if (patchedId.HasValue) _settingsBtnId = patchedId.Value;
             }
             catch (Exception ex) { Log.LogWarning($"[MenuRTPanel] Settings-button re-patch: {ex.Message}"); }
@@ -142,14 +134,13 @@ internal sealed class MenuRTPanel
 
         if (showing && !_quadPlaced && leftCam != null && _quadGO != null)
         {
-            var catDef = CanvasCategoryInfo.GetCategoryDefaults(CanvasCategory.Menu);
             Vector3 headPos = leftCam.transform.position;
             float headYaw = leftCam.transform.eulerAngles.y;
             Quaternion yawOnly = Quaternion.Euler(0f, headYaw, 0f);
             Vector3 forward = yawOnly * Vector3.forward;
             float dist = VRSettings.MenuDistance;
 
-            _quadGO.transform.position = headPos + forward * dist + Vector3.up * catDef.VerticalOffset;
+            _quadGO.transform.position = headPos + forward * dist;
             _quadGO.transform.rotation = yawOnly;
             _quadPlaced = true;
             Log.LogInfo($"[MenuRTPanel] Placed at dist={dist:F2}m yaw={headYaw:F1}°");
@@ -275,9 +266,75 @@ internal sealed class MenuRTPanel
 
         _pointer.Bind(canvas, _quadCollider, _rt);
 
-        var patchedId = CanvasConversionScanner.PatchMenuSettingsButton(canvas);
+        var patchedId = RedirectSettingsButton(canvas);
         if (patchedId.HasValue) _settingsBtnId = patchedId.Value;
 
         Log.LogInfo($"[MenuRTPanel] Setup complete: rt={rtW}x{rtH} worldSize={PanelWorldWidth:F2}x{worldH:F2}m canvasLayer={canvasLayer}");
+    }
+
+    /// <summary>
+    /// Finds buttons in MenuCanvas whose label text equals "Settings" and replaces their
+    /// onClick listener to open the VR Settings panel — once at first
+    /// discovery, and again on every menu-open transition, since the game may reinitialise
+    /// buttons — so this returns the patched button's instance ID instead of writing a field as a
+    /// side effect; the caller assigns it itself. Returns null when no "Settings" button is found
+    /// this call. Canvas-mode-agnostic (works the same whether the canvas is WorldSpace or
+    /// ScreenSpaceCamera) — only walks Text/Button components, never touches renderMode/transform.
+    /// Cannot use GetComponentInParent&lt;Button&gt;() in IL2CPP — walks parents manually.
+    /// </summary>
+    private static int? RedirectSettingsButton(Canvas menuCanvas)
+    {
+        int? lastPatchedId = null;
+        try
+        {
+            var texts = menuCanvas.GetComponentsInChildren<TMP_Text>(true);
+            int patched = 0;
+            foreach (var t in texts)
+            {
+                if (t == null) continue;
+                string? s = t.text;
+                if (s == null) continue;
+                if (!s.Equals("Settings", StringComparison.OrdinalIgnoreCase)) continue;
+
+                // Walk up the parent chain to find the Button (IL2CPP GetComponentInParent is broken).
+                Button? btn = null;
+                var tr = t.transform;
+                for (int i = 0; i < 5 && tr != null; i++)
+                {
+                    btn = tr.gameObject.GetComponent<Button>();
+                    if (btn != null) break;
+                    tr = tr.parent;
+                }
+                if (btn == null) continue;
+
+                // Replace onClick to suppress the game's persistent listener.
+                // The actual VR panel open is handled in MenuRTPanel.TryClick via the returned
+                // button instance ID, to avoid IL2CPP AddListener reliability issues on
+                // freshly-created events.
+                btn.onClick = new Button.ButtonClickedEvent();
+                int btnId = btn.gameObject.GetInstanceID();
+                lastPatchedId = btnId;
+                // Log full parent chain so we can see which panel this button belongs to
+                var chain = new System.Text.StringBuilder();
+                var ctr = btn.transform;
+                for (int ci = 0; ci < 6 && ctr != null; ci++)
+                {
+                    chain.Append(ctr.gameObject.name);
+                    chain.Append('(');
+                    chain.Append(ctr.gameObject.GetInstanceID());
+                    chain.Append(')');
+                    if (ci < 5 && ctr.parent != null) chain.Append('→');
+                    ctr = ctr.parent;
+                }
+                patched++;
+                Log.LogInfo($"[MenuRTPanel] Patched Settings button id={btnId} active={btn.gameObject.activeInHierarchy} chain: {chain}");
+            }
+            Log.LogInfo($"[MenuRTPanel] Settings button: {patched} button(s) redirected to VR panel");
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning($"[MenuRTPanel] Settings button redirect failed: {ex.Message}");
+        }
+        return lastPatchedId;
     }
 }
