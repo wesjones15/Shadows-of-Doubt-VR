@@ -73,6 +73,7 @@ internal sealed class CaseBoardRTController : IRTGripTarget
         };
         _windows = new CaseBoardWindows(quadLayer, input, grip);
         grip.Register(this);
+        PanelLayouts.Reset += ResetLayout;
 
         var anchorGO = new GameObject("SoDVR_CaseBoardAnchor");
         Object.DontDestroyOnLoad(anchorGO);
@@ -165,6 +166,16 @@ internal sealed class CaseBoardRTController : IRTGripTarget
     private static float CorkboardHalfHeight => 0.5f * BoardWorldWidth * Screen.height / Mathf.Max(1, Screen.width);
 
     /// <summary>F8: re-place the board in front of the current head pose.</summary>
+    /// <summary>Forgets every drag on the board: the board, its panels and its notes go back to their
+    /// defaults, now if the board is open.</summary>
+    private void ResetLayout()
+    {
+        _headLayout = null;
+        foreach (var panel in _panels) panel.ResetLayout();
+        _windows.ResetLayouts();
+        if (IsOpen && _head != null) PlaceAnchor(_head);
+    }
+
     public void Recenter(Camera? leftCam)
     {
         if (IsOpen && leftCam != null) PlaceAnchor(leftCam);

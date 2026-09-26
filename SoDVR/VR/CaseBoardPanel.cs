@@ -265,6 +265,9 @@ internal sealed class CaseBoardPanel : IRTGripTarget
             if (region.View.Visible) PlaceView(region);
     }
 
+    /// <summary>Back to the default placement on the board (applied at the next relayout).</summary>
+    public void ResetLayout() => _anchorLocalLayout = null;
+
     public void OnGripReleased()
     {
         if (_anchor == null || _solo) return;

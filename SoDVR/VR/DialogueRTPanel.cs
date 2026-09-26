@@ -62,6 +62,7 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
         _grip = grip;
         _panel = new RTCanvasPanel("DialogueRTPanel", quadLayer, input);
         _speech = new ConversationSpeechPanel(quadLayer, input, ScreenWorldWidth);
+        PanelLayouts.Reset += () => _headLocalLayout = (DefaultHeadOffset, Quaternion.LookRotation(DefaultHeadOffset));
     }
 
     public bool IsOpen => _view != null && _view.Visible;

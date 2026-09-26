@@ -340,6 +340,7 @@ public static class VRSettingsPanel
 
         SectionHeader(t, "─── WINDOWS ───");
         ConfigFloat(t, "Menu Distance", VRSettings.MenuDistanceEntry, DistanceOptions, v => $"{v:F1} m");
+        ActionRow(t, "Window Positions", "Reset", PanelLayouts.ResetAll);
 
         SectionHeader(t, "─── HUD ───");
         ConfigFloat(t, "HUD Distance", VRSettings.HudDistanceEntry, DistanceOptions, v => $"{v:F1} m");
@@ -654,6 +655,16 @@ public static class VRSettingsPanel
         row.anchoredPosition = new Vector2(0f, -tab.NextY);
         tab.NextY += ROW_STEP;
         AddText(row, text, 28).color = ColHeaderText;
+    }
+
+    /// <summary>A row whose button acts at once — not a setting, so nothing to Apply.</summary>
+    private static void ActionRow(Tab tab, string label, string buttonLabel, Action onClick)
+    {
+        var row = NewRow(tab, label);
+        var button = AddButton("ActionBtn", row, ColNavBtn, buttonLabel, 26, onClick);
+        button.anchorMin = button.anchorMax = button.pivot = new Vector2(1f, 0.5f);
+        button.sizeDelta = new Vector2(130f, ROW_H - 12f);
+        button.anchoredPosition = new Vector2(-8f, 0f);
     }
 
     private static (Image img, TextMeshProUGUI txt) AddToggleRow(Tab tab, string label, Action onClick)

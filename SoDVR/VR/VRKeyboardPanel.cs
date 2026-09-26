@@ -76,6 +76,7 @@ internal sealed class VRKeyboardPanel : IRTGripTarget, IRTPointerExtension
         _layer = layer;
         _grip = grip;
         _panel = new RTCanvasPanel("VRKeyboard", layer, input);
+        PanelLayouts.Reset += () => _headLocalLayout = (DefaultHeadOffset, Quaternion.LookRotation(DefaultHeadOffset));
     }
 
     /// <summary>A text box was clicked on an RT panel: open for it even if it already had focus

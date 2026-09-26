@@ -57,6 +57,13 @@ internal sealed class MinimapRTPanel : IRTGripTarget
     {
         _grip = grip;
         _panel = new RTCanvasPanel("MinimapRTPanel", quadLayer, input);
+        PanelLayouts.Reset += () =>
+        {
+            _boardLayout = null;
+            _bodyLayout = null;
+            // Recomputes the default for wherever it shows next frame.
+            _placement = Placement.None;
+        };
     }
 
     /// <param name="rig">The player's VR origin — what the held-B map stays locked to.</param>

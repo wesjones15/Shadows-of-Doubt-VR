@@ -39,6 +39,7 @@ internal sealed class LooseCanvasPanels
         _quadLayer = quadLayer;
         _input = input;
         _grip = grip;
+        PanelLayouts.Reset += _layouts.Clear;
     }
 
     private void Discover()

@@ -89,6 +89,17 @@ internal sealed class CaseBoardWindows
         }
     }
 
+    /// <summary>Every open note back to its default cascade spot on the board.</summary>
+    public void ResetLayouts()
+    {
+        _cascadeIndex = 0;
+        foreach (var w in _windows.Values)
+        {
+            w.SetLayout(FirstWindowOffset + CascadeStep * (_cascadeIndex++ % CascadeLength), Quaternion.identity);
+            if (_anchor != null) w.PlaceFromLayout(_anchor);
+        }
+    }
+
     /// <summary>Right before any case-board panel renders: a pin the game created this frame for a
     /// re-pinned note is moved back before the corkboard draws it far off the board.</summary>
     public void BeforeRender()
