@@ -200,7 +200,8 @@ internal sealed class ControllerInteraction
         // Skip when VR Settings panel or pause menu is open
         if (VRSettingsPanel.RootGO?.activeSelf == true) return;
         bool menuOpen = menuCanvasRef != null && menuCanvasRef.isActiveAndEnabled;
-        if (menuOpen)
+        // On a computer the game draws its own cursor, and the HUD shows the actions.
+        if (menuOpen || ComputerUse.InUse)
         {
             if (_leftDotVisible  && _leftDotCanvas != null) { _leftDotCanvas.gameObject.SetActive(false); _leftDotVisible = false; }
             if (_leftLabelVisible && _leftLabelCanvas != null) { _leftLabelCanvas.gameObject.SetActive(false); _leftLabelVisible = false; }
