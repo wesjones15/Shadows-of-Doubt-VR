@@ -345,7 +345,7 @@ internal sealed class TooltipRTPanel
             if (canvas == null || canvas.gameObject.name != CanvasName) continue;
             try
             {
-                _panel.Attach(canvas, ScreenWorldWidth);
+                _panel.Attach(canvas, ScreenWorldWidth, transparent: true);
                 _contextMenus = canvas.transform.Find(ContextMenusName);
                 _tooltips = canvas.transform.Find(TooltipsName);
                 if (_contextMenus == null || _tooltips == null)
