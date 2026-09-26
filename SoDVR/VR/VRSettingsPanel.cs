@@ -1,3 +1,4 @@
+using BepInEx.Configuration;
 using BepInEx.Logging;
 using System;
 using System.Collections.Generic;
@@ -10,61 +11,40 @@ namespace SoDVR.VR;
 
 /// <summary>
 /// Builds the VR Settings panel: the game's own settings (graphics, audio, controls, general),
-/// written through the game's setters, plus the mod's VR tab (<see cref="VRSettings"/>). Shown on
-/// an RT panel by <see cref="VRSettingsRTPanel"/>; opened by F10 or the menu's Settings button.
+/// read from and applied through the game's settings system (<see cref="GameSettingsBridge"/>), plus
+/// the mod's VR tab (<see cref="VRSettings"/>). Changes stay pending until Apply; Reset Defaults
+/// resets the open tab; leaving a tab or closing with pending changes asks first. Shown on an RT
+/// panel by <see cref="VRSettingsRTPanel"/>; opened by F10 or the menu's Settings button.
 ///
 /// DontDestroyOnLoad, since scene changes would destroy it. AddComponent&lt;RectTransform&gt;()
-/// works on these plain new GameObjects (IL2CPP doesn't upgrade the Transform on SetParent); don't
-/// AddComponent&lt;CanvasGroup&gt;() and then expect a RectTransform, as CanvasGroup doesn't
-/// require one.
+/// works on these plain new GameObjects (IL2CPP doesn't upgrade the Transform on SetParent).
 /// </summary>
 public static class VRSettingsPanel
 {
     private static ManualLogSource Log => Plugin.Log;
 
-    private const int   UILayer  = VRCamera.UILayer;
-    private const float ROW_H    = 60f;   // row height px
-    private const float ROW_STEP = 68f;   // row height + gap
-    private const float TOP_PAD  = 8f;
+    public const string CanvasName = "VRSettingsPanelInternal";
+
+    private const int   UILayer   = VRCamera.UILayer;
+    private const float ROW_H     = 60f;
+    private const float ROW_STEP  = 68f;
+    private const float TOP_PAD   = 8f;
+    private const float TITLE_H   = 70f;
+    private const float TABS_H    = 56f;
+    private const float BOTTOM_H  = 84f;
     private static readonly Vector2 WindowSize = new(900f, 700f);
 
-    public static GameObject?    RootGO { get; private set; }
-    /// <summary>The panel itself, centred on its screen-sized canvas.</summary>
-    public static RectTransform? Window { get; private set; }
-
-    private static RectTransform?  _graphicsPaneRT;
-    private static RectTransform?  _audioPaneRT;
-    private static RectTransform?  _controlsPaneRT;
-    private static RectTransform?  _generalPaneRT;
-    private static RectTransform?  _graphicsContentRT;
-    private static RectTransform?  _audioContentRT;
-    private static RectTransform?  _controlsContentRT;
-    private static RectTransform?  _generalContentRT;
-    private static int             _activeTab = 0;  // 0=Graphics, 1=Audio, 2=Controls, 3=General, 4=VR
-    private static CanvasGroup?    _graphicsGroup;
-    private static CanvasGroup?    _audioGroup;
-    private static CanvasGroup?    _controlsGroup;
-    private static CanvasGroup?    _generalGroup;
-    private static RectTransform?  _vrPaneRT;
-    private static RectTransform?  _vrContentRT;
-    private static CanvasGroup?    _vrGroup;
-    private static Image?          _graphicsTabImg;
-    private static Image?          _audioTabImg;
-    private static Image?          _controlsTabImg;
-    private static Image?          _generalTabImg;
-    private static Image?          _vrTabImg;
-
-    // Image colour refresh — called in Show() to re-apply toggle states and static colors.
-    private static readonly List<(Image img, TextMeshProUGUI txt, Func<bool> getter)> _toggleRefs    = new();
-    private static readonly List<(Image img, Color col)>                               _staticImgRefs = new();
-
     // Dark enough for white labels to read on them.
-    private static readonly Color ColTabActive   = new(0.16f, 0.45f, 0.70f, 1f); // blue
-    private static readonly Color ColTabInactive = new(0.24f, 0.24f, 0.40f, 1f); // slate
-    private static readonly Color ColBtnOn       = new(0.18f, 0.52f, 0.24f, 1f); // green
-    private static readonly Color ColBtnOff      = new(0.30f, 0.30f, 0.34f, 1f); // grey
-    private static readonly Color ColNavBtn      = new(0.26f, 0.32f, 0.55f, 1f); // indigo
-    private static readonly Color ColClose       = new(0.70f, 0.22f, 0.20f, 1f); // red
+    private static readonly Color ColTabActive   = new(0.16f, 0.45f, 0.70f, 1f);
+    private static readonly Color ColTabInactive = new(0.24f, 0.24f, 0.40f, 1f);
+    private static readonly Color ColBtnOn       = new(0.18f, 0.52f, 0.24f, 1f);
+    private static readonly Color ColBtnOff      = new(0.30f, 0.30f, 0.34f, 1f);
+    private static readonly Color ColNavBtn      = new(0.26f, 0.32f, 0.55f, 1f);
+    private static readonly Color ColClose       = new(0.70f, 0.22f, 0.20f, 1f);
+    private static readonly Color ColApply       = new(0.18f, 0.52f, 0.24f, 1f);
+    private static readonly Color ColDisabled    = new(0.22f, 0.22f, 0.25f, 1f);
+    private static readonly Color ColPendingText = new(1.00f, 0.85f, 0.30f, 1f);
+    private static readonly Color ColHeaderText  = new(0.60f, 0.90f, 1.00f, 1f);
 
     // The values the VR tab's ◀/▶ rows step through. A value set in the config file between them
     // shows as the nearest one.
@@ -77,9 +57,46 @@ public static class VRSettingsPanel
     private static readonly float[] HudSizeOptions     = { 0.6f, 0.75f, 0.9f, 1f, 1.1f, 1.25f, 1.5f };
     private static readonly float[] HudHeightOptions   = { -0.3f, -0.2f, -0.15f, -0.1f, 0f, 0.1f, 0.2f, 0.3f };
 
-    // GO instance-ID → action map — avoids IL2CPP AddListener 3× fire bug.
-    // Populated in Init(); cleared at Init() start.  TryClickCanvas calls HandleClick().
+    public static GameObject?    RootGO { get; private set; }
+    /// <summary>The panel itself, centred on its screen-sized canvas.</summary>
+    public static RectTransform? Window { get; private set; }
+
+    private sealed class Row
+    {
+        public Action Refresh = () => { };
+        public Action ResetToDefault = () => { };
+    }
+
+    private sealed class Tab
+    {
+        public readonly string Name;
+        public readonly Image Button;
+        public readonly GameObject Pane;
+        public readonly RectTransform Content;
+        public readonly List<Row> Rows = new();
+        public float NextY = TOP_PAD;
+
+        public Tab(string name, Image button, GameObject pane, RectTransform content)
+        {
+            Name = name; Button = button; Pane = pane; Content = content;
+        }
+    }
+
+    private static readonly List<Tab> _tabs = new();
+    private static int _activeTab;
+
+    // Button GameObject instance ID → action. Clicks arrive through VRSettingsRTPanel.
     private static readonly Dictionary<int, Action> _clickMap = new();
+
+    private static readonly Dictionary<string, int> _pendingGame = new();
+    private static readonly Dictionary<ConfigEntryBase, object> _pendingConfig = new();
+    private static bool HasPending => _pendingGame.Count + _pendingConfig.Count > 0;
+
+    private static Image? _applyImg;
+    private static TextMeshProUGUI? _applyTxt;
+    private static GameObject? _confirm;
+    private static TextMeshProUGUI? _confirmTxt;
+    private static Action? _afterConfirm;
 
     /// <summary>Runs the action of the button clicked, or of the button a clicked label sits in.</summary>
     public static bool HandleClick(GameObject go)
@@ -96,16 +113,14 @@ public static class VRSettingsPanel
 
     // ── Init ──────────────────────────────────────────────────────────────────
 
-    public const string CanvasName = "VRSettingsPanelInternal";
-
     public static GameObject? Init()
     {
-        _toggleRefs.Clear();
-        _staticImgRefs.Clear();
         _clickMap.Clear();
+        _tabs.Clear();
+        _pendingGame.Clear();
+        _pendingConfig.Clear();
         try
         {
-            // ── Canvas ────────────────────────────────────────────────────────
             var root = new GameObject(CanvasName);
             root.layer = UILayer;
             UnityEngine.Object.DontDestroyOnLoad(root);
@@ -118,457 +133,39 @@ public static class VRSettingsPanel
             scaler.referenceResolution = WindowSize;
             scaler.matchWidthOrHeight  = 1f;
 
-            var windowGO = MakeGO("Window", root.transform);
-            var window   = windowGO.AddComponent<RectTransform>();
+            var window = MakeRect("Window", root.transform);
             window.anchorMin = window.anchorMax = new Vector2(0.5f, 0.5f);
             window.sizeDelta = WindowSize;
             Window = window;
 
-            // ── Background ────────────────────────────────────────────────────
-            var bgGO   = MakeGO("Background", window);
-            var bgRT   = bgGO.AddComponent<RectTransform>();
-            bgRT.anchorMin = Vector2.zero; bgRT.anchorMax = Vector2.one; bgRT.sizeDelta = Vector2.zero;
-            var bgImg  = bgGO.AddComponent<Image>();
+            var bg = MakeRect("Background", window);
+            Stretch(bg);
+            var bgImg = bg.gameObject.AddComponent<Image>();
             bgImg.color = new Color(0.08f, 0.08f, 0.14f, 0.88f); bgImg.raycastTarget = false;
 
-            // ── Title ─────────────────────────────────────────────────────────
-            var titleGO   = MakeGO("Title", window);
-            var titleRT   = titleGO.AddComponent<RectTransform>();
-            titleRT.anchorMin = new Vector2(0f, 1f); titleRT.anchorMax = new Vector2(1f, 1f);
-            titleRT.pivot = new Vector2(0.5f, 1f); titleRT.sizeDelta = new Vector2(0f, 70f);
-            var titleTxt  = titleGO.AddComponent<TextMeshProUGUI>();
-            titleTxt.text = "VR Settings"; titleTxt.fontSize = 44; titleTxt.color = Color.white;
-            titleTxt.alignment = TextAlignmentOptions.Center; titleTxt.raycastTarget = false;
+            var title = MakeRect("Title", window);
+            title.anchorMin = new Vector2(0f, 1f); title.anchorMax = new Vector2(1f, 1f);
+            title.pivot = new Vector2(0.5f, 1f); title.sizeDelta = new Vector2(0f, TITLE_H);
+            AddText(title, "VR Settings", 44);
 
-            // ── Close button ──────────────────────────────────────────────────
-            var closeBtnGO  = MakeGO("CloseButton", window);
-            var closeBtnImg = closeBtnGO.AddComponent<Image>();
-            var closeBtnRT  = closeBtnGO.GetComponent<RectTransform>();
-            closeBtnRT.anchorMin = new Vector2(1f, 1f); closeBtnRT.anchorMax = new Vector2(1f, 1f);
-            closeBtnRT.pivot = new Vector2(1f, 1f); closeBtnRT.sizeDelta = new Vector2(80f, 56f);
-            closeBtnRT.anchoredPosition = new Vector2(-8f, -8f);
-            closeBtnImg.color = ColClose;
-            _staticImgRefs.Add((closeBtnImg, ColClose));
-            closeBtnGO.AddComponent<Button>();
-            _clickMap[closeBtnGO.GetInstanceID()] = Hide;
-            var closeLblGO   = MakeGO("CloseLabel", closeBtnGO.transform);
-            var closeLblRT   = closeLblGO.AddComponent<RectTransform>();
-            closeLblRT.anchorMin = Vector2.zero; closeLblRT.anchorMax = Vector2.one; closeLblRT.sizeDelta = Vector2.zero;
-            var closeLbl = closeLblGO.AddComponent<TextMeshProUGUI>();
-            closeLbl.text = "X"; closeLbl.fontSize = 32; closeLbl.color = Color.white;
-            closeLbl.alignment = TextAlignmentOptions.Center; closeLbl.raycastTarget = false;
+            var close = AddButton("CloseButton", window, ColClose, "X", 32, RequestClose);
+            close.anchorMin = close.anchorMax = close.pivot = new Vector2(1f, 1f);
+            close.sizeDelta = new Vector2(80f, 56f);
+            close.anchoredPosition = new Vector2(-8f, -8f);
 
-            // ── Tab row ───────────────────────────────────────────────────────
-            var tabRowGO   = MakeGO("TabRow", window);
-            var tabRowRT   = tabRowGO.AddComponent<RectTransform>();
-            tabRowRT.anchorMin = new Vector2(0f, 1f); tabRowRT.anchorMax = new Vector2(1f, 1f);
-            tabRowRT.pivot = new Vector2(0.5f, 1f); tabRowRT.sizeDelta = new Vector2(0f, 56f);
-            tabRowRT.anchoredPosition = new Vector2(0f, -70f);
+            BuildTabs(window);
+            BuildBottomBar(window);
+            BuildGraphicsTab(_tabs[0]);
+            BuildAudioTab(_tabs[1]);
+            BuildControlsTab(_tabs[2]);
+            BuildGeneralTab(_tabs[3]);
+            BuildVRTab(_tabs[4]);
+            foreach (var tab in _tabs) tab.Content.sizeDelta = new Vector2(0f, tab.NextY + TOP_PAD);
+            BuildConfirm(window);
 
-            // 5 tabs × 105px wide, ~11px gap → positions -232 / -116 / 0 / +116 / +232
-            MakeTabButton("GraphicsTab",  "Graphics",  tabRowGO.transform, new Vector2(-232f, 0f), true,
-                          out _graphicsTabImg,  out var graphicsBtn, 105f);
-            MakeTabButton("AudioTab",     "Audio",     tabRowGO.transform, new Vector2(-116f, 0f), false,
-                          out _audioTabImg,     out var audioBtn, 105f);
-            MakeTabButton("ControlsTab",  "Controls",  tabRowGO.transform, new Vector2(   0f, 0f), false,
-                          out _controlsTabImg,  out var controlsBtn, 105f);
-            MakeTabButton("GeneralTab",   "General",   tabRowGO.transform, new Vector2( 116f, 0f), false,
-                          out _generalTabImg,   out var generalBtn, 105f);
-            MakeTabButton("VRTab",        "VR",        tabRowGO.transform, new Vector2( 232f, 0f), false,
-                          out _vrTabImg,        out var vrBtn, 105f);
-            _clickMap[graphicsBtn.gameObject.GetInstanceID()] = ActivateGraphicsTab;
-            _clickMap[audioBtn.gameObject.GetInstanceID()]    = ActivateAudioTab;
-            _clickMap[controlsBtn.gameObject.GetInstanceID()] = ActivateControlsTab;
-            _clickMap[generalBtn.gameObject.GetInstanceID()]  = ActivateGeneralTab;
-            _clickMap[vrBtn.gameObject.GetInstanceID()]       = ActivateVRTab;
-
-            // ── Scrollable content panes (topOffset = -126 = below 70px title + 56px tabs) ──
-            var (graphicsPaneGO, graphicsContent) = MakeScrollablePane("GraphicsPane", window, -126f);
-            var (audioPaneGO,    audioContent)    = MakeScrollablePane("AudioPane", window, -126f);
-            var (controlsPaneGO, controlsContent) = MakeScrollablePane("ControlsPane", window, -126f);
-            var (generalPaneGO,  generalContent)  = MakeScrollablePane("GeneralPane", window, -126f);
-            var (vrPaneGO,       vrContent)       = MakeScrollablePane("VRPane", window, -126f);
-            _graphicsPaneRT    = graphicsPaneGO.GetComponent<RectTransform>();
-            _audioPaneRT       = audioPaneGO.GetComponent<RectTransform>();
-            _controlsPaneRT    = controlsPaneGO.GetComponent<RectTransform>();
-            _generalPaneRT     = generalPaneGO.GetComponent<RectTransform>();
-            _vrPaneRT          = vrPaneGO.GetComponent<RectTransform>();
-            _graphicsContentRT = graphicsContent;
-            _audioContentRT    = audioContent;
-            _controlsContentRT = controlsContent;
-            _generalContentRT  = generalContent;
-            _vrContentRT       = vrContent;
-            _graphicsGroup  = graphicsPaneGO.AddComponent<CanvasGroup>();
-            _audioGroup     = audioPaneGO.AddComponent<CanvasGroup>();
-            _controlsGroup  = controlsPaneGO.AddComponent<CanvasGroup>();
-            _generalGroup   = generalPaneGO.AddComponent<CanvasGroup>();
-            _vrGroup        = vrPaneGO.AddComponent<CanvasGroup>();
-            // Start with non-Graphics panes hidden — shift off-canvas via localPosition.
-            SetPaneVisible(_audioPaneRT,    _audioGroup,    false);
-            SetPaneVisible(_controlsPaneRT, _controlsGroup, false);
-            SetPaneVisible(_generalPaneRT,  _generalGroup,  false);
-            SetPaneVisible(_vrPaneRT,       _vrGroup,       false);
-
-            // ── Graphics tab rows ─────────────────────────────────────────────
-            float gy = TOP_PAD;
-
-            // Family B — dedicated Game.Instance bool setters
-            AddToggleRow(graphicsContent, ref gy, "VSync",
-                () => ReadBool("vsync"),
-                v => { try { Game.Instance?.SetVsync(v); PlayerPrefs.SetInt("vsync", v ? 1 : 0); PlayerPrefs.Save(); }
-                       catch (Exception ex) { Log.LogWarning($"[VRSettings] vsync: {ex.Message}"); } });
-
-            AddToggleRow(graphicsContent, ref gy, "Depth Blur",
-                () => ReadBool("depthBlur"),
-                v => { try { Game.Instance?.SetDepthBlur(v); PlayerPrefs.SetInt("depthBlur", v ? 1 : 0); PlayerPrefs.Save(); }
-                       catch (Exception ex) { Log.LogWarning($"[VRSettings] depthBlur: {ex.Message}"); } });
-
-            AddToggleRow(graphicsContent, ref gy, "Dithering",
-                () => ReadBool("dithering"),
-                v => { try { Game.Instance?.SetDithering(v); PlayerPrefs.SetInt("dithering", v ? 1 : 0); PlayerPrefs.Save(); }
-                       catch (Exception ex) { Log.LogWarning($"[VRSettings] dithering: {ex.Message}"); } });
-
-            AddToggleRow(graphicsContent, ref gy, "Screen Space Refl.",
-                () => ReadBool("screenSpaceReflection"),
-                v => { try { Game.Instance?.SetScreenSpaceReflection(v); PlayerPrefs.SetInt("screenSpaceReflection", v ? 1 : 0); PlayerPrefs.Save(); }
-                       catch (Exception ex) { Log.LogWarning($"[VRSettings] ssr: {ex.Message}"); } });
-
-            // Family A — gameSettingControls + SessionData guard (in-gameplay only)
-            foreach (var row in new (string lbl, string id)[]
-            {
-                ("Motion Blur",       "motionBlur"),
-                ("Bloom",             "bloom"),
-                ("Colour Grading",    "colourGrading"),
-                ("Film Grain",        "filmGrain"),
-                ("Flickering Lights", "flickeringLights"),
-            })
-            {
-                var capturedId = row.id;
-                AddToggleRow(graphicsContent, ref gy, row.lbl,
-                    () => ReadBool(capturedId),
-                    v => SetFamilyA(capturedId, v));
-            }
-
-            // Family C — enum via Game.Instance
-            AddPrevNextRow(graphicsContent, ref gy, "AA Mode",
-                new[] { "Off", "SMAA", "TAA", "DLSS" },
-                () => ClampIdx(ReadInt("aaMode"), 3),
-                v => { try { Game.Instance?.SetAAMode(v); PlayerPrefs.SetInt("aaMode", v); PlayerPrefs.Save(); }
-                       catch (Exception ex) { Log.LogWarning($"[VRSettings] aaMode: {ex.Message}"); } });
-
-            AddPrevNextRow(graphicsContent, ref gy, "AA Quality",
-                new[] { "Low", "Medium", "High" },
-                () => ClampIdx(ReadInt("aaQuality"), 2),
-                v => { try { Game.Instance?.SetAAQuality(v); PlayerPrefs.SetInt("aaQuality", v); PlayerPrefs.Save(); }
-                       catch (Exception ex) { Log.LogWarning($"[VRSettings] aaQuality: {ex.Message}"); } });
-
-            // Family D — float via Game.Instance
-            var ldVals = new[] { 0.5f, 0.75f, 1.0f, 1.5f, 2.0f };
-            AddPrevNextRow(graphicsContent, ref gy, "Light Distance",
-                new[] { "0.5×", "0.75×", "1.0×", "1.5×", "2.0×" },
-                () => FloatToIdx(ReadFloat("lightDistance", 1f), ldVals),
-                v => { try { Game.Instance?.SetLightDistance(ldVals[v]); PlayerPrefs.SetFloat("lightDistance", ldVals[v]); PlayerPrefs.Save(); }
-                       catch (Exception ex) { Log.LogWarning($"[VRSettings] lightDist: {ex.Message}"); } });
-
-            // Family E — frame cap: toggle + value
-            AddToggleRow(graphicsContent, ref gy, "Frame Cap",
-                () => ReadBool("enableFrameCap"),
-                v => { try { Game.Instance?.SetEnableFrameCap(v); PlayerPrefs.SetInt("enableFrameCap", v ? 1 : 0); PlayerPrefs.Save(); }
-                       catch (Exception ex) { Log.LogWarning($"[VRSettings] enableFrameCap: {ex.Message}"); } });
-
-            var fcVals = new[] { 30, 60, 90, 120, 144, 165, 240, 0 };
-            AddPrevNextRow(graphicsContent, ref gy, "Cap Value",
-                new[] { "30", "60", "90", "120", "144", "165", "240", "Unlimited" },
-                () => IntToIdx(ReadInt("frameCap", 60), fcVals),
-                v => { try { Game.Instance?.SetFrameCap(fcVals[v]); PlayerPrefs.SetInt("frameCap", fcVals[v]); PlayerPrefs.Save(); }
-                       catch (Exception ex) { Log.LogWarning($"[VRSettings] frameCap: {ex.Message}"); } });
-
-            FinalizeContent(graphicsContent, gy);
-
-            // ── Audio tab ─────────────────────────────────────────────────────
-            float ay = TOP_PAD;
-
-            // Volume steps: 0% → 100% in 10% increments
-            var volLabels = new[] { "0%", "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%" };
-            var volVals   = new[] { 0f, 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f };
-
-            // Master volume — FMOD bus:/ controls all audio. AudioListener.volume has no effect on FMOD.
-            AddPrevNextRow(audioContent, ref ay, "Master Volume", volLabels,
-                () => FloatToIdx(ReadFloat("masterVolume", 1f), volVals),
-                v  => {
-                    float vol = volVals[v];
-                    try
-                    {
-                        var bus = FMODUnity.RuntimeManager.GetBus("bus:/");
-                        bus.setVolume(vol);
-                        Log.LogInfo($"[VRSettings] masterVolume bus:/ = {vol:F2} OK");
-                    }
-                    catch (Exception ex) { Log.LogWarning($"[VRSettings] masterVolume bus: {ex.Message}"); }
-                    try { PlayerPrefs.SetFloat("masterVolume", vol); PlayerPrefs.Save(); }
-                    catch (Exception ex) { Log.LogWarning($"[VRSettings] masterVolume prefs: {ex.Message}"); }
-                });
-
-            // Per-channel volumes — AudioController.SetVCALevel for live change + PlayerPrefs to persist.
-            // VCA paths confirmed from Master Bank.strings.bank.
-            // Note: "vca:/Music" does not exist — music is "vca:/Soundtrack".
-            foreach (var row in new (string lbl, string prefsKey, string vca, float def)[]
-            {
-                ("Music Volume",   "musicVolume",        "vca:/Soundtrack",    1f),
-                ("Ambience Vol.",  "ambienceVolume",     "vca:/Ambience",      1f),
-                ("Weather Vol.",   "weatherVolume",      "vca:/Weather",       1f),
-                ("Footsteps Vol.", "footstepsVolume",    "vca:/Footsteps",     1f),
-                ("Notifications",  "notificationsVolume","vca:/Notifications", 1f),
-                ("PA System Vol.", "paVolume",           "vca:/PA System",     1f),
-                ("Other SFX Vol.", "otherVolume",        "vca:/Other SFX",     1f),
-            })
-            {
-                var cKey = row.prefsKey;
-                var cVca = row.vca;
-                var cDef = row.def;
-                AddPrevNextRow(audioContent, ref ay, row.lbl, volLabels,
-                    () => FloatToIdx(ReadFloat(cKey, cDef), volVals),
-                    v => {
-                        float vol = volVals[v];
-                        try
-                        {
-                            var vca = FMODUnity.RuntimeManager.GetVCA(cVca);
-                            vca.setVolume(vol);
-                            Log.LogInfo($"[VRSettings] VCA {cVca} = {vol:F2} OK");
-                        }
-                        catch (Exception ex) { Log.LogWarning($"[VRSettings] VCA {cVca} EX: {ex.Message}"); }
-                        try { PlayerPrefs.SetFloat(cKey, vol); PlayerPrefs.Save(); }
-                        catch (Exception ex) { Log.LogWarning($"[VRSettings] prefs {cKey}: {ex.Message}"); }
-                    });
-            }
-
-            // Music on/off — SetFamilyA routes through PlayerPrefsController.OnToggleChanged
-            // which updates both the in-memory GameSetting.intValue AND PlayerPrefs.
-            AddToggleRow(audioContent, ref ay, "Music",
-                () => ReadBool("music"),
-                v => {
-                    try { SetFamilyA("music", v); }
-                    catch (Exception ex) { Log.LogWarning($"[VRSettings] music toggle: {ex.Message}"); }
-                });
-
-            // Licensed music — Game.SetAllowLicensedMusic(bool) + PlayerPrefs
-            AddToggleRow(audioContent, ref ay, "Licensed Music",
-                () => ReadBool("licensedMusic"),
-                v => {
-                    try { Game.Instance?.SetAllowLicensedMusic(v); }
-                    catch (Exception ex) { Log.LogWarning($"[VRSettings] licensedMusic live: {ex.Message}"); }
-                    try { PlayerPrefs.SetInt("licensedMusic", v ? 1 : 0); PlayerPrefs.Save(); }
-                    catch (Exception ex) { Log.LogWarning($"[VRSettings] licensedMusic prefs: {ex.Message}"); }
-                });
-
-            // Bass reduction — Game.SetBassReduction(int) triggers FMOD snapshot internally
-            AddToggleRow(audioContent, ref ay, "Bass Reduction",
-                () => ReadBool("bassReduction"),
-                v => {
-                    try { Game.Instance?.SetBassReduction(v ? 1 : 0); }
-                    catch (Exception ex) { Log.LogWarning($"[VRSettings] bassReduction live: {ex.Message}"); }
-                    try { PlayerPrefs.SetInt("bassReduction", v ? 1 : 0); PlayerPrefs.Save(); }
-                    catch (Exception ex) { Log.LogWarning($"[VRSettings] bassReduction prefs: {ex.Message}"); }
-                });
-
-            // Hyperacusis — Game.SetHyperacusisFilter(int) triggers FMOD snapshot internally
-            AddToggleRow(audioContent, ref ay, "Hyperacusis",
-                () => ReadBool("hyperacusis"),
-                v => {
-                    try { Game.Instance?.SetHyperacusisFilter(v ? 1 : 0); }
-                    catch (Exception ex) { Log.LogWarning($"[VRSettings] hyperacusis live: {ex.Message}"); }
-                    try { PlayerPrefs.SetInt("hyperacusis", v ? 1 : 0); PlayerPrefs.Save(); }
-                    catch (Exception ex) { Log.LogWarning($"[VRSettings] hyperacusis prefs: {ex.Message}"); }
-                });
-
-            FinalizeContent(audioContent, ay);
-
-            // ── Controls tab ──────────────────────────────────────────────────
-            float cy = TOP_PAD;
-
-            // Bool controls — use SetFamilyA (OnToggleChanged via gameSettingControls list).
-            // Falls back to raw PlayerPrefs when PlayerPrefsController is unavailable.
-            AddToggleRow(controlsContent, ref cy, "Always Run",
-                () => ReadBool("alwaysRun"),     v => SetFamilyA("alwaysRun", v));
-            AddToggleRow(controlsContent, ref cy, "Toggle Run",
-                () => ReadBool("toggleRun"),     v => SetFamilyA("toggleRun", v));
-            AddToggleRow(controlsContent, ref cy, "Auto-Switch Ctrls",
-                () => ReadBool("controlAutoSwitch"), v => SetFamilyA("controlAutoSwitch", v));
-            AddToggleRow(controlsContent, ref cy, "Control Hints",
-                () => ReadBool("controlHints"),  v => SetFamilyA("controlHints", v));
-            AddToggleRow(controlsContent, ref cy, "Invert X",
-                () => ReadBool("invertX"),       v => SetFamilyA("invertX", v));
-            AddToggleRow(controlsContent, ref cy, "Invert Y",
-                () => ReadBool("invertY"),       v => SetFamilyA("invertY", v));
-            AddToggleRow(controlsContent, ref cy, "Force Feedback",
-                () => ReadBool("forceFeedback"), v => SetFamilyA("forceFeedback", v));
-
-            // Sensitivity — float, no dedicated setter; PlayerPrefs only (takes effect on reload).
-            var sensVals   = new[] { 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 1.75f, 2.0f, 2.5f, 3.0f };
-            var sensLabels = new[] { "0.5×", "0.75×", "1.0×", "1.25×", "1.5×", "1.75×", "2.0×", "2.5×", "3.0×" };
-            foreach (var row in new (string lbl, string key)[]
-            {
-                ("Mouse Sens. X",    "mouseSensitivityX"),
-                ("Mouse Sens. Y",    "mouseSensitivityY"),
-                ("Ctlr Sens. X",     "controllerSensitivityX"),
-                ("Ctlr Sens. Y",     "controllerSensitivityY"),
-            })
-            {
-                var cKey = row.key;
-                AddPrevNextRow(controlsContent, ref cy, row.lbl, sensLabels,
-                    () => FloatToIdx(ReadFloat(cKey, 1f), sensVals),
-                    v => SetPrefsFloat(cKey, sensVals[v]));
-            }
-
-            // Smoothing — stored as int 0–3; no dedicated setter, PlayerPrefs only.
-            var smoothLabels = new[] { "Off", "Low", "Medium", "High" };
-            AddPrevNextRow(controlsContent, ref cy, "Mouse Smoothing", smoothLabels,
-                () => ClampIdx(ReadInt("mouseSmoothing"), 3),
-                v => SetPrefsInt("mouseSmoothing", v));
-            AddPrevNextRow(controlsContent, ref cy, "Ctlr Smoothing", smoothLabels,
-                () => ClampIdx(ReadInt("controllerSmoothing"), 3),
-                v => SetPrefsInt("controllerSmoothing", v));
-
-            // Virtual cursor sensitivity (in-game mouse UI)
-            var vcVals = new[] { 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 2.5f };
-            AddPrevNextRow(controlsContent, ref cy, "Virtual Cursor",
-                new[] { "0.5×", "0.75×", "1.0×", "1.25×", "1.5×", "2.0×", "2.5×" },
-                () => FloatToIdx(ReadFloat("virtualCursorSensitivity", 1f), vcVals),
-                v => SetPrefsFloat("virtualCursorSensitivity", vcVals[v]));
-
-            FinalizeContent(controlsContent, cy);
-
-            // ── General tab ───────────────────────────────────────────────────
-            float gy2 = TOP_PAD;
-
-            // Family C — FOV (Game.Instance.SetFOV)
-            var fovVals = new[] { 50, 60, 70, 80, 90, 100, 110, 120 };
-            AddPrevNextRow(generalContent, ref gy2, "FOV",
-                new[] { "50", "60", "70", "80", "90", "100", "110", "120" },
-                () => IntToIdx(ReadInt("fpsfov", 90), fovVals),
-                v => { try { Game.Instance?.SetFOV(fovVals[v]); PlayerPrefs.SetInt("fpsfov", fovVals[v]); PlayerPrefs.Save(); }
-                       catch (Exception ex) { Log.LogWarning($"[VRSettings] fpsfov: {ex.Message}"); } });
-
-            // Family A — Head Bob
-            AddToggleRow(generalContent, ref gy2, "Head Bob",
-                () => ReadBool("headBob"),
-                v => SetFamilyA("headBob", v));
-
-            // Family A — Rain Detail
-            AddToggleRow(generalContent, ref gy2, "Rain Detail",
-                () => ReadBool("rainDetail"),
-                v => SetFamilyA("rainDetail", v));
-
-            // Family A — Dynamic Resolution
-            AddToggleRow(generalContent, ref gy2, "Dynamic Res.",
-                () => ReadBool("dynamicResolution"),
-                v => {
-                    try {
-                        var drc = DynamicResolutionController.Instance;
-                        if (drc != null) drc.SetDynamicResolutionEnabled(v);
-                        SetFamilyA("dynamicResolution", v);
-                    }
-                    catch (Exception ex) { Log.LogWarning($"[VRSettings] dynamicResolution: {ex.Message}"); }
-                });
-
-            // Family A — UI Scale (0=Small, 1=Normal, 2=Large)
-            AddPrevNextRow(generalContent, ref gy2, "UI Scale",
-                new[] { "Small", "Normal", "Large" },
-                () => ReadInt("uiScale", 1),
-                v => { try { PlayerPrefs.SetInt("uiScale", v); PlayerPrefs.Save(); SetFamilyA("uiScale", v > 0); }
-                       catch (Exception ex) { Log.LogWarning($"[VRSettings] uiScale: {ex.Message}"); } });
-
-            // Family A — Text Speed (0=Slow, 1=Normal, 2=Fast)
-            AddPrevNextRow(generalContent, ref gy2, "Text Speed",
-                new[] { "Slow", "Normal", "Fast" },
-                () => ReadInt("textspeed", 1),
-                v => { try { PlayerPrefs.SetInt("textspeed", v); PlayerPrefs.Save(); SetFamilyA("textspeed", v > 0); }
-                       catch (Exception ex) { Log.LogWarning($"[VRSettings] textspeed: {ex.Message}"); } });
-
-            // Family A — Word-by-word Text
-            AddToggleRow(generalContent, ref gy2, "Word-by-word",
-                () => ReadBool("wordByWordText"),
-                v => SetFamilyA("wordByWordText", v));
-
-            // Family D — Draw Distance (Game.Instance.SetDrawDistance)
-            var ddVals  = new[] { 0.5f, 0.75f, 1.0f, 1.5f, 2.0f };
-            AddPrevNextRow(generalContent, ref gy2, "Draw Distance",
-                new[] { "50%", "75%", "100%", "150%", "200%" },
-                () => FloatToIdx(ReadFloat("drawDist", 1f), ddVals),
-                v => { try { Game.Instance?.SetDrawDistance(ddVals[v]); PlayerPrefs.SetFloat("drawDist", ddVals[v]); PlayerPrefs.Save(); }
-                       catch (Exception ex) { Log.LogWarning($"[VRSettings] drawDist: {ex.Message}"); } });
-
-            // Game difficulty — stored as string "Easy"/"Normal"/"Hard"/"Extreme"
-            var diffLabels = new[] { "Easy", "Normal", "Hard", "Extreme" };
-            AddPrevNextRow(generalContent, ref gy2, "Difficulty", diffLabels,
-                () => StrToIdx(PlayerPrefs.GetString("gameDifficulty", "Normal"), diffLabels),
-                v => {
-                    try { Game.Instance?.SetGameDifficulty(v); }
-                    catch (Exception ex) { Log.LogWarning($"[VRSettings] difficulty live: {ex.Message}"); }
-                    try { PlayerPrefs.SetString("gameDifficulty", diffLabels[v]); PlayerPrefs.Save(); }
-                    catch (Exception ex) { Log.LogWarning($"[VRSettings] difficulty prefs: {ex.Message}"); }
-                });
-
-            // Game length — stored as string; SetGameLength(int,bool,bool,bool) is a game-start
-            // function, not a settings setter — write PlayerPrefs only, applies on next new game.
-            var lenLabels = new[] { "Very Short", "Short", "Normal", "Long", "Very Long" };
-            AddPrevNextRow(generalContent, ref gy2, "Game Length", lenLabels,
-                () => StrToIdx(PlayerPrefs.GetString("gameLength", "Normal"), lenLabels),
-                v => SetPrefsStr("gameLength", lenLabels[v]));
-
-            FinalizeContent(generalContent, gy2);
-
-            // ── VR tab ───────────────────────────────────────────────────────
-            float vy = TOP_PAD;
-
-            // ── Turning section header ────────────────────────────────────────
-            AddSectionHeader(vrContent, ref vy, "─── TURNING ───");
-
-            AddToggleRow(vrContent, ref vy, "Smooth Turn",
-                () => VRSettings.SmoothTurn, v => VRSettings.SmoothTurn = v);
-            AddFloatRow(vrContent, ref vy, "Snap Angle", SnapAngleOptions, v => $"{v}°",
-                () => VRSettings.SnapTurnAngle, v => VRSettings.SnapTurnAngle = v);
-            AddFloatRow(vrContent, ref vy, "Smooth Speed", SmoothSpeedOptions, v => $"{v}°/s",
-                () => VRSettings.SmoothTurnSpeed, v => VRSettings.SmoothTurnSpeed = v);
-
-            // ── Movement section header ───────────────────────────────────────
-            AddSectionHeader(vrContent, ref vy, "─── MOVEMENT ───");
-
-            AddFloatRow(vrContent, ref vy, "Move Speed", MoveSpeedOptions, v => $"{v} m/s",
-                () => VRSettings.MoveSpeed, v => VRSettings.MoveSpeed = v);
-            AddFloatRow(vrContent, ref vy, "Sprint Multi", SprintOptions, v => $"{v}×",
-                () => VRSettings.SprintMultiplier, v => VRSettings.SprintMultiplier = v);
-
-            // ── Controls section header ───────────────────────────────────────
-            AddSectionHeader(vrContent, ref vy, "─── CONTROLS ───");
-
-            AddToggleRow(vrContent, ref vy, "Left Laser",
-                () => VRSettings.LeftLaser, v => VRSettings.LeftLaser = v);
-            AddToggleRow(vrContent, ref vy, "Item Hand: Right",
-                () => VRSettings.ItemHandRight, v => VRSettings.ItemHandRight = v);
-
-            // ── Windows section header ────────────────────────────────────────
-            AddSectionHeader(vrContent, ref vy, "─── WINDOWS ───");
-
-            AddFloatRow(vrContent, ref vy, "Menu Distance", DistanceOptions, v => $"{v:F1} m",
-                () => VRSettings.MenuDistance, v => VRSettings.MenuDistance = v);
-
-            // ── HUD section header ────────────────────────────────────────────
-            AddSectionHeader(vrContent, ref vy, "─── HUD ───");
-
-            AddFloatRow(vrContent, ref vy, "HUD Distance", DistanceOptions, v => $"{v:F1} m",
-                () => VRSettings.HudDistance, v => VRSettings.HudDistance = v);
-            AddFloatRow(vrContent, ref vy, "HUD Size", HudSizeOptions, v => $"{v:0.##}×",
-                () => VRSettings.HudSize, v => VRSettings.HudSize = v);
-            AddFloatRow(vrContent, ref vy, "HUD Height", HudHeightOptions, v => $"{v:+0.00;-0.00;0} m",
-                () => VRSettings.HudVerticalOffset, v => VRSettings.HudVerticalOffset = v);
-
-            FinalizeContent(vrContent, vy);
-
-            // Start with Graphics tab active
-            SetTabVisual(0);
-
+            ActivateTab(0);
             RootGO = root;
-            root.SetActive(false);  // hidden by default — F10 to open
+            root.SetActive(false);
             Log.LogInfo("[VRSettingsPanel] Init complete.");
             return root;
         }
@@ -579,61 +176,379 @@ public static class VRSettingsPanel
         }
     }
 
+    private static void BuildTabs(RectTransform window)
+    {
+        var row = MakeRect("TabRow", window);
+        row.anchorMin = new Vector2(0f, 1f); row.anchorMax = new Vector2(1f, 1f);
+        row.pivot = new Vector2(0.5f, 1f); row.sizeDelta = new Vector2(0f, TABS_H);
+        row.anchoredPosition = new Vector2(0f, -TITLE_H);
+
+        string[] names = { "Graphics", "Audio", "Controls", "General", "VR" };
+        for (int i = 0; i < names.Length; i++)
+        {
+            int index = i;
+            var button = AddButton(names[i] + "Tab", row, ColTabInactive, names[i], 26, () => RequestTab(index));
+            button.anchorMin = button.anchorMax = new Vector2(0.5f, 0.5f);
+            button.sizeDelta = new Vector2(105f, 50f);
+            button.anchoredPosition = new Vector2((i - 2) * 116f, 0f);
+
+            var (pane, content) = MakeScrollablePane(names[i] + "Pane", window);
+            _tabs.Add(new Tab(names[i], button.GetComponent<Image>(), pane, content));
+        }
+    }
+
+    private static void BuildBottomBar(RectTransform window)
+    {
+        var reset = AddButton("ResetButton", window, ColNavBtn, "Reset Defaults", 26, ResetActiveTab);
+        reset.anchorMin = reset.anchorMax = reset.pivot = new Vector2(0.5f, 0f);
+        reset.sizeDelta = new Vector2(240f, 56f);
+        reset.anchoredPosition = new Vector2(-140f, 14f);
+
+        var apply = AddButton("ApplyButton", window, ColApply, "Apply", 26, ApplyPending);
+        apply.anchorMin = apply.anchorMax = apply.pivot = new Vector2(0.5f, 0f);
+        apply.sizeDelta = new Vector2(240f, 56f);
+        apply.anchoredPosition = new Vector2(140f, 14f);
+        _applyImg = apply.GetComponent<Image>();
+        _applyTxt = apply.GetComponentInChildren<TextMeshProUGUI>();
+    }
+
+    private static void BuildConfirm(RectTransform window)
+    {
+        var shade = MakeRect("Confirm", window);
+        Stretch(shade);
+        var shadeImg = shade.gameObject.AddComponent<Image>();
+        shadeImg.color = new Color(0f, 0f, 0f, 0.6f); // catches clicks meant for what's behind it
+
+        var box = MakeRect("Box", shade);
+        box.anchorMin = box.anchorMax = new Vector2(0.5f, 0.5f);
+        box.sizeDelta = new Vector2(620f, 260f);
+        box.gameObject.AddComponent<Image>().color = new Color(0.14f, 0.14f, 0.22f, 1f);
+
+        var text = MakeRect("Text", box);
+        text.anchorMin = new Vector2(0f, 1f); text.anchorMax = new Vector2(1f, 1f);
+        text.pivot = new Vector2(0.5f, 1f); text.sizeDelta = new Vector2(-40f, 150f);
+        text.anchoredPosition = new Vector2(0f, -10f);
+        _confirmTxt = AddText(text, "", 30);
+
+        (string label, Color colour, Action action)[] buttons =
+        {
+            ("Apply",   ColApply,  () => ResolveConfirm(apply: true)),
+            ("Discard", ColClose,  () => ResolveConfirm(apply: false)),
+            ("Cancel",  ColNavBtn, CloseConfirm),
+        };
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            var b = AddButton(buttons[i].label + "Button", box, buttons[i].colour, buttons[i].label, 28, buttons[i].action);
+            b.anchorMin = b.anchorMax = b.pivot = new Vector2(0.5f, 0f);
+            b.sizeDelta = new Vector2(170f, 56f);
+            b.anchoredPosition = new Vector2((i - 1) * 190f, 22f);
+        }
+        _confirm = shade.gameObject;
+        _confirm.SetActive(false);
+    }
+
+    // ── Tab contents ──────────────────────────────────────────────────────────
+
+    private static void BuildGraphicsTab(Tab t)
+    {
+        GameToggle(t, "Depth Blur", "depthBlur");
+        GameToggle(t, "Dithering", "dithering");
+        GameToggle(t, "Screen Space Refl.", "screenSpaceReflection");
+        GameToggle(t, "Motion Blur", "motionBlur");
+        GameToggle(t, "Bloom", "bloom");
+        GameToggle(t, "Colour Grading", "colourGrading");
+        GameToggle(t, "Film Grain", "filmGrain");
+        GameToggle(t, "Flickering Lights", "flickeringLights");
+        GameToggle(t, "Dynamic Res.", "dynamicResolution");
+        GameChoice(t, "AA Mode", "aaMode");
+        GameChoice(t, "AA Quality", "aaQuality");
+        GameChoice(t, "DLSS Mode", "dlssMode");
+        GameSlider(t, "Light Distance", "lightDistance", 10, "%");
+        GameSlider(t, "Draw Distance", "drawDist", 25, "%");
+        GameSlider(t, "Rain Detail", "rainDetail", 1);
+        GameToggle(t, "VSync", "vsync");
+        GameToggle(t, "Frame Cap", "enableFrameCap");
+        GameSlider(t, "Cap Value", "frameCap", 15);
+    }
+
+    private static void BuildAudioTab(Tab t)
+    {
+        GameSlider(t, "Master Volume", "masterVolume", 10, "%");
+        GameSlider(t, "Music Volume", "musicVolume", 10, "%");
+        GameSlider(t, "Ambience Vol.", "ambienceVolume", 10, "%");
+        GameSlider(t, "Weather Vol.", "weatherVolume", 10, "%");
+        GameSlider(t, "Footsteps Vol.", "footstepsVolume", 10, "%");
+        GameSlider(t, "Interface Vol.", "interfaceVolume", 10, "%");
+        GameSlider(t, "Notifications", "notificationsVolume", 10, "%");
+        GameSlider(t, "PA System Vol.", "paVolume", 10, "%");
+        GameSlider(t, "Other SFX Vol.", "otherVolume", 10, "%");
+        GameToggle(t, "Music", "music");
+        GameToggle(t, "Licensed Music", "licensedMusic");
+        GameChoice(t, "Bass Reduction", "bassReduction");
+        GameChoice(t, "Hyperacusis", "hyperacusis");
+    }
+
+    private static void BuildControlsTab(Tab t)
+    {
+        GameToggle(t, "Always Run", "alwaysRun");
+        GameToggle(t, "Toggle Run", "toggleRun");
+        GameToggle(t, "Auto-Switch Ctrls", "controlAutoSwitch");
+        GameToggle(t, "Control Hints", "controlHints");
+        GameToggle(t, "Invert X", "invertX");
+        GameToggle(t, "Invert Y", "invertY");
+        GameSlider(t, "Force Feedback", "forceFeedback", 1);
+        GameSlider(t, "Ctlr Sens. X", "controllerSensitivityX", 2);
+        GameSlider(t, "Ctlr Sens. Y", "controllerSensitivityY", 2);
+        GameSlider(t, "Mouse Sens. X", "mouseSensitivityX", 2);
+        GameSlider(t, "Mouse Sens. Y", "mouseSensitivityY", 2);
+        GameSlider(t, "Mouse Smoothing", "mouseSmoothing", 2);
+        GameSlider(t, "Ctlr Smoothing", "controllerSmoothing", 2);
+        GameSlider(t, "Virtual Cursor", "virtualCursorSensitivity", 2);
+    }
+
+    private static void BuildGeneralTab(Tab t)
+    {
+        GameChoice(t, "Language", "language");
+        GameSlider(t, "FOV", "fpsfov", 5);
+        GameSlider(t, "Head Bob", "headBob", 10, "%");
+        GameSlider(t, "UI Scale", "uiScale", 10, "%");
+        GameSlider(t, "Text Speed", "textspeed", 10, "%");
+        GameToggle(t, "Word-by-word", "wordByWordText");
+        GameToggle(t, "Objective Markers", "objectiveMarkers");
+        GameToggle(t, "Directional Arrow", "directionalArrow");
+        GameToggle(t, "Awareness Indicator", "awarenessIndicator");
+        GameToggle(t, "Popup Tips", "popupTips");
+        GameToggle(t, "Close UI on Resume", "closeInteractionsOnResume");
+        GameChoice(t, "Difficulty", "gameDifficulty");
+        GameChoice(t, "Game Length", "gameLength");
+    }
+
+    private static void BuildVRTab(Tab t)
+    {
+        SectionHeader(t, "─── TURNING ───");
+        ConfigToggle(t, "Smooth Turn", VRSettings.SmoothTurnEntry);
+        ConfigFloat(t, "Snap Angle", VRSettings.SnapTurnAngleEntry, SnapAngleOptions, v => $"{v}°");
+        ConfigFloat(t, "Smooth Speed", VRSettings.SmoothTurnSpeedEntry, SmoothSpeedOptions, v => $"{v}°/s");
+
+        SectionHeader(t, "─── MOVEMENT ───");
+        ConfigFloat(t, "Move Speed", VRSettings.MoveSpeedEntry, MoveSpeedOptions, v => $"{v} m/s");
+        ConfigFloat(t, "Sprint Multi", VRSettings.SprintMultiplierEntry, SprintOptions, v => $"{v}×");
+
+        SectionHeader(t, "─── CONTROLS ───");
+        ConfigToggle(t, "Left Laser", VRSettings.LeftLaserEntry);
+        ConfigToggle(t, "Item Hand: Right", VRSettings.ItemHandRightEntry);
+
+        SectionHeader(t, "─── WINDOWS ───");
+        ConfigFloat(t, "Menu Distance", VRSettings.MenuDistanceEntry, DistanceOptions, v => $"{v:F1} m");
+
+        SectionHeader(t, "─── HUD ───");
+        ConfigFloat(t, "HUD Distance", VRSettings.HudDistanceEntry, DistanceOptions, v => $"{v:F1} m");
+        ConfigFloat(t, "HUD Size", VRSettings.HudSizeEntry, HudSizeOptions, v => $"{v:0.##}×");
+        ConfigFloat(t, "HUD Height", VRSettings.HudVerticalOffsetEntry, HudHeightOptions, v => $"{v:+0.00;-0.00;0} m");
+    }
+
+    // ── Rows ──────────────────────────────────────────────────────────────────
+
+    private static void GameToggle(Tab tab, string label, string id)
+    {
+        var (img, txt) = AddToggleRow(tab, label, () =>
+        {
+            if (GameSettingsBridge.KindOf(id) == GameSettingsBridge.Kind.Missing) return;
+            SetGamePending(id, GameValue(id) != 0 ? 0 : 1);
+        });
+        tab.Rows.Add(new Row
+        {
+            Refresh = () =>
+            {
+                bool available = GameSettingsBridge.KindOf(id) != GameSettingsBridge.Kind.Missing;
+                ShowToggle(img, txt, available ? GameValue(id) != 0 : (bool?)null, _pendingGame.ContainsKey(id));
+            },
+            ResetToDefault = () => { var d = GameSettingsBridge.Default(id); if (d != null) SetGamePending(id, d.Value); },
+        });
+    }
+
+    private static void GameSlider(Tab tab, string label, string id, int step, string suffix = "")
+    {
+        void Step(int direction)
+        {
+            if (GameSettingsBridge.KindOf(id) != GameSettingsBridge.Kind.Slider) return;
+            var (min, max) = GameSettingsBridge.Range(id);
+            SetGamePending(id, Mathf.Clamp(GameValue(id) + direction * step, min, max));
+        }
+        var txt = AddStepRow(tab, label, () => Step(-1), () => Step(1));
+        tab.Rows.Add(new Row
+        {
+            Refresh = () =>
+            {
+                bool available = GameSettingsBridge.KindOf(id) == GameSettingsBridge.Kind.Slider;
+                ShowValue(txt, available ? $"{GameValue(id)}{suffix}" : "—", _pendingGame.ContainsKey(id));
+            },
+            ResetToDefault = () => { var d = GameSettingsBridge.Default(id); if (d != null) SetGamePending(id, d.Value); },
+        });
+    }
+
+    private static void GameChoice(Tab tab, string label, string id)
+    {
+        void Step(int direction)
+        {
+            if (GameSettingsBridge.KindOf(id) != GameSettingsBridge.Kind.Dropdown) return;
+            var (min, max) = GameSettingsBridge.Range(id);
+            SetGamePending(id, Mathf.Clamp(GameValue(id) + direction, min, max));
+        }
+        var txt = AddStepRow(tab, label, () => Step(-1), () => Step(1));
+        tab.Rows.Add(new Row
+        {
+            Refresh = () =>
+            {
+                bool available = GameSettingsBridge.KindOf(id) == GameSettingsBridge.Kind.Dropdown;
+                ShowValue(txt, available ? GameSettingsBridge.OptionLabel(id, GameValue(id)) : "—", _pendingGame.ContainsKey(id));
+            },
+            ResetToDefault = () => { var d = GameSettingsBridge.Default(id); if (d != null) SetGamePending(id, d.Value); },
+        });
+    }
+
+    private static void ConfigToggle(Tab tab, string label, ConfigEntry<bool> entry)
+    {
+        var (img, txt) = AddToggleRow(tab, label, () => SetConfigPending(entry, !ConfigValue(entry)));
+        tab.Rows.Add(new Row
+        {
+            Refresh = () => ShowToggle(img, txt, ConfigValue(entry), _pendingConfig.ContainsKey(entry)),
+            ResetToDefault = () => SetConfigPending(entry, (bool)entry.DefaultValue),
+        });
+    }
+
+    private static void ConfigFloat(Tab tab, string label, ConfigEntry<float> entry, float[] options, Func<float, string> format)
+    {
+        void Step(int direction)
+        {
+            int index = Mathf.Clamp(NearestIndex(ConfigValue(entry), options) + direction, 0, options.Length - 1);
+            SetConfigPending(entry, options[index]);
+        }
+        var txt = AddStepRow(tab, label, () => Step(-1), () => Step(1));
+        tab.Rows.Add(new Row
+        {
+            Refresh = () => ShowValue(txt, format(options[NearestIndex(ConfigValue(entry), options)]), _pendingConfig.ContainsKey(entry)),
+            ResetToDefault = () => SetConfigPending(entry, (float)entry.DefaultValue),
+        });
+    }
+
+    // ── Pending changes ───────────────────────────────────────────────────────
+
+    private static int GameValue(string id) =>
+        _pendingGame.TryGetValue(id, out var v) ? v : GameSettingsBridge.Current(id);
+
+    private static T ConfigValue<T>(ConfigEntry<T> entry) =>
+        _pendingConfig.TryGetValue(entry, out var v) ? (T)v : entry.Value;
+
+    private static void SetGamePending(string id, int value)
+    {
+        if (value == GameSettingsBridge.Current(id)) _pendingGame.Remove(id);
+        else _pendingGame[id] = value;
+        RefreshAll();
+    }
+
+    private static void SetConfigPending<T>(ConfigEntry<T> entry, T value)
+    {
+        if (EqualityComparer<T>.Default.Equals(value, entry.Value)) _pendingConfig.Remove(entry);
+        else _pendingConfig[entry] = value!;
+        RefreshAll();
+    }
+
+    private static void ApplyPending()
+    {
+        if (!HasPending) return;
+        Log.LogInfo($"[VRSettings] Applying {_pendingGame.Count} game and {_pendingConfig.Count} VR change(s) on {_tabs[_activeTab].Name}.");
+        foreach (var (id, value) in _pendingGame.ToList()) GameSettingsBridge.Apply(id, value);
+        foreach (var (entry, value) in _pendingConfig.ToList())
+        {
+            entry.BoxedValue = value;
+            Log.LogInfo($"[VRSettings] {entry.Definition.Section}.{entry.Definition.Key} = {value}");
+        }
+        DiscardPending();
+    }
+
+    private static void DiscardPending()
+    {
+        _pendingGame.Clear();
+        _pendingConfig.Clear();
+        RefreshAll();
+    }
+
+    private static void ResetActiveTab()
+    {
+        foreach (var row in _tabs[_activeTab].Rows) row.ResetToDefault();
+        Log.LogInfo($"[VRSettings] {_tabs[_activeTab].Name} reset to defaults (pending until Apply).");
+    }
+
+    private static void RefreshAll()
+    {
+        foreach (var tab in _tabs)
+            foreach (var row in tab.Rows)
+            {
+                try { row.Refresh(); } catch (Exception ex) { Log.LogWarning($"[VRSettings] Refresh: {ex.Message}"); }
+            }
+        int count = _pendingGame.Count + _pendingConfig.Count;
+        if (_applyTxt != null) _applyTxt.text = count > 0 ? $"Apply ({count})" : "Apply";
+        if (_applyImg != null) _applyImg.color = count > 0 ? ColApply : ColDisabled;
+    }
+
+    // ── Confirmation ──────────────────────────────────────────────────────────
+
+    private static void RequestTab(int index)
+    {
+        if (index == _activeTab) return;
+        if (HasPending) AskFirst(() => ActivateTab(index));
+        else ActivateTab(index);
+    }
+
+    private static void RequestClose()
+    {
+        if (HasPending) AskFirst(Hide);
+        else Hide();
+    }
+
+    private static void AskFirst(Action then)
+    {
+        if (_confirm == null) { then(); return; }
+        _afterConfirm = then;
+        int count = _pendingGame.Count + _pendingConfig.Count;
+        if (_confirmTxt != null) _confirmTxt.text = $"Apply {count} change{(count == 1 ? "" : "s")} to {_tabs[_activeTab].Name}?";
+        _confirm.SetActive(true);
+    }
+
+    private static void ResolveConfirm(bool apply)
+    {
+        if (apply) ApplyPending(); else DiscardPending();
+        var then = _afterConfirm;
+        CloseConfirm();
+        then?.Invoke();
+    }
+
+    private static void CloseConfirm()
+    {
+        _afterConfirm = null;
+        if (_confirm != null) _confirm.SetActive(false);
+    }
+
     // ── Visibility ────────────────────────────────────────────────────────────
 
     public static void Show()
     {
         if (RootGO == null) return;
         RootGO.SetActive(true);
-        // Re-apply toggle states and static colors in case they changed while hidden.
-        RefreshColors();
-        // Re-enforce tab pane visibility — always open on Graphics tab.
-        _activeTab = 0;
-        SetPaneVisible(_graphicsPaneRT,  _graphicsGroup,  true);
-        SetPaneVisible(_audioPaneRT,     _audioGroup,     false);
-        SetPaneVisible(_controlsPaneRT,  _controlsGroup,  false);
-        SetPaneVisible(_generalPaneRT,   _generalGroup,   false);
+        _pendingGame.Clear();
+        _pendingConfig.Clear();
+        CloseConfirm();
+        ActivateTab(_activeTab);
         Log.LogInfo("[VRSettingsPanel] Shown.");
-        LogGameSettingsOnce();
-    }
-
-    // Temporary: every setting the game's own options menu defines, to compare with the tabs here.
-    private static bool s_loggedGameSettings;
-
-    private static void LogGameSettingsOnce()
-    {
-        if (s_loggedGameSettings) return;
-        try
-        {
-            var controls = PlayerPrefsController.Instance?.gameSettingControls;
-            if (controls == null) return;
-            s_loggedGameSettings = true;
-            var sb = new System.Text.StringBuilder($"[VRSettingsPanel] Game settings ({controls.Count}):");
-            for (int i = 0; i < controls.Count; i++)
-            {
-                var s = controls[i];
-                if (s == null) continue;
-                sb.Append($"\n  '{s.identifier}' = {s.intValue} (default {s.intDefault})");
-                try
-                {
-                    var slider = s.slider != null ? s.slider.slider : null;
-                    if (slider != null)
-                        sb.Append($" slider [{slider.minValue}..{slider.maxValue}] whole={slider.wholeNumbers} percent={s.slider!.isPercentage}");
-                    else if (s.dropdown != null && s.dropdown.dropdown != null)
-                        sb.Append($" dropdown ({s.dropdown.dropdown.options.Count} options)");
-                    else if (s.toggle != null)
-                        sb.Append(" toggle");
-                }
-                catch (Exception ex) { sb.Append($" (control: {ex.Message})"); }
-            }
-            Log.LogInfo(sb.ToString());
-        }
-        catch (Exception ex) { Log.LogWarning($"[VRSettingsPanel] Game settings log: {ex.Message}"); }
     }
 
     public static void Hide()
     {
         if (RootGO == null) return;
+        _pendingGame.Clear();
+        _pendingConfig.Clear();
+        CloseConfirm();
         RootGO.SetActive(false);
         Log.LogInfo("[VRSettingsPanel] Hidden.");
     }
@@ -641,21 +556,7 @@ public static class VRSettingsPanel
     public static void Toggle()
     {
         if (RootGO == null) return;
-        if (RootGO.activeSelf) Hide(); else Show();
-    }
-
-    private static void RefreshColors()
-    {
-        foreach (var (img, txt, getter) in _toggleRefs)
-        {
-            if (img == null || txt == null) continue;
-            try { SetToggleVisual(img, txt, getter()); } catch { }
-        }
-        foreach (var (img, col) in _staticImgRefs)
-        {
-            if (img != null) img.color = col;
-        }
-        SetTabVisual(0); // always open on Graphics tab
+        if (RootGO.activeSelf) RequestClose(); else Show();
     }
 
     public static void Destroy()
@@ -664,117 +565,30 @@ public static class VRSettingsPanel
         try { UnityEngine.Object.Destroy(RootGO); } catch { }
         RootGO = null;
         Window = null;
-        _graphicsPaneRT  = null;
-        _audioPaneRT     = null;
-        _controlsPaneRT  = null;
-        _generalPaneRT   = null;
-        _vrPaneRT        = null;
-        _graphicsGroup   = null;
-        _audioGroup      = null;
-        _controlsGroup   = null;
-        _generalGroup    = null;
-        _vrGroup         = null;
-        _graphicsContentRT  = null;
-        _audioContentRT     = null;
-        _controlsContentRT  = null;
-        _generalContentRT   = null;
-        _vrContentRT        = null;
+        _tabs.Clear();
+        _clickMap.Clear();
+        _confirm = null;
+        _confirmTxt = null;
+        _applyImg = null;
+        _applyTxt = null;
         _activeTab = 0;
-        _toggleRefs.Clear();
-        _staticImgRefs.Clear();
     }
 
-    // ── Tab switching ─────────────────────────────────────────────────────────
-
-    private static void ActivateGraphicsTab()
+    private static void ActivateTab(int index)
     {
-        _activeTab = 0; SetTabVisual(0);
-        SetPaneVisible(_graphicsPaneRT,  _graphicsGroup,  true);
-        SetPaneVisible(_audioPaneRT,     _audioGroup,     false);
-        SetPaneVisible(_controlsPaneRT,  _controlsGroup,  false);
-        SetPaneVisible(_generalPaneRT,   _generalGroup,   false);
-        SetPaneVisible(_vrPaneRT,        _vrGroup,        false);
-        Log.LogInfo("[VRSettingsPanel] Graphics tab active.");
-    }
-
-    private static void ActivateAudioTab()
-    {
-        _activeTab = 1; SetTabVisual(1);
-        SetPaneVisible(_graphicsPaneRT,  _graphicsGroup,  false);
-        SetPaneVisible(_audioPaneRT,     _audioGroup,     true);
-        SetPaneVisible(_controlsPaneRT,  _controlsGroup,  false);
-        SetPaneVisible(_generalPaneRT,   _generalGroup,   false);
-        SetPaneVisible(_vrPaneRT,        _vrGroup,        false);
-        Log.LogInfo("[VRSettingsPanel] Audio tab active.");
-    }
-
-    private static void ActivateControlsTab()
-    {
-        _activeTab = 2; SetTabVisual(2);
-        SetPaneVisible(_graphicsPaneRT,  _graphicsGroup,  false);
-        SetPaneVisible(_audioPaneRT,     _audioGroup,     false);
-        SetPaneVisible(_controlsPaneRT,  _controlsGroup,  true);
-        SetPaneVisible(_generalPaneRT,   _generalGroup,   false);
-        SetPaneVisible(_vrPaneRT,        _vrGroup,        false);
-        Log.LogInfo("[VRSettingsPanel] Controls tab active.");
-    }
-
-    private static void ActivateGeneralTab()
-    {
-        _activeTab = 3; SetTabVisual(3);
-        SetPaneVisible(_graphicsPaneRT,  _graphicsGroup,  false);
-        SetPaneVisible(_audioPaneRT,     _audioGroup,     false);
-        SetPaneVisible(_controlsPaneRT,  _controlsGroup,  false);
-        SetPaneVisible(_generalPaneRT,   _generalGroup,   true);
-        SetPaneVisible(_vrPaneRT,        _vrGroup,        false);
-        Log.LogInfo("[VRSettingsPanel] General tab active.");
-    }
-
-    private static void ActivateVRTab()
-    {
-        _activeTab = 4; SetTabVisual(4);
-        SetPaneVisible(_graphicsPaneRT,  _graphicsGroup,  false);
-        SetPaneVisible(_audioPaneRT,     _audioGroup,     false);
-        SetPaneVisible(_controlsPaneRT,  _controlsGroup,  false);
-        SetPaneVisible(_generalPaneRT,   _generalGroup,   false);
-        SetPaneVisible(_vrPaneRT,        _vrGroup,        true);
-        Log.LogInfo("[VRSettingsPanel] VR tab active.");
-    }
-
-    // Hides/shows a pane by shifting it off-canvas (localPosition.x = 9999 when hidden).
-    // VRCamera's RescanCanvasAlpha resets CanvasGroup.alpha to 1 every 30 frames on other
-    // canvases, but the isVrPanel bypass means our CanvasGroups are left alone.
-    // Visibility is purely positional — no alpha hacks needed.
-    private static void SetPaneVisible(RectTransform? rt, CanvasGroup? cg, bool visible)
-    {
-        if (rt != null)
+        _activeTab = index;
+        for (int i = 0; i < _tabs.Count; i++)
         {
-            var lp = rt.localPosition;
-            rt.localPosition = new Vector3(visible ? 0f : 9999f, lp.y, lp.z);
+            _tabs[i].Pane.SetActive(i == index);
+            _tabs[i].Button.color = i == index ? ColTabActive : ColTabInactive;
         }
-        if (cg != null) { cg.interactable = visible; cg.blocksRaycasts = visible; }
+        RefreshAll();
     }
 
-    private static void SetTabVisual(int activeTab)
-    {
-        if (_graphicsTabImg  != null) _graphicsTabImg.color  = activeTab == 0 ? ColTabActive : ColTabInactive;
-        if (_audioTabImg     != null) _audioTabImg.color     = activeTab == 1 ? ColTabActive : ColTabInactive;
-        if (_controlsTabImg  != null) _controlsTabImg.color  = activeTab == 2 ? ColTabActive : ColTabInactive;
-        if (_generalTabImg   != null) _generalTabImg.color   = activeTab == 3 ? ColTabActive : ColTabInactive;
-        if (_vrTabImg        != null) _vrTabImg.color        = activeTab == 4 ? ColTabActive : ColTabInactive;
-    }
-
-    /// <summary>
-    /// Scrolls the open tab by <paramref name="units"/>: positive reveals lower rows.
-    /// </summary>
+    /// <summary>Scrolls the open tab by <paramref name="units"/>: positive reveals lower rows.</summary>
     public static void Scroll(float units)
     {
-        var content = _activeTab == 0 ? _graphicsContentRT
-                    : _activeTab == 1 ? _audioContentRT
-                    : _activeTab == 2 ? _controlsContentRT
-                    : _activeTab == 3 ? _generalContentRT
-                    :                   _vrContentRT;
-        if (content != null) ScrollContent(content, units);
+        if (_activeTab < _tabs.Count) ScrollContent(_tabs[_activeTab].Content, units);
     }
 
     private static void ScrollContent(RectTransform content, float units)
@@ -786,426 +600,153 @@ public static class VRSettingsPanel
         content.anchoredPosition = new Vector2(0f, newY);
     }
 
-    // ── Scrollable pane builder ───────────────────────────────────────────────
+    // ── Layout builders ───────────────────────────────────────────────────────
+
     // Scrolled by moving content.anchoredPosition.y (▲/▼ buttons and the stick); the pane's
     // RectMask2D clips what's scrolled out.
-
-    private static (GameObject pane, RectTransform content) MakeScrollablePane(
-        string name, Transform parent, float topOffset)
+    private static (GameObject pane, RectTransform content) MakeScrollablePane(string name, RectTransform window)
     {
-        var paneGO = MakeGO(name, parent);
-        var paneRT = paneGO.AddComponent<RectTransform>();
-        paneRT.anchorMin = new Vector2(0f, 0f);
-        paneRT.anchorMax = new Vector2(1f, 1f);
-        paneRT.offsetMin = new Vector2(10f,  20f);
-        paneRT.offsetMax = new Vector2(-10f, topOffset);
-        paneGO.AddComponent<RectMask2D>();
+        var pane = MakeRect(name, window);
+        pane.anchorMin = Vector2.zero; pane.anchorMax = Vector2.one;
+        pane.offsetMin = new Vector2(10f, BOTTOM_H);
+        pane.offsetMax = new Vector2(-10f, -(TITLE_H + TABS_H));
+        pane.gameObject.AddComponent<RectMask2D>();
 
-        // Content: top-anchored in pane; height set by FinalizeContent after rows added.
-        var contentGO = MakeGO(name + "Content", paneGO.transform);
-        var contentRT = contentGO.AddComponent<RectTransform>();
-        contentRT.anchorMin        = new Vector2(0f, 1f);
-        contentRT.anchorMax        = new Vector2(1f, 1f);
-        contentRT.pivot            = new Vector2(0.5f, 1f);
-        contentRT.anchoredPosition = Vector2.zero;
-        contentRT.sizeDelta        = new Vector2(0f, 100f);
+        var content = MakeRect(name + "Content", pane);
+        content.anchorMin = new Vector2(0f, 1f); content.anchorMax = new Vector2(1f, 1f);
+        content.pivot = new Vector2(0.5f, 1f);
+        content.sizeDelta = new Vector2(0f, 100f);
 
-        // Scroll arrows at LEFT corners of the pane — avoids overlap with ◀/▶ nav buttons
-        // which are anchored to the right edge of every row.
-        AddScrollArrow(name + "Up",   paneGO.transform, up: true,  contentRT);
-        AddScrollArrow(name + "Down", paneGO.transform, up: false, contentRT);
-
-        return (paneGO, contentRT);
-    }
-
-    private static void AddScrollArrow(string name, Transform parent, bool up, RectTransform content)
-    {
-        var go  = MakeGO(name, parent);
-        var img = go.AddComponent<Image>();
-        var rt  = go.GetComponent<RectTransform>();
-        // Anchored to LEFT edge so the arrow never overlaps the right-side ◀/▶ buttons.
-        rt.anchorMin = new Vector2(0f, up ? 1f : 0f);
-        rt.anchorMax = new Vector2(0f, up ? 1f : 0f);
-        rt.pivot     = new Vector2(0f, up ? 1f : 0f);
-        rt.sizeDelta = new Vector2(55f, 55f);
-        rt.anchoredPosition = new Vector2(5f, up ? -5f : 5f);
-        img.color = ColNavBtn;
-        _staticImgRefs.Add((img, ColNavBtn));
-
-        var lblGO = MakeGO("Lbl", go.transform);
-        var lblRT = lblGO.AddComponent<RectTransform>();
-        lblRT.anchorMin = Vector2.zero; lblRT.anchorMax = Vector2.one; lblRT.sizeDelta = Vector2.zero;
-        var lbl = lblGO.AddComponent<TextMeshProUGUI>();
-        lbl.text = up ? "\u25B2" : "\u25BC";   // ▲ / ▼
-        lbl.fontSize = 26; lbl.color = Color.white;
-        lbl.alignment = TextAlignmentOptions.Center; lbl.raycastTarget = false;
-
+        // At the left corners, clear of the ◀/▶ buttons at the right of every row.
         const float scrollStep = ROW_STEP * 2.5f;
-        go.AddComponent<Button>();
-        _clickMap[go.GetInstanceID()] = () => ScrollContent(content, up ? -scrollStep : scrollStep);
-    }
-
-    private static void FinalizeContent(RectTransform content, float usedHeight)
-    {
-        content.sizeDelta     = new Vector2(0f, usedHeight + TOP_PAD);
-        content.anchoredPosition = Vector2.zero;   // reset to top
-    }
-
-    // ── Row builders ──────────────────────────────────────────────────────────
-
-    private static void AddSectionHeader(RectTransform content, ref float yTop, string text)
-    {
-        var hdrGO = MakeGO("Row_Hdr_" + text, content.transform);
-        var hdrRT = hdrGO.GetComponent<RectTransform>() ?? hdrGO.AddComponent<RectTransform>();
-        hdrRT.anchorMin = new Vector2(0f, 1f); hdrRT.anchorMax = new Vector2(1f, 1f);
-        hdrRT.pivot = new Vector2(0.5f, 1f);
-        hdrRT.sizeDelta = new Vector2(0f, ROW_H);
-        hdrRT.anchoredPosition = new Vector2(0f, -yTop);
-        var hdrLbl = hdrGO.AddComponent<TextMeshProUGUI>();
-        hdrLbl.text = text;
-        hdrLbl.fontSize = 28; hdrLbl.color = new Color(0.6f, 0.9f, 1f, 1f);
-        hdrLbl.alignment = TextAlignmentOptions.Midline; hdrLbl.raycastTarget = false;
-        yTop += ROW_STEP;
-    }
-
-    private static void AddToggleRow(
-        RectTransform content, ref float yTop,
-        string label, Func<bool> getter, Action<bool> setter)
-    {
-        var rowGO = MakeGO("Row_" + label, content.transform);
-        var rowRT = rowGO.AddComponent<RectTransform>();
-        rowRT.anchorMin = new Vector2(0f, 1f); rowRT.anchorMax = new Vector2(1f, 1f);
-        rowRT.pivot = new Vector2(0.5f, 1f); rowRT.sizeDelta = new Vector2(0f, ROW_H);
-        rowRT.anchoredPosition = new Vector2(0f, -yTop);
-
-        AddRowLabel(rowGO.transform, label);
-
-        // Toggle button anchored to row's right edge
-        var btnGO  = MakeGO("TogBtn", rowGO.transform);
-        var btnImg = btnGO.AddComponent<Image>();
-        var btnRT  = btnGO.GetComponent<RectTransform>();
-        btnRT.anchorMin = new Vector2(1f, 0.5f); btnRT.anchorMax = new Vector2(1f, 0.5f);
-        btnRT.pivot     = new Vector2(1f, 0.5f);
-        btnRT.sizeDelta = new Vector2(130f, ROW_H - 12f);
-        btnRT.anchoredPosition = new Vector2(-8f, 0f);
-
-        var btnLblGO   = MakeGO("Lbl", btnGO.transform);
-        var btnLblRT   = btnLblGO.AddComponent<RectTransform>();
-        btnLblRT.anchorMin = Vector2.zero; btnLblRT.anchorMax = Vector2.one; btnLblRT.sizeDelta = Vector2.zero;
-        var btnTxt = btnLblGO.AddComponent<TextMeshProUGUI>();
-        btnTxt.fontSize = 28; btnTxt.color = Color.white;
-        btnTxt.alignment = TextAlignmentOptions.Center; btnTxt.raycastTarget = false;
-
-        bool curVal = false;
-        try { curVal = getter(); } catch { }
-        SetToggleVisual(btnImg, btnTxt, curVal);
-        _toggleRefs.Add((btnImg, btnTxt, getter));
-
-        btnGO.AddComponent<Button>();
-        _clickMap[btnGO.GetInstanceID()] = () =>
+        foreach (bool up in new[] { true, false })
         {
-            bool newVal = false;
-            try { newVal = !getter(); } catch { }
-            try { setter(newVal); } catch (Exception ex) { Log.LogWarning($"[VRSettings] toggle '{label}': {ex.Message}"); }
-            SetToggleVisual(btnImg, btnTxt, newVal);
-            Log.LogInfo($"[VRSettings] {label} → {(newVal ? "ON" : "OFF")}");
-        };
-
-        yTop += ROW_STEP;
+            var arrow = AddButton(name + (up ? "Up" : "Down"), pane, ColNavBtn, up ? "▲" : "▼", 26,
+                () => ScrollContent(content, up ? -scrollStep : scrollStep));
+            arrow.anchorMin = arrow.anchorMax = arrow.pivot = new Vector2(0f, up ? 1f : 0f);
+            arrow.sizeDelta = new Vector2(55f, 55f);
+            arrow.anchoredPosition = new Vector2(5f, up ? -5f : 5f);
+        }
+        return (pane.gameObject, content);
     }
 
-    private static void AddPrevNextRow(
-        RectTransform content, ref float yTop,
-        string label, string[] options, Func<int> getter, Action<int> setter)
+    private static RectTransform NewRow(Tab tab, string label)
     {
-        var rowGO = MakeGO("Row_" + label, content.transform);
-        var rowRT = rowGO.AddComponent<RectTransform>();
-        rowRT.anchorMin = new Vector2(0f, 1f); rowRT.anchorMax = new Vector2(1f, 1f);
-        rowRT.pivot = new Vector2(0.5f, 1f); rowRT.sizeDelta = new Vector2(0f, ROW_H);
-        rowRT.anchoredPosition = new Vector2(0f, -yTop);
+        var row = MakeRect("Row_" + label, tab.Content);
+        row.anchorMin = new Vector2(0f, 1f); row.anchorMax = new Vector2(1f, 1f);
+        row.pivot = new Vector2(0.5f, 1f); row.sizeDelta = new Vector2(0f, ROW_H);
+        row.anchoredPosition = new Vector2(0f, -tab.NextY);
+        tab.NextY += ROW_STEP;
 
-        AddRowLabel(rowGO.transform, label);
-
-        // Layout (right-anchored): [◀ 50] [value 120] [▶ 50] with 8px gaps, 8px from right
-        //   ▶ right edge:  -8
-        //   ▶ left edge:   -58    anchoredPos.x = -33
-        //   value right:  -63
-        //   value left:   -183   anchoredPos.x = -123
-        //   ◀ right edge: -188
-        //   ◀ left edge:  -238   anchoredPos.x = -213
-
-        var prevGO  = MakeGO("Prev", rowGO.transform);
-        var prevImg = prevGO.AddComponent<Image>();
-        var prevRT  = prevGO.GetComponent<RectTransform>();
-        prevRT.anchorMin = new Vector2(1f, 0.5f); prevRT.anchorMax = new Vector2(1f, 0.5f);
-        prevRT.pivot = new Vector2(0.5f, 0.5f); prevRT.sizeDelta = new Vector2(50f, ROW_H - 12f);
-        prevRT.anchoredPosition = new Vector2(-213f, 0f);
-        prevImg.color = ColNavBtn;
-        _staticImgRefs.Add((prevImg, ColNavBtn));
-        AddNavBtnLabel(prevGO.transform, "\u25C0");
-
-        var valGO   = MakeGO("Val", rowGO.transform);
-        var valRT   = valGO.AddComponent<RectTransform>();
-        valRT.anchorMin = new Vector2(1f, 0.5f); valRT.anchorMax = new Vector2(1f, 0.5f);
-        valRT.pivot = new Vector2(0.5f, 0.5f); valRT.sizeDelta = new Vector2(120f, ROW_H - 12f);
-        valRT.anchoredPosition = new Vector2(-123f, 0f);
-        var valTxt  = valGO.AddComponent<TextMeshProUGUI>();
-        valTxt.fontSize = 26; valTxt.color = Color.white;
-        valTxt.alignment = TextAlignmentOptions.Center; valTxt.raycastTarget = false;
-
-        var nextGO  = MakeGO("Next", rowGO.transform);
-        var nextImg = nextGO.AddComponent<Image>();
-        var nextRT  = nextGO.GetComponent<RectTransform>();
-        nextRT.anchorMin = new Vector2(1f, 0.5f); nextRT.anchorMax = new Vector2(1f, 0.5f);
-        nextRT.pivot = new Vector2(0.5f, 0.5f); nextRT.sizeDelta = new Vector2(50f, ROW_H - 12f);
-        nextRT.anchoredPosition = new Vector2(-33f, 0f);
-        nextImg.color = ColNavBtn;
-        _staticImgRefs.Add((nextImg, ColNavBtn));
-        AddNavBtnLabel(nextGO.transform, "\u25B6");
-
-        int curIdx = 0;
-        try { curIdx = ClampIdx(getter(), options.Length - 1); } catch { }
-        valTxt.text = options[curIdx];
-
-        prevGO.AddComponent<Button>();
-        _clickMap[prevGO.GetInstanceID()] = () =>
-        {
-            int cur = 0;
-            try { cur = getter(); } catch { }
-            int newIdx = Math.Max(0, cur - 1);
-            try { setter(newIdx); } catch (Exception ex) { Log.LogWarning($"[VRSettings] prev '{label}': {ex.Message}"); }
-            valTxt.text = options[ClampIdx(newIdx, options.Length - 1)];
-            Log.LogInfo($"[VRSettings] {label} → {options[ClampIdx(newIdx, options.Length - 1)]}");
-        };
-
-        nextGO.AddComponent<Button>();
-        _clickMap[nextGO.GetInstanceID()] = () =>
-        {
-            int cur = 0;
-            try { cur = getter(); } catch { }
-            int newIdx = Math.Min(options.Length - 1, cur + 1);
-            try { setter(newIdx); } catch (Exception ex) { Log.LogWarning($"[VRSettings] next '{label}': {ex.Message}"); }
-            valTxt.text = options[ClampIdx(newIdx, options.Length - 1)];
-            Log.LogInfo($"[VRSettings] {label} → {options[ClampIdx(newIdx, options.Length - 1)]}");
-        };
-
-        yTop += ROW_STEP;
+        // Starts 65 px in, clear of the 55 px scroll arrows.
+        var lbl = MakeRect("Lbl", row);
+        lbl.anchorMin = Vector2.zero; lbl.anchorMax = new Vector2(0.55f, 1f);
+        lbl.offsetMin = new Vector2(65f, 0f); lbl.offsetMax = Vector2.zero;
+        AddText(lbl, label, 30).alignment = TextAlignmentOptions.MidlineLeft;
+        return row;
     }
 
-    private static void AddFloatRow(
-        RectTransform content, ref float yTop, string label,
-        float[] options, Func<float, string> format, Func<float> getter, Action<float> setter)
+    private static void SectionHeader(Tab tab, string text)
     {
-        AddPrevNextRow(content, ref yTop, label, options.Select(format).ToArray(),
-            () => FloatToIdx(getter(), options), i => setter(options[i]));
+        var row = MakeRect("Row_Hdr_" + text, tab.Content);
+        row.anchorMin = new Vector2(0f, 1f); row.anchorMax = new Vector2(1f, 1f);
+        row.pivot = new Vector2(0.5f, 1f); row.sizeDelta = new Vector2(0f, ROW_H);
+        row.anchoredPosition = new Vector2(0f, -tab.NextY);
+        tab.NextY += ROW_STEP;
+        AddText(row, text, 28).color = ColHeaderText;
     }
 
-    private static void AddPlaceholderRow(RectTransform content, ref float yTop, string label)
+    private static (Image img, TextMeshProUGUI txt) AddToggleRow(Tab tab, string label, Action onClick)
     {
-        var rowGO = MakeGO("Row_" + label, content.transform);
-        var rowRT = rowGO.AddComponent<RectTransform>();
-        rowRT.anchorMin = new Vector2(0f, 1f); rowRT.anchorMax = new Vector2(1f, 1f);
-        rowRT.pivot = new Vector2(0.5f, 1f); rowRT.sizeDelta = new Vector2(0f, ROW_H);
-        rowRT.anchoredPosition = new Vector2(0f, -yTop);
-
-        AddRowLabel(rowGO.transform, label);
-
-        var valGO  = MakeGO("Val", rowGO.transform);
-        var valRT  = valGO.AddComponent<RectTransform>();
-        valRT.anchorMin = new Vector2(0.55f, 0f); valRT.anchorMax = new Vector2(1f, 1f);
-        valRT.offsetMin = Vector2.zero; valRT.offsetMax = new Vector2(-8f, 0f);
-        var valTxt = valGO.AddComponent<TextMeshProUGUI>();
-        valTxt.text = "[---]"; valTxt.fontSize = 26;
-        valTxt.color = new Color(0.55f, 0.55f, 0.55f, 1f);
-        valTxt.alignment = TextAlignmentOptions.MidlineRight; valTxt.raycastTarget = false;
-
-        yTop += ROW_STEP;
+        var row = NewRow(tab, label);
+        var button = AddButton("TogBtn", row, ColBtnOff, "", 28, onClick);
+        button.anchorMin = button.anchorMax = button.pivot = new Vector2(1f, 0.5f);
+        button.sizeDelta = new Vector2(130f, ROW_H - 12f);
+        button.anchoredPosition = new Vector2(-8f, 0f);
+        return (button.GetComponent<Image>(), button.GetComponentInChildren<TextMeshProUGUI>());
     }
 
-    // ── Shared layout helpers ─────────────────────────────────────────────────
-
-    private static void AddRowLabel(Transform row, string text)
+    // Right-anchored: [◀ 50] [value 160] [▶ 50] with 8 px gaps, 8 px from the right edge.
+    private static TextMeshProUGUI AddStepRow(Tab tab, string label, Action previous, Action next)
     {
-        var lblGO   = MakeGO("Lbl", row);
-        var lblRT   = lblGO.AddComponent<RectTransform>();
-        // Start label at 65px from left — clears the 55px scroll arrow + 5px gap.
-        lblRT.anchorMin = new Vector2(0f, 0f); lblRT.anchorMax = new Vector2(0.55f, 1f);
-        lblRT.offsetMin = new Vector2(65f, 0f); lblRT.offsetMax = Vector2.zero;
-        var lbl = lblGO.AddComponent<TextMeshProUGUI>();
-        lbl.text = text; lbl.fontSize = 30; lbl.color = Color.white;
-        lbl.alignment = TextAlignmentOptions.MidlineLeft; lbl.raycastTarget = false;
+        var row = NewRow(tab, label);
+
+        var prev = AddButton("Prev", row, ColNavBtn, "◀", 22, previous);
+        prev.anchorMin = prev.anchorMax = new Vector2(1f, 0.5f);
+        prev.sizeDelta = new Vector2(50f, ROW_H - 12f);
+        prev.anchoredPosition = new Vector2(-253f, 0f);
+
+        var val = MakeRect("Val", row);
+        val.anchorMin = val.anchorMax = new Vector2(1f, 0.5f);
+        val.sizeDelta = new Vector2(160f, ROW_H - 12f);
+        val.anchoredPosition = new Vector2(-143f, 0f);
+        var txt = AddText(val, "", 26);
+        txt.enableAutoSizing = true; txt.fontSizeMin = 14f; txt.fontSizeMax = 26f;
+
+        var nextBtn = AddButton("Next", row, ColNavBtn, "▶", 22, next);
+        nextBtn.anchorMin = nextBtn.anchorMax = new Vector2(1f, 0.5f);
+        nextBtn.sizeDelta = new Vector2(50f, ROW_H - 12f);
+        nextBtn.anchoredPosition = new Vector2(-33f, 0f);
+        return txt;
     }
 
-    private static void AddNavBtnLabel(Transform parent, string text)
+    private static void ShowToggle(Image img, TextMeshProUGUI txt, bool? on, bool pending)
     {
-        var lblGO   = MakeGO("Lbl", parent);
-        var lblRT   = lblGO.AddComponent<RectTransform>();
-        lblRT.anchorMin = Vector2.zero; lblRT.anchorMax = Vector2.one; lblRT.sizeDelta = Vector2.zero;
-        var lbl = lblGO.AddComponent<TextMeshProUGUI>();
-        lbl.text = text; lbl.fontSize = 22; lbl.color = Color.white;
-        lbl.alignment = TextAlignmentOptions.Center; lbl.raycastTarget = false;
+        img.color = on == null ? ColDisabled : on.Value ? ColBtnOn : ColBtnOff;
+        txt.text = on == null ? "—" : on.Value ? "ON" : "OFF";
+        txt.color = pending ? ColPendingText : Color.white;
     }
 
-    private static void SetToggleVisual(Image img, TextMeshProUGUI txt, bool on)
+    private static void ShowValue(TextMeshProUGUI txt, string value, bool pending)
     {
-        img.color = on ? ColBtnOn : ColBtnOff;
-        txt.text  = on ? "ON" : "OFF";
+        txt.text = value;
+        txt.color = pending ? ColPendingText : Color.white;
     }
 
-    private static void MakeTabButton(
-        string name, string label, Transform parent,
-        Vector2 pos, bool startActive,
-        out Image bgImg, out Button button, float width = 130f)
-    {
-        var go  = MakeGO(name, parent);
-        var img = go.AddComponent<Image>();
-        var rt  = go.GetComponent<RectTransform>();
-        rt.anchorMin = new Vector2(0.5f, 0.5f); rt.anchorMax = new Vector2(0.5f, 0.5f);
-        rt.sizeDelta = new Vector2(width, 50f); rt.anchoredPosition = pos;
-        img.color = startActive ? ColTabActive : ColTabInactive;
-        button = go.AddComponent<Button>();
-        bgImg  = img;
-        var lblGO   = MakeGO(name + "Label", go.transform);
-        var lblRT   = lblGO.AddComponent<RectTransform>();
-        lblRT.anchorMin = Vector2.zero; lblRT.anchorMax = Vector2.one; lblRT.sizeDelta = Vector2.zero;
-        var txt = lblGO.AddComponent<TextMeshProUGUI>();
-        txt.text = label; txt.fontSize = 26; txt.color = Color.white;
-        txt.alignment = TextAlignmentOptions.Center; txt.raycastTarget = false;
-    }
-
-    private static GameObject MakeGO(string name, Transform parent)
+    private static RectTransform AddButton(string name, Transform parent, Color colour, string label, float fontSize, Action onClick)
     {
         var go = new GameObject(name);
         go.layer = UILayer;
         go.transform.SetParent(parent, false);
-        return go;
+        var img = go.AddComponent<Image>();
+        img.color = colour;
+        go.AddComponent<Button>();
+        _clickMap[go.GetInstanceID()] = onClick;
+        var rt = go.GetComponent<RectTransform>();
+
+        var lbl = MakeRect("Lbl", rt);
+        Stretch(lbl);
+        AddText(lbl, label, fontSize);
+        return rt;
     }
 
-    // ── Settings read helpers ─────────────────────────────────────────────────
-
-    private static bool ReadBool(string id)
+    private static TextMeshProUGUI AddText(RectTransform rt, string text, float fontSize)
     {
-        try
-        {
-            var ppc = PlayerPrefsController.Instance;
-            if (ppc != null) return ppc.GetSettingInt(id) != 0;
-        }
-        catch { }
-        return PlayerPrefs.GetInt(id, 0) != 0;
+        var txt = rt.gameObject.AddComponent<TextMeshProUGUI>();
+        txt.text = text; txt.fontSize = fontSize; txt.color = Color.white;
+        txt.alignment = TextAlignmentOptions.Center; txt.raycastTarget = false;
+        return txt;
     }
 
-    private static int ReadInt(string id, int def = 0)
+    private static RectTransform MakeRect(string name, Transform parent)
     {
-        try
-        {
-            var ppc = PlayerPrefsController.Instance;
-            if (ppc != null) return ppc.GetSettingInt(id);
-        }
-        catch { }
-        return PlayerPrefs.GetInt(id, def);
+        var go = new GameObject(name);
+        go.layer = UILayer;
+        go.transform.SetParent(parent, false);
+        return go.AddComponent<RectTransform>();
     }
 
-    private static float ReadFloat(string id, float def = 0f) =>
-        PlayerPrefs.GetFloat(id, def);  // no GetSettingFloat on PlayerPrefsController
-
-    // ── Settings write helpers ────────────────────────────────────────────────
-
-    /// <summary>
-    /// Family A write: uses gameSettingControls list + OnToggleChanged (in-gameplay only).
-    /// Falls back to raw PlayerPrefs when session or controller not available.
-    /// </summary>
-    private static void SetFamilyA(string id, bool newVal)
+    private static void Stretch(RectTransform rt)
     {
-        try
-        {
-            var ppc = PlayerPrefsController.Instance;
-            if (ppc != null)
-            {
-                // Find by indexed loop — avoids Il2Cpp delegate conversion issues with Find(predicate)
-                PlayerPrefsController.GameSetting? gs = null;
-                var controls = ppc.gameSettingControls;
-                if (controls != null)
-                    for (int i = 0; i < controls.Count; i++)
-                    {
-                        var s = controls[i];
-                        if (s != null && s.identifier == id) { gs = s; break; }
-                    }
-
-                if (gs != null)
-                {
-                    gs.intValue = newVal ? 1 : 0;
-                    if (SessionData.Instance != null)
-                        ppc.OnToggleChanged(id, false);
-                    else
-                        PlayerPrefs.SetInt(id, gs.intValue);
-                }
-                else
-                {
-                    PlayerPrefs.SetInt(id, newVal ? 1 : 0);
-                }
-            }
-            else
-            {
-                PlayerPrefs.SetInt(id, newVal ? 1 : 0);
-            }
-            PlayerPrefs.Save();
-            Log.LogInfo($"[VRSettings] FamilyA '{id}' → {newVal}");
-        }
-        catch (Exception ex)
-        {
-            Log.LogWarning($"[VRSettings] FamilyA '{id}': {ex.Message}");
-        }
+        rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
+        rt.offsetMin = rt.offsetMax = Vector2.zero;
     }
 
-    // ── Utility ───────────────────────────────────────────────────────────────
-
-    /// <summary>Write a float to PlayerPrefs only (no live setter available).</summary>
-    private static void SetPrefsFloat(string id, float val)
+    private static int NearestIndex(float value, float[] options)
     {
-        try { PlayerPrefs.SetFloat(id, val); PlayerPrefs.Save(); }
-        catch (Exception ex) { Log.LogWarning($"[VRSettings] prefs float '{id}': {ex.Message}"); }
-    }
-
-    /// <summary>Write an int to PlayerPrefs only (no live setter available).</summary>
-    private static void SetPrefsInt(string id, int val)
-    {
-        try { PlayerPrefs.SetInt(id, val); PlayerPrefs.Save(); }
-        catch (Exception ex) { Log.LogWarning($"[VRSettings] prefs int '{id}': {ex.Message}"); }
-    }
-
-    /// <summary>Write a string to PlayerPrefs only.</summary>
-    private static void SetPrefsStr(string id, string val)
-    {
-        try { PlayerPrefs.SetString(id, val); PlayerPrefs.Save(); }
-        catch (Exception ex) { Log.LogWarning($"[VRSettings] prefs str '{id}': {ex.Message}"); }
-    }
-
-    /// <summary>Find the index of <paramref name="val"/> in <paramref name="arr"/>, case-insensitive; 0 if not found.</summary>
-    private static int StrToIdx(string val, string[] arr)
-    {
-        for (int i = 0; i < arr.Length; i++)
-            if (string.Equals(arr[i], val, StringComparison.OrdinalIgnoreCase)) return i;
-        return 0;
-    }
-
-    private static int ClampIdx(int v, int max) => v < 0 ? 0 : v > max ? max : v;
-
-    private static int FloatToIdx(float val, float[] arr)
-    {
-        int   best = 0;
-        float bestDist = float.MaxValue;
-        for (int i = 0; i < arr.Length; i++)
-        {
-            float d = Math.Abs(arr[i] - val);
-            if (d < bestDist) { bestDist = d; best = i; }
-        }
+        int best = 0;
+        for (int i = 1; i < options.Length; i++)
+            if (Math.Abs(options[i] - value) < Math.Abs(options[best] - value)) best = i;
         return best;
-    }
-
-    private static int IntToIdx(int val, int[] arr)
-    {
-        for (int i = 0; i < arr.Length; i++)
-            if (arr[i] == val) return i;
-        return 0;
     }
 }

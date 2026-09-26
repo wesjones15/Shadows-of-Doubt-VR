@@ -4,7 +4,7 @@ namespace SoDVR.VR;
 
 /// <summary>
 /// The mod's own player settings, kept in the BepInEx config: edited in the file or on the VR tab of
-/// the VR Settings panel, which writes straight back to it. Bound in Plugin.Load, before any VR code
+/// the VR Settings panel, whose Apply writes back to it. Bound in Plugin.Load, before any VR code
 /// reads them.
 /// </summary>
 internal static class VRSettings
@@ -52,15 +52,28 @@ internal static class VRSettings
             "Height of the HUD's centre relative to the eyes, in metres (negative is lower).");
     }
 
-    public static bool SmoothTurn { get => s_smoothTurn!.Value; set => s_smoothTurn!.Value = value; }
-    public static float SnapTurnAngle { get => s_snapTurnAngle!.Value; set => s_snapTurnAngle!.Value = value; }
-    public static float SmoothTurnSpeed { get => s_smoothTurnSpeed!.Value; set => s_smoothTurnSpeed!.Value = value; }
-    public static float MoveSpeed { get => s_moveSpeed!.Value; set => s_moveSpeed!.Value = value; }
-    public static float SprintMultiplier { get => s_sprintMultiplier!.Value; set => s_sprintMultiplier!.Value = value; }
-    public static bool LeftLaser { get => s_leftLaser!.Value; set => s_leftLaser!.Value = value; }
-    public static bool ItemHandRight { get => s_itemHandRight!.Value; set => s_itemHandRight!.Value = value; }
-    public static float MenuDistance { get => s_menuDistance!.Value; set => s_menuDistance!.Value = value; }
-    public static float HudDistance { get => s_hudDistance!.Value; set => s_hudDistance!.Value = value; }
-    public static float HudSize { get => s_hudSize!.Value; set => s_hudSize!.Value = value; }
-    public static float HudVerticalOffset { get => s_hudVerticalOffset!.Value; set => s_hudVerticalOffset!.Value = value; }
+    public static bool SmoothTurn => s_smoothTurn!.Value;
+    public static float SnapTurnAngle => s_snapTurnAngle!.Value;
+    public static float SmoothTurnSpeed => s_smoothTurnSpeed!.Value;
+    public static float MoveSpeed => s_moveSpeed!.Value;
+    public static float SprintMultiplier => s_sprintMultiplier!.Value;
+    public static bool LeftLaser => s_leftLaser!.Value;
+    public static bool ItemHandRight => s_itemHandRight!.Value;
+    public static float MenuDistance => s_menuDistance!.Value;
+    public static float HudDistance => s_hudDistance!.Value;
+    public static float HudSize => s_hudSize!.Value;
+    public static float HudVerticalOffset => s_hudVerticalOffset!.Value;
+
+    // The entries themselves, for the VR tab: it edits pending values and resets to their defaults.
+    public static ConfigEntry<bool> SmoothTurnEntry => s_smoothTurn!;
+    public static ConfigEntry<float> SnapTurnAngleEntry => s_snapTurnAngle!;
+    public static ConfigEntry<float> SmoothTurnSpeedEntry => s_smoothTurnSpeed!;
+    public static ConfigEntry<float> MoveSpeedEntry => s_moveSpeed!;
+    public static ConfigEntry<float> SprintMultiplierEntry => s_sprintMultiplier!;
+    public static ConfigEntry<bool> LeftLaserEntry => s_leftLaser!;
+    public static ConfigEntry<bool> ItemHandRightEntry => s_itemHandRight!;
+    public static ConfigEntry<float> MenuDistanceEntry => s_menuDistance!;
+    public static ConfigEntry<float> HudDistanceEntry => s_hudDistance!;
+    public static ConfigEntry<float> HudSizeEntry => s_hudSize!;
+    public static ConfigEntry<float> HudVerticalOffsetEntry => s_hudVerticalOffset!;
 }
