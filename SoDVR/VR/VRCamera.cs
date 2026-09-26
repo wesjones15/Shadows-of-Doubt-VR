@@ -356,6 +356,7 @@ public class VRCamera : MonoBehaviour
 
             MigrationCapture.Tick(Time.frameCount);
             FrameRateProbe.Tick();
+            WorldMarksCapture.Tick(Time.frameCount, _leftCam);
 
             try { _tooltipRTPanel.Tick(_leftCam, _uiPointerPoint); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] TooltipRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
