@@ -65,31 +65,25 @@ internal sealed class CanvasMaterialPatcher
 
             try
             {
-                // Skip CanvasGroupFix for the VR Settings panel — its pane CanvasGroups are
-                // intentionally set to interactable=false (not alpha=0) and must not be reset.
-                bool isVrPanel = canvas.GetInstanceID() == VRSettingsPanel.CanvasInstanceId;
-                if (!isVrPanel)
+                var groups = canvas.GetComponentsInChildren<CanvasGroup>(true);
+                foreach (var cg in groups)
                 {
-                    var groups = canvas.GetComponentsInChildren<CanvasGroup>(true);
-                    foreach (var cg in groups)
+                    if (cg == null || RTOwnedCanvases.Contains(cg.transform)) continue;
+                    // Skip the root CanvasGroup — the game uses this to hide/show the entire
+                    // canvas (e.g. ActionPanelCanvas alpha=0 during pause). Overriding it
+                    // would fight the game's visibility control.
+                    if (cg.gameObject == canvas.gameObject) continue;
+                    // Also skip CanvasGroups that belong to independently-managed root
+                    // canvases nested inside this canvas (e.g. CaseCanvas inside GameCanvas).
+                    // Their CanvasGroups are the game's visibility controllers for those panels.
+                    try {
+                        var cgCv = cg.gameObject.GetComponent<Canvas>();
+                        if (cgCv != null && managedCanvases.ContainsKey(cgCv.GetInstanceID())) continue;
+                    } catch { }
+                    if (cg.alpha < 0.99f)
                     {
-                        if (cg == null || RTOwnedCanvases.Contains(cg.transform)) continue;
-                        // Skip the root CanvasGroup — the game uses this to hide/show the entire
-                        // canvas (e.g. ActionPanelCanvas alpha=0 during pause). Overriding it
-                        // would fight the game's visibility control.
-                        if (cg.gameObject == canvas.gameObject) continue;
-                        // Also skip CanvasGroups that belong to independently-managed root
-                        // canvases nested inside this canvas (e.g. CaseCanvas inside GameCanvas).
-                        // Their CanvasGroups are the game's visibility controllers for those panels.
-                        try {
-                            var cgCv = cg.gameObject.GetComponent<Canvas>();
-                            if (cgCv != null && managedCanvases.ContainsKey(cgCv.GetInstanceID())) continue;
-                        } catch { }
-                        if (cg.alpha < 0.99f)
-                        {
-                            Log.LogInfo($"[CanvasMaterialPatcher] CanvasGroupFix '{cg.gameObject.name}' on '{canvasName}': {cg.alpha:F2}->1");
-                            cg.alpha = 1f;
-                        }
+                        Log.LogInfo($"[CanvasMaterialPatcher] CanvasGroupFix '{cg.gameObject.name}' on '{canvasName}': {cg.alpha:F2}->1");
+                        cg.alpha = 1f;
                     }
                 }
             }

@@ -69,6 +69,7 @@ public class VRCamera : MonoBehaviour
     private VRKeyboardPanel _keyboard = null!;
     private HudRTPanels _hudRT = null!;
     private ClueMessagePanel _clueRT = null!;
+    private VRSettingsRTPanel _vrSettingsRT = null!;
     private readonly PostFXOverlayCompositor _overlay = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
@@ -144,7 +145,6 @@ public class VRCamera : MonoBehaviour
     private readonly Dictionary<int, Graphic> _managedFades = new();
 
     // ── VR settings panel (Phase 0 test canvas) ──────────────────────────────
-    private GameObject?   _settingsPanelGO;   // root GO of VRSettingsPanelInternal
 
     // ── Controller / cursor dot / laser ─────────────────────────────────────
     private GameObject?   _rightControllerGO;
@@ -234,6 +234,7 @@ public class VRCamera : MonoBehaviour
         _keyboard = new VRKeyboardPanel(UILayer, _rtPanelInput, _rtPanelGrip);
         _hudRT = new HudRTPanels(UILayer, _rtPanelInput);
         _clueRT = new ClueMessagePanel(UILayer, _rtPanelInput);
+        _vrSettingsRT = new VRSettingsRTPanel(UILayer, _rtPanelInput, _rtPanelGrip);
         Log.LogInfo("[VRCamera] Awake — polling for SYNCHRONIZED state before swapchain setup.");
     }
 
@@ -375,6 +376,9 @@ public class VRCamera : MonoBehaviour
 
             try { _clueRT.Tick(_hudRT, _dialogueRT.OpenView); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] ClueMessagePanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
+
+            try { _vrSettingsRT.Tick(_leftCam); }
+            catch (Exception ex) { Log.LogWarning($"[VRCamera] VRSettingsRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
         }
 
         // F8: re-centre all canvases in front of the current head pose.
@@ -962,8 +966,7 @@ public class VRCamera : MonoBehaviour
         // ── Phase 1: VR Settings Panel ───────────────────────────────────────────
         try
         {
-            _settingsPanelGO = VRSettingsPanel.Init(
-                id => _positionedCanvases.Remove(id));
+            VRSettingsPanel.Init();
             Log.LogInfo("[VRCamera] VRSettingsPanel.Init complete.");
         }
         catch (Exception ex)
@@ -1124,6 +1127,8 @@ public class VRCamera : MonoBehaviour
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] MinimapRTPanel.Render: {ex.Message}"); }
                 try { _keyboard.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] VRKeyboardPanel.Render: {ex.Message}"); }
+                try { _vrSettingsRT.Render(); }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] VRSettingsRTPanel.Render: {ex.Message}"); }
 
                 // No GL.invertCulling — HDRP flipYMode handles both Y-flip and culling.
                 _rightCam.Render();
@@ -1139,6 +1144,7 @@ public class VRCamera : MonoBehaviour
                     _caseBoardRT.AppendOverlay(_overlay);
                     _dialogueRT.AppendOverlay(_overlay);
                     _minimapRT.AppendOverlay(_overlay);
+                    _vrSettingsRT.AppendOverlay(_overlay);
                     _keyboard.AppendOverlay(_overlay);
                     _rtPanelInput.AppendOverlay(_overlay);
                     _overlay.Composite(_rightCam, _rightRT);
@@ -1264,7 +1270,6 @@ public class VRCamera : MonoBehaviour
 
         _legacyCanvases.Tick(rtOwnsPointer);
 
-        _controllerInteraction.UpdateVrSettingsScroll();
         _controllerInteraction.UpdateLeftPose(displayTime, transform, _leftControllerGO);
     }
 

@@ -127,19 +127,6 @@ internal static class CanvasClickRouter
                     string hitCanvasName = hitCanvas.gameObject.name ?? "";
                     Log.LogInfo($"[CanvasClickRouter] Trigger click: '{go?.name}' on '{hitCanvasName}'");
 
-                    // ── VRSettingsPanel button intercept ─────────────────────────────
-                    // Walk hierarchy so child GOs (e.g. labels with raycastTarget=false)
-                    // still resolve to the registered button parent.
-                    {
-                        var vtr = go?.transform;
-                        for (int vi = 0; vi < 5 && vtr != null; vi++)
-                        {
-                            if (VRSettingsPanel.HandleClick(vtr.gameObject.GetInstanceID()))
-                                return;
-                            vtr = vtr.parent;
-                        }
-                    }
-
                     // Set PointerEventData fields that Unity's handlers check.
                     ped.pointerEnter       = go;
                     ped.pointerPress       = go;

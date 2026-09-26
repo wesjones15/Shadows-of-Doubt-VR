@@ -9,15 +9,14 @@ using TMPro;
 namespace SoDVR.VR;
 
 /// <summary>
-/// Owns the VR Settings panel canvas (Phase 2: Graphics tab fully wired).
+/// Builds the VR Settings panel: the game's own settings (graphics, audio, controls, general),
+/// written through the game's setters, plus the mod's VR tab (<see cref="VRSettings"/>). Shown on
+/// an RT panel by <see cref="VRSettingsRTPanel"/>; opened by F10 or the menu's Settings button.
 ///
-/// Canvas lifecycle rules:
-///   - Created as ScreenSpaceOverlay → ScanAndConvertCanvases converts to WorldSpace.
-///   - DontDestroyOnLoad mandatory — scene transitions destroy non-persistent GOs.
-///   - Register canvas ID in _ownedCanvasIds BEFORE scan fires.
-///   - AddComponent&lt;RectTransform&gt;() works here (plain Transform on new GO, IL2CPP
-///     does NOT auto-upgrade on SetParent). DO NOT use AddComponent&lt;CanvasGroup&gt;()
-///     and then GetComponent&lt;RectTransform&gt;() — CanvasGroup has no [RequireComponent(RT)].
+/// DontDestroyOnLoad, since scene changes would destroy it. AddComponent&lt;RectTransform&gt;()
+/// works on these plain new GameObjects (IL2CPP doesn't upgrade the Transform on SetParent); don't
+/// AddComponent&lt;CanvasGroup&gt;() and then expect a RectTransform, as CanvasGroup doesn't
+/// require one.
 /// </summary>
 public static class VRSettingsPanel
 {
@@ -27,11 +26,12 @@ public static class VRSettingsPanel
     private const float ROW_H    = 60f;   // row height px
     private const float ROW_STEP = 68f;   // row height + gap
     private const float TOP_PAD  = 8f;
+    private static readonly Vector2 WindowSize = new(900f, 700f);
 
-    public static int         CanvasInstanceId { get; private set; }
-    public static GameObject? RootGO           { get; private set; }
+    public static GameObject?    RootGO { get; private set; }
+    /// <summary>The panel itself, centred on its screen-sized canvas.</summary>
+    public static RectTransform? Window { get; private set; }
 
-    private static Action<int>?    _removeFromPositioned;
     private static RectTransform?  _graphicsPaneRT;
     private static RectTransform?  _audioPaneRT;
     private static RectTransform?  _controlsPaneRT;
@@ -58,16 +58,13 @@ public static class VRSettingsPanel
     private static readonly List<(Image img, TextMeshProUGUI txt, Func<bool> getter)> _toggleRefs    = new();
     private static readonly List<(Image img, Color col)>                               _staticImgRefs = new();
 
-    // Panel image vertex tints — keep in [0,1] range.
-    // VRCamera.ApplyReadableImageBoost boosts each Image's material._Color by ×4 once,
-    // so the GPU sees: final_HDR = vertex_color × mat_color = tint × (4,4,4,1).
-    // E.g. ColBtnOff (0.85,0.85,0.85) × 4 ≈ (3.4,3.4,3.4) — bright enough to survive
-    // HDRP auto-exposure, the same way TMP_Text vertex colours do after ApplyReadableTextBoost.
-    private static readonly Color ColTabActive   = new(0.50f, 0.85f, 1.00f, 1f); // cyan-blue
-    private static readonly Color ColTabInactive = new(0.55f, 0.55f, 0.90f, 1f); // purple
-    private static readonly Color ColBtnOn       = new(0.70f, 1.00f, 0.70f, 1f); // green
-    private static readonly Color ColBtnOff      = new(0.85f, 0.85f, 0.85f, 1f); // light grey
-    private static readonly Color ColNavBtn      = new(0.65f, 0.75f, 1.00f, 1f); // lavender
+    // Dark enough for white labels to read on them.
+    private static readonly Color ColTabActive   = new(0.16f, 0.45f, 0.70f, 1f); // blue
+    private static readonly Color ColTabInactive = new(0.24f, 0.24f, 0.40f, 1f); // slate
+    private static readonly Color ColBtnOn       = new(0.18f, 0.52f, 0.24f, 1f); // green
+    private static readonly Color ColBtnOff      = new(0.30f, 0.30f, 0.34f, 1f); // grey
+    private static readonly Color ColNavBtn      = new(0.26f, 0.32f, 0.55f, 1f); // indigo
+    private static readonly Color ColClose       = new(0.70f, 0.22f, 0.20f, 1f); // red
 
     // The values the VR tab's ◄/► rows step through. A value set in the config file between them
     // shows as the nearest one.
@@ -84,48 +81,58 @@ public static class VRSettingsPanel
     // Populated in Init(); cleared at Init() start.  TryClickCanvas calls HandleClick().
     private static readonly Dictionary<int, Action> _clickMap = new();
 
-    public static bool HandleClick(int goId)
+    /// <summary>Runs the action of the button clicked, or of the button a clicked label sits in.</summary>
+    public static bool HandleClick(GameObject go)
     {
-        if (!_clickMap.TryGetValue(goId, out var action)) return false;
-        try { action(); } catch (Exception ex) { Plugin.Log.LogWarning($"[VRSettings] HandleClick {goId}: {ex.Message}"); }
-        return true;
+        var t = go.transform;
+        for (int i = 0; i < 5 && t != null; i++, t = t.parent)
+        {
+            if (!_clickMap.TryGetValue(t.gameObject.GetInstanceID(), out var action)) continue;
+            try { action(); } catch (Exception ex) { Log.LogWarning($"[VRSettings] Click '{t.name}': {ex.Message}"); }
+            return true;
+        }
+        return false;
     }
 
     // ── Init ──────────────────────────────────────────────────────────────────
 
-    public static GameObject? Init(Action<int> removeFromPositioned)
+    public const string CanvasName = "VRSettingsPanelInternal";
+
+    public static GameObject? Init()
     {
-        _removeFromPositioned = removeFromPositioned;
         _toggleRefs.Clear();
         _staticImgRefs.Clear();
         _clickMap.Clear();
         try
         {
             // ── Canvas ────────────────────────────────────────────────────────
-            var root = new GameObject("VRSettingsPanelInternal");
+            var root = new GameObject(CanvasName);
             root.layer = UILayer;
             UnityEngine.Object.DontDestroyOnLoad(root);
 
-            var cv = root.AddComponent<Canvas>();
-            cv.renderMode   = RenderMode.ScreenSpaceOverlay;
-            cv.sortingOrder = 50;
-            CanvasInstanceId = cv.GetInstanceID();
-            // NOT added to ownedCanvasIds — RescanCanvasAlpha applies ZTest Always patch,
-            // bypassing HDRP auto-exposure so panel graphics render at full brightness.
-
+            root.AddComponent<Canvas>();
+            // Scaled so the window fills the screen's height: the RT texture then draws it at
+            // about twice its unit size.
             var scaler = root.AddComponent<CanvasScaler>();
             scaler.uiScaleMode         = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-            scaler.referenceResolution = new Vector2(900f, 700f);
+            scaler.referenceResolution = WindowSize;
+            scaler.matchWidthOrHeight  = 1f;
+
+            var windowGO = MakeGO("Window", root.transform);
+            var window   = windowGO.AddComponent<RectTransform>();
+            window.anchorMin = window.anchorMax = new Vector2(0.5f, 0.5f);
+            window.sizeDelta = WindowSize;
+            Window = window;
 
             // ── Background ────────────────────────────────────────────────────
-            var bgGO   = MakeGO("Background", root.transform);
+            var bgGO   = MakeGO("Background", window);
             var bgRT   = bgGO.AddComponent<RectTransform>();
             bgRT.anchorMin = Vector2.zero; bgRT.anchorMax = Vector2.one; bgRT.sizeDelta = Vector2.zero;
             var bgImg  = bgGO.AddComponent<Image>();
             bgImg.color = new Color(0.08f, 0.08f, 0.14f, 0.88f); bgImg.raycastTarget = false;
 
             // ── Title ─────────────────────────────────────────────────────────
-            var titleGO   = MakeGO("Title", root.transform);
+            var titleGO   = MakeGO("Title", window);
             var titleRT   = titleGO.AddComponent<RectTransform>();
             titleRT.anchorMin = new Vector2(0f, 1f); titleRT.anchorMax = new Vector2(1f, 1f);
             titleRT.pivot = new Vector2(0.5f, 1f); titleRT.sizeDelta = new Vector2(0f, 70f);
@@ -134,14 +141,14 @@ public static class VRSettingsPanel
             titleTxt.alignment = TextAlignmentOptions.Center; titleTxt.raycastTarget = false;
 
             // ── Close button ──────────────────────────────────────────────────
-            var closeBtnGO  = MakeGO("CloseButton", root.transform);
+            var closeBtnGO  = MakeGO("CloseButton", window);
             var closeBtnImg = closeBtnGO.AddComponent<Image>();
             var closeBtnRT  = closeBtnGO.GetComponent<RectTransform>();
             closeBtnRT.anchorMin = new Vector2(1f, 1f); closeBtnRT.anchorMax = new Vector2(1f, 1f);
             closeBtnRT.pivot = new Vector2(1f, 1f); closeBtnRT.sizeDelta = new Vector2(80f, 56f);
             closeBtnRT.anchoredPosition = new Vector2(-8f, -8f);
-            closeBtnImg.color = new Color(1.00f, 0.45f, 0.40f, 1f); // red tint (mat ×4 → HDR)
-            _staticImgRefs.Add((closeBtnImg, new Color(1.00f, 0.45f, 0.40f, 1f)));
+            closeBtnImg.color = ColClose;
+            _staticImgRefs.Add((closeBtnImg, ColClose));
             closeBtnGO.AddComponent<Button>();
             _clickMap[closeBtnGO.GetInstanceID()] = Hide;
             var closeLblGO   = MakeGO("CloseLabel", closeBtnGO.transform);
@@ -152,7 +159,7 @@ public static class VRSettingsPanel
             closeLbl.alignment = TextAlignmentOptions.Center; closeLbl.raycastTarget = false;
 
             // ── Tab row ───────────────────────────────────────────────────────
-            var tabRowGO   = MakeGO("TabRow", root.transform);
+            var tabRowGO   = MakeGO("TabRow", window);
             var tabRowRT   = tabRowGO.AddComponent<RectTransform>();
             tabRowRT.anchorMin = new Vector2(0f, 1f); tabRowRT.anchorMax = new Vector2(1f, 1f);
             tabRowRT.pivot = new Vector2(0.5f, 1f); tabRowRT.sizeDelta = new Vector2(0f, 56f);
@@ -176,13 +183,11 @@ public static class VRSettingsPanel
             _clickMap[vrBtn.gameObject.GetInstanceID()]       = ActivateVRTab;
 
             // ── Scrollable content panes (topOffset = -126 = below 70px title + 56px tabs) ──
-            // No ScrollRect / RectMask2D — those corrupt HDRP stencil in WorldSpace canvas.
-            // Scrolling done by shifting content.anchoredPosition.y via ▲/▼ buttons.
-            var (graphicsPaneGO, graphicsContent) = MakeScrollablePane("GraphicsPane", root.transform, -126f);
-            var (audioPaneGO,    audioContent)    = MakeScrollablePane("AudioPane",    root.transform, -126f);
-            var (controlsPaneGO, controlsContent) = MakeScrollablePane("ControlsPane", root.transform, -126f);
-            var (generalPaneGO,  generalContent)  = MakeScrollablePane("GeneralPane",  root.transform, -126f);
-            var (vrPaneGO,       vrContent)       = MakeScrollablePane("VRPane",       root.transform, -126f);
+            var (graphicsPaneGO, graphicsContent) = MakeScrollablePane("GraphicsPane", window, -126f);
+            var (audioPaneGO,    audioContent)    = MakeScrollablePane("AudioPane", window, -126f);
+            var (controlsPaneGO, controlsContent) = MakeScrollablePane("ControlsPane", window, -126f);
+            var (generalPaneGO,  generalContent)  = MakeScrollablePane("GeneralPane", window, -126f);
+            var (vrPaneGO,       vrContent)       = MakeScrollablePane("VRPane", window, -126f);
             _graphicsPaneRT    = graphicsPaneGO.GetComponent<RectTransform>();
             _audioPaneRT       = audioPaneGO.GetComponent<RectTransform>();
             _controlsPaneRT    = controlsPaneGO.GetComponent<RectTransform>();
@@ -564,7 +569,7 @@ public static class VRSettingsPanel
 
             RootGO = root;
             root.SetActive(false);  // hidden by default — F10 to open
-            Log.LogInfo("[VRSettingsPanel] Init complete (ScreenSpaceOverlay, sortOrder=50).");
+            Log.LogInfo("[VRSettingsPanel] Init complete.");
             return root;
         }
         catch (Exception ex)
@@ -588,7 +593,6 @@ public static class VRSettingsPanel
         SetPaneVisible(_audioPaneRT,     _audioGroup,     false);
         SetPaneVisible(_controlsPaneRT,  _controlsGroup,  false);
         SetPaneVisible(_generalPaneRT,   _generalGroup,   false);
-        _removeFromPositioned?.Invoke(CanvasInstanceId);
         Log.LogInfo("[VRSettingsPanel] Shown.");
     }
 
@@ -624,6 +628,7 @@ public static class VRSettingsPanel
         if (RootGO == null) return;
         try { UnityEngine.Object.Destroy(RootGO); } catch { }
         RootGO = null;
+        Window = null;
         _graphicsPaneRT  = null;
         _audioPaneRT     = null;
         _controlsPaneRT  = null;
@@ -725,31 +730,30 @@ public static class VRSettingsPanel
     }
 
     /// <summary>
-    /// Scrolls the currently visible pane by <paramref name="pixels"/> units.
-    /// Positive pixels scrolls DOWN (reveals lower rows); negative scrolls UP.
-    /// Called from VRCamera when the thumbstick Y axis changes.
+    /// Scrolls the open tab by <paramref name="units"/>: positive reveals lower rows.
     /// </summary>
-    public static void Scroll(float pixels)
+    public static void Scroll(float units)
     {
         var content = _activeTab == 0 ? _graphicsContentRT
                     : _activeTab == 1 ? _audioContentRT
                     : _activeTab == 2 ? _controlsContentRT
                     : _activeTab == 3 ? _generalContentRT
                     :                   _vrContentRT;
-        if (content == null) return;
-        // Viewport height = pane height (content rect minus its top-offset).
-        // We approximate viewport as 400px (matches pane sizeDelta.y set in MakeScrollablePane).
-        const float viewportH = 400f;
+        if (content != null) ScrollContent(content, units);
+    }
+
+    private static void ScrollContent(RectTransform content, float units)
+    {
+        var pane = content.parent.GetComponent<RectTransform>();
+        float viewportH = pane != null ? pane.rect.height : 0f;
         float maxY = Mathf.Max(0f, content.sizeDelta.y - viewportH);
-        float newY = Mathf.Clamp(content.anchoredPosition.y + pixels, 0f, maxY);
+        float newY = Mathf.Clamp(content.anchoredPosition.y + units, 0f, maxY);
         content.anchoredPosition = new Vector2(0f, newY);
     }
 
     // ── Scrollable pane builder ───────────────────────────────────────────────
-    // No ScrollRect or RectMask2D — both corrupt HDRP's stencil buffer in WorldSpace
-    // canvas, causing the world geometry to disappear behind the masked region.
-    // Scrolling is done by shifting content.anchoredPosition.y directly from ▲/▼ buttons.
-    // Content overflows the pane bottom visually (no GPU clipping), which is acceptable.
+    // Scrolled by moving content.anchoredPosition.y (▲/▼ buttons and the stick); the pane's
+    // RectMask2D clips what's scrolled out.
 
     private static (GameObject pane, RectTransform content) MakeScrollablePane(
         string name, Transform parent, float topOffset)
@@ -760,6 +764,7 @@ public static class VRSettingsPanel
         paneRT.anchorMax = new Vector2(1f, 1f);
         paneRT.offsetMin = new Vector2(10f,  20f);
         paneRT.offsetMax = new Vector2(-10f, topOffset);
+        paneGO.AddComponent<RectMask2D>();
 
         // Content: top-anchored in pane; height set by FinalizeContent after rows added.
         var contentGO = MakeGO(name + "Content", paneGO.transform);
@@ -772,14 +777,13 @@ public static class VRSettingsPanel
 
         // Scroll arrows at LEFT corners of the pane — avoids overlap with ◄/► nav buttons
         // which are anchored to the right edge of every row.
-        AddScrollArrow(name + "Up",   paneGO.transform, up: true,  contentRT, topOffset);
-        AddScrollArrow(name + "Down", paneGO.transform, up: false, contentRT, topOffset);
+        AddScrollArrow(name + "Up",   paneGO.transform, up: true,  contentRT);
+        AddScrollArrow(name + "Down", paneGO.transform, up: false, contentRT);
 
         return (paneGO, contentRT);
     }
 
-    private static void AddScrollArrow(
-        string name, Transform parent, bool up, RectTransform content, float topOffset)
+    private static void AddScrollArrow(string name, Transform parent, bool up, RectTransform content)
     {
         var go  = MakeGO(name, parent);
         var img = go.AddComponent<Image>();
@@ -801,19 +805,9 @@ public static class VRSettingsPanel
         lbl.fontSize = 26; lbl.color = Color.white;
         lbl.alignment = TextAlignmentOptions.Center; lbl.raycastTarget = false;
 
-        // viewportH ≈ canvas reference height (700) minus title+tabs (126) minus bottom pad (20)
-        float viewportH = 700f + topOffset - 20f;
-        float scrollStep = ROW_STEP * 2.5f;
-
-        go.AddComponent<Button>().onClick.AddListener(new Action(() =>
-        {
-            float contentH = content.sizeDelta.y;
-            float maxY     = Mathf.Max(0f, contentH - viewportH);
-            // ▼ = reveal lower rows = shift content UP = increase anchoredPosition.y
-            // ▲ = back towards top  = decrease anchoredPosition.y towards 0
-            float newY = Mathf.Clamp(content.anchoredPosition.y + (up ? -scrollStep : scrollStep), 0f, maxY);
-            content.anchoredPosition = new Vector2(0f, newY);
-        }));
+        const float scrollStep = ROW_STEP * 2.5f;
+        go.AddComponent<Button>();
+        _clickMap[go.GetInstanceID()] = () => ScrollContent(content, up ? -scrollStep : scrollStep);
     }
 
     private static void FinalizeContent(RectTransform content, float usedHeight)

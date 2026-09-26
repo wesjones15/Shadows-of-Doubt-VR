@@ -499,20 +499,6 @@ internal sealed class ControllerInteraction
             try { if (_aimDotPool[i].activeSelf) _aimDotPool[i].SetActive(false); } catch { }
         }
     }
-
-    /// <summary>Thumbstick Y scrolls the VR settings panel when it is open. Dead-zone: ignore
-    /// values &lt; 0.2 to prevent drift.</summary>
-    public void UpdateVrSettingsScroll()
-    {
-        if (VRSettingsPanel.RootGO?.activeSelf != true) return;
-        if (OpenXRManager.GetThumbstickState(true, out float tx, out float ty))
-        {
-            const float deadZone   = 0.20f;
-            const float scrollRate = 6.0f;  // pixels per frame at full deflection
-            if (Mathf.Abs(ty) > deadZone)
-                VRSettingsPanel.Scroll(-ty * scrollRate); // negative: stick up → scroll up (lower y)
-        }
-    }
 }
 
 internal struct AimScanResult
