@@ -12,11 +12,12 @@ namespace SoDVR.VR;
 /// An on-screen keyboard for the game's text boxes (save names, renames, sticky notes, case names):
 /// neither the headset runtime (no XR_META_virtual_keyboard over Virtual Desktop) nor the game (its
 /// own keyboard only opens in gamepad mode) offers one in VR. It opens when a text box gets focus —
-/// clicked, or focused by the game itself as the save popup does — and types straight into it. Done
+/// clicked, or focused by the game itself as the save popup does — and types straight into it. The
+/// preview line takes a press to place the cursor and a drag to select, as the flat game does. Done
 /// does what Enter does; ✕ just closes the keyboard. Its own canvas on an RT panel, drawn above every
 /// other panel, placed low and tilted up like a laptop keyboard, and grip-draggable.
 /// </summary>
-internal sealed class VRKeyboardPanel : IRTGripTarget
+internal sealed class VRKeyboardPanel : IRTGripTarget, IRTPointerExtension
 {
     private static ManualLogSource Log => Plugin.Log;
 
@@ -52,7 +53,12 @@ internal sealed class VRKeyboardPanel : IRTGripTarget
 
     private RTPanelView? _view;
     private RectTransform? _board;
+    private RectTransform? _previewBox;
     private TextMeshProUGUI? _preview;
+    private RectTransform? _caret;
+    private int _selectionAnchor;
+    private int _selectionFocus;
+    private bool _selectingText;
     private Image? _shiftImage;
     private TMP_InputField? _target;
     private GameObject? _lastSelected;
@@ -110,6 +116,7 @@ internal sealed class VRKeyboardPanel : IRTGripTarget
         if (_view == null) return;
         bool wasOpen = _target != null;
         _target = field;
+        Select(TargetText.Length, TargetText.Length);
         SetShift(false);
         if (!wasOpen && head != null) PlaceInFrontOf(head.transform);
         Log.LogInfo($"[VRKeyboard] Open for '{field.name}' (text length {field.text?.Length ?? 0})");
@@ -121,36 +128,70 @@ internal sealed class VRKeyboardPanel : IRTGripTarget
         if (_view != null) _view.Visible = false;
     }
 
-    // ── Typing ────────────────────────────────────────────────────────────────────────────
+    // ── Typing: a selection from _selectionAnchor to _selectionFocus (the cursor) ─────────────
+
+    private string TargetText => _target?.text ?? "";
+    private int SelectionStart => Mathf.Min(_selectionAnchor, _selectionFocus);
+    private int SelectionEnd => Mathf.Max(_selectionAnchor, _selectionFocus);
 
     private void Type(string text)
     {
-        var field = _target;
-        if (field == null) return;
-        string current = field.text ?? "";
-        if (field.characterLimit > 0 && current.Length + text.Length > field.characterLimit) return;
-        int at = Mathf.Clamp(field.stringPosition, 0, current.Length);
-        field.text = current.Insert(at, text);
-        field.stringPosition = at + text.Length;
+        ReplaceSelection(text);
         if (_shift) SetShift(false);
     }
 
     private void Backspace()
     {
-        var field = _target;
-        if (field == null) return;
-        string current = field.text ?? "";
-        int at = Mathf.Clamp(field.stringPosition, 0, current.Length);
-        if (at == 0) return;
-        field.text = current.Remove(at - 1, 1);
-        field.stringPosition = at - 1;
+        if (SelectionEnd > SelectionStart) { ReplaceSelection(""); return; }
+        if (SelectionStart == 0) return;
+        _selectionAnchor = SelectionStart - 1;
+        ReplaceSelection("");
     }
 
+    private void Clear() => SetText("", 0);
+
+    /// <summary>Arrows collapse a selection to the side they point, then move one character.</summary>
     private void MoveCursor(int by)
+    {
+        int to = SelectionEnd > SelectionStart ? (by < 0 ? SelectionStart : SelectionEnd)
+                                               : Mathf.Clamp(_selectionFocus + by, 0, TargetText.Length);
+        Select(to, to);
+    }
+
+    private void ReplaceSelection(string insert)
     {
         var field = _target;
         if (field == null) return;
-        field.stringPosition = Mathf.Clamp(field.stringPosition + by, 0, (field.text ?? "").Length);
+        string current = TargetText;
+        int start = Mathf.Clamp(SelectionStart, 0, current.Length);
+        int end = Mathf.Clamp(SelectionEnd, 0, current.Length);
+        string text = current.Remove(start, end - start).Insert(start, insert);
+        if (field.characterLimit > 0 && text.Length > field.characterLimit) return;
+        SetText(text, start + insert.Length);
+    }
+
+    private void SetText(string text, int cursor)
+    {
+        if (_target == null) return;
+        _target.text = text;
+        Select(cursor, cursor);
+    }
+
+    /// <summary>Also shown in the text box itself, as its own highlight.</summary>
+    private void Select(int anchor, int focus)
+    {
+        int length = TargetText.Length;
+        _selectionAnchor = Mathf.Clamp(anchor, 0, length);
+        _selectionFocus = Mathf.Clamp(focus, 0, length);
+        var field = _target;
+        if (field == null) return;
+        try
+        {
+            field.stringPosition = _selectionFocus;
+            field.selectionStringAnchorPosition = _selectionAnchor;
+            field.selectionStringFocusPosition = _selectionFocus;
+        }
+        catch (Exception ex) { Log.LogWarning($"[VRKeyboard] Selection sync: {ex.Message}"); }
     }
 
     /// <summary>What Enter does in a single-line box: submit, then end editing.</summary>
@@ -175,18 +216,70 @@ internal sealed class VRKeyboardPanel : IRTGripTarget
         if (_shiftImage != null) _shiftImage.color = on ? ActionKeyColour * 1.6f : ActionKeyColour;
     }
 
+    /// <summary>The text with the selection highlighted, and the cursor drawn as a bar rather than
+    /// written into the text — so every character in the preview is one character of the box,
+    /// and a pointer position on it maps straight to a place in the text.</summary>
     private void UpdatePreview()
     {
         var field = _target;
-        if (field == null || _preview == null) return;
-        string text = field.text ?? "";
+        if (field == null || _preview == null || _caret == null) return;
+        string text = TargetText;
         if (field.contentType == TMP_InputField.ContentType.Password) text = new string('*', text.Length);
-        int at = Mathf.Clamp(field.stringPosition, 0, text.Length);
-        _preview.text = Escape(text.Substring(0, at)) + "<color=#7FD4FF>|</color>" + Escape(text.Substring(at));
+        _selectionAnchor = Mathf.Clamp(_selectionAnchor, 0, text.Length);
+        _selectionFocus = Mathf.Clamp(_selectionFocus, 0, text.Length);
+        int start = SelectionStart, end = SelectionEnd;
+        string selected = end > start ? "<mark=#3A7BD5AA>" + Escape(text.Substring(start, end - start)) + "</mark>" : "";
+        _preview.text = Escape(text.Substring(0, start)) + selected + Escape(text.Substring(end));
+
+        _preview.ForceMeshUpdate();
+        _caret.localPosition = new Vector3(CaretX(_selectionFocus), 0f, 0f);
+        _caret.gameObject.SetActive(end == start);
+    }
+
+    private float CaretX(int index)
+    {
+        var info = _preview!.textInfo;
+        int count = info.characterCount;
+        if (count == 0 || index <= 0) return count == 0 ? _preview.rectTransform.rect.xMin : info.characterInfo[0].origin;
+        return info.characterInfo[Mathf.Min(index, count) - 1].xAdvance;
     }
 
     // TMP rich text would swallow a typed '<'.
-    private static string Escape(string s) => s.Replace("<", "<noparse><</noparse>");
+    private static string Escape(string s) => s.Length == 0 ? "" : "<noparse>" + s + "</noparse>";
+
+    /// <summary>The place in the text under the pointer, if it's on the preview.</summary>
+    private bool TryTextIndexAt(in RTPointerSample sample, bool mustBeInside, out int index)
+    {
+        index = 0;
+        if (_preview == null || _previewBox == null) return false;
+        if (mustBeInside && !RectTransformUtility.RectangleContainsScreenPoint(_previewBox, sample.ScreenPosition, sample.EventCamera))
+            return false;
+        index = Mathf.Clamp(TMP_TextUtilities.GetCursorIndexFromPosition(_preview, sample.ScreenPosition, sample.EventCamera), 0, TargetText.Length);
+        return true;
+    }
+
+    // ── IRTPointerExtension: a press on the preview places the cursor, a drag selects ─────────
+
+    public bool TryTakePress(GameObject? hitGo, in RTPointerSample sample)
+    {
+        if (_target == null || !TryTextIndexAt(sample, mustBeInside: true, out int index)) return false;
+        _selectingText = true;
+        Select(index, index);
+        return true;
+    }
+
+    public void ContinuePress(in RTPointerSample sample)
+    {
+        if (_selectingText && TryTextIndexAt(sample, mustBeInside: false, out int index)) Select(_selectionAnchor, index);
+    }
+
+    public void EndPress(in RTPointerSample sample) => _selectingText = false;
+    public void Cancel() => _selectingText = false;
+    public void OnPointer(GameObject? hitGo, in RTPointerSample sample) { }
+    public bool TryTakeScroll(float delta, GameObject? hitGo, in RTPointerSample sample) => false;
+    public bool TryTakeSecondaryClick(GameObject? hitGo, in RTPointerSample sample) => false;
+    public void OnAltButton(bool press, bool held, bool release, GameObject? hitGo, in RTPointerSample sample) { }
+    public bool AltGestureActive => false;
 
     // ── Building ──────────────────────────────────────────────────────────────────────────
 
@@ -201,16 +294,24 @@ internal sealed class VRKeyboardPanel : IRTGripTarget
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ConstantPixelSize;
             scaler.scaleFactor = 1f;
 
-            float width = PaddingPixels * 2 + 12 * KeyPixels + 11 * GapPixels;
+            // The number row is the widest: twelve characters and backspace.
+            const int widestRowKeys = 13;
+            float width = PaddingPixels * 2 + widestRowKeys * KeyPixels + (widestRowKeys - 1) * GapPixels;
             float height = PaddingPixels * 2 + PreviewPixels + GapPixels + 5 * KeyPixels + 5 * GapPixels;
             _board = MakeRect("Board", root.transform, new Vector2(width, height), Vector2.zero);
             AddImage(_board, PanelColour, raycast: true);
 
             float top = height * 0.5f - PaddingPixels;
-            var previewBox = MakeRect("Preview", _board, new Vector2(width - 2 * PaddingPixels, PreviewPixels),
+            _previewBox = MakeRect("Preview", _board, new Vector2(width - 2 * PaddingPixels, PreviewPixels),
                 new Vector2(0f, top - PreviewPixels * 0.5f));
-            AddImage(previewBox, new Color(0.02f, 0.02f, 0.04f, 1f), raycast: false);
-            _preview = MakeLabel(previewBox, "", 44f, TextAlignmentOptions.MidlineLeft, new Vector2(18f, 0f));
+            AddImage(_previewBox, new Color(0.02f, 0.02f, 0.04f, 1f), raycast: false);
+            _preview = MakeLabel(_previewBox, "", 44f, TextAlignmentOptions.MidlineLeft, new Vector2(18f, 0f));
+            _preview.enableWordWrapping = false;
+            _preview.enableAutoSizing = true;
+            _preview.fontSizeMin = 22f;
+            _preview.fontSizeMax = 44f;
+            _caret = MakeRect("Caret", _preview.rectTransform, new Vector2(4f, 50f), Vector2.zero);
+            AddImage(_caret, new Color(0.5f, 0.83f, 1f, 1f), raycast: false);
 
             float rowTop = top - PreviewPixels - GapPixels;
             float left = -width * 0.5f + PaddingPixels;
@@ -234,16 +335,18 @@ internal sealed class VRKeyboardPanel : IRTGripTarget
             bx += 1.5f * KeyPixels + GapPixels;
             AddKey(_board, "◀", bx, lastY, 1f, ActionKeyColour, () => MoveCursor(-1));
             bx += KeyPixels + GapPixels;
-            AddKey(_board, "", bx, lastY, 5.5f, KeyColour, () => Type(" "));
-            bx += 5.5f * KeyPixels + GapPixels;
+            AddKey(_board, "", bx, lastY, 5f, KeyColour, () => Type(" "));
+            bx += 5f * KeyPixels + GapPixels;
             AddKey(_board, "▶", bx, lastY, 1f, ActionKeyColour, () => MoveCursor(1));
             bx += KeyPixels + GapPixels;
+            AddKey(_board, "Clear", bx, lastY, 1.5f, ActionKeyColour, Clear);
+            bx += 1.5f * KeyPixels + GapPixels;
             AddKey(_board, "Done", bx, lastY, 1.5f, ActionKeyColour, Done);
             bx += 1.5f * KeyPixels + GapPixels;
             AddKey(_board, "✕", bx, lastY, 1f, CloseKeyColour, Close);
 
             _panel.Attach(canvas, MetersPerPixel * ScreenWidth());
-            _view = _panel.CreateView("Keys");
+            _view = _panel.CreateView("Keys", extension: this);
             _view.Visible = false;
             _grip.Register(this);
             Log.LogInfo($"[VRKeyboard] Built ({width:F0}x{height:F0} px)");
