@@ -22,6 +22,8 @@ internal sealed class SoloScreens
     // After the screen closes, how long to wait before deciding the board the game opened with it
     // is still up and needs closing too.
     private const int BoardCheckFrames = 10;
+    // The notebook is read up close: its text is small.
+    private const float NotebookCloserMeters = 0.3f;
 
     private int _openedFrame;
     private bool _boardWasOpen;
@@ -45,7 +47,8 @@ internal sealed class SoloScreens
     {
         if (Active != null) Close();
         var yaw = Quaternion.Euler(0f, head.transform.eulerAngles.y, 0f);
-        Position = head.transform.position + yaw * (Vector3.forward * VRSettings.MenuDistance);
+        float distance = VRSettings.MenuDistance - (screen == SoloScreen.Notebook ? NotebookCloserMeters : 0f);
+        Position = head.transform.position + yaw * (Vector3.forward * distance);
         Rotation = yaw;
         _boardWasOpen = boardOpen;
         _openedFrame = Time.frameCount;
