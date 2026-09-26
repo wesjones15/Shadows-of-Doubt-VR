@@ -43,6 +43,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     private readonly bool _wholeCanvas;
     private readonly bool _transparent;
     private readonly Func<float>? _bottomAboveAnchor;
+    private readonly float? _fitWidth;
     private readonly List<Region> _regions = new();
 
     private int _discoveryCooldown;
@@ -68,11 +69,14 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     /// <param name="transparent">See <see cref="CameraRig.SetupRTPanelProjectorCamera"/>.</param>
     /// <param name="bottomAboveAnchor">Raise the panel so its bottom edge sits this high above the anchor
     /// (metres) — where the flat layout would overlap something else on the board.</param>
+    /// <param name="fitWidth">Size the visible content to this world width, centred across the anchor
+    /// (with <paramref name="bottomAboveAnchor"/>).</param>
     public CaseBoardPanel(string canvasName, float screenWorldWidth, float distanceInFrontOfAnchor,
         bool draggable, int quadLayer, RTPanelInput input, RTPanelGrip grip,
         IRTPointerExtension? pointerExtension = null, string[]? regions = null, Func<bool>? shownWhile = null,
-        bool wholeCanvas = false, bool transparent = false, Func<float>? bottomAboveAnchor = null)
+        bool wholeCanvas = false, bool transparent = false, Func<float>? bottomAboveAnchor = null, float? fitWidth = null)
     {
+        _fitWidth = fitWidth;
         _wholeCanvas = wholeCanvas;
         _transparent = transparent;
         _bottomAboveAnchor = bottomAboveAnchor;
@@ -170,6 +174,8 @@ internal sealed class CaseBoardPanel : IRTGripTarget
 
     private void PlaceView(Region region)
     {
+        if (_fitWidth is { } width && region.View.PixelRect.width >= 1f)
+            region.View.Scale = width / (region.View.PixelRect.width * region.View.BaseMetersPerPixel);
         var slide = _poseRotation * (Vector3.right * (region.OffsetPixels * _panel.MetersPerPixel));
         region.View.SetCanvasPose(_posePosition + slide, _poseRotation);
         if (_bottomAboveAnchor == null || _anchor == null) return;
@@ -178,6 +184,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
         var view = region.View;
         var local = Quaternion.Inverse(_anchor.rotation) * (view.Transform.position - _anchor.position);
         local.y = _bottomAboveAnchor() + 0.5f * view.WorldSize.y;
+        if (_fitWidth != null) local.x = 0f;
         view.SetPose(_anchor.position + _anchor.rotation * local, view.Transform.rotation);
     }
 
