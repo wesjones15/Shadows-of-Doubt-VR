@@ -42,13 +42,33 @@ internal static class ComputerUse
     // wants more room.
     private const float ViewPullbackMeters = 0.3f;
 
-    /// <summary>How far to pull the view back from the screen while a computer is in use.</summary>
+    // Level, and the screen's front or back as found; which one faces the player is settled per call.
+    private static Vector3 s_screenNormal;
+
+    /// <summary>How far to pull the view back from the screen while a computer is in use: straight
+    /// out from the screen's face, since the game doesn't seat the player square in front of it.</summary>
     public static Vector3 ViewPullback(Vector3 cameraPosition)
     {
-        if (ScreenBounds is not { } bounds) return Vector3.zero;
-        var away = cameraPosition - bounds.center;
-        away.y = 0f;
-        return away.sqrMagnitude < 0.0001f ? Vector3.zero : away.normalized * ViewPullbackMeters;
+        if (ScreenBounds is not { } bounds || s_screenNormal == Vector3.zero) return Vector3.zero;
+        var normal = Vector3.Dot(cameraPosition - bounds.center, s_screenNormal) < 0f ? -s_screenNormal : s_screenNormal;
+        return normal * ViewPullbackMeters;
+    }
+
+    /// <summary>The screen mesh's thinnest axis, levelled.</summary>
+    private static Vector3 ScreenNormal(ComputerController computer)
+    {
+        try
+        {
+            var screen = computer.screenRenderer;
+            var mesh = screen?.GetComponent<MeshFilter>()?.sharedMesh;
+            if (screen == null || mesh == null) return Vector3.zero;
+            var size = mesh.bounds.size;
+            var local = size.x <= size.y && size.x <= size.z ? Vector3.right : size.y <= size.z ? Vector3.up : Vector3.forward;
+            var normal = screen.transform.TransformDirection(local);
+            normal.y = 0f;
+            return normal.sqrMagnitude < 0.0001f ? Vector3.zero : normal.normalized;
+        }
+        catch { return Vector3.zero; }
     }
 
     /// <summary>The computer aims its cursor with a ray from the game camera; while it does, the camera
@@ -82,7 +102,7 @@ internal static class ComputerUse
 
         if (!lockedIn)
         {
-            if (s_wasLockedIn) { s_computer = null; Set(false, "left the locked-in interaction"); }
+            if (s_wasLockedIn) { s_computer = null; s_screenNormal = Vector3.zero; Set(false, "left the locked-in interaction"); }
             s_wasLockedIn = false;
             return;
         }
@@ -98,8 +118,9 @@ internal static class ComputerUse
                 if (computer != null && computer.playerControlled) { used = computer; break; }
         }
         catch (Exception ex) { Log.LogWarning($"[ComputerUse] Search: {ex.Message}"); }
+        if (used != s_computer) s_screenNormal = used != null ? ScreenNormal(used) : Vector3.zero;
         s_computer = used;
-        Set(used != null, used != null ? $"using '{used.name}', screen {ScreenBoundsText(used)}" : "locked in, but no computer under the player's control");
+        Set(used != null, used != null ? $"using '{used.name}', screen {ScreenBoundsText(used)} facing {s_screenNormal}" :"locked in, but no computer under the player's control");
     }
 
     private static string ScreenBoundsText(ComputerController computer)
