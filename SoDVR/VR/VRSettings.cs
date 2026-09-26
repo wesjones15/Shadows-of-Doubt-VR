@@ -35,7 +35,7 @@ internal static class VRSettings
         s_sprintMultiplier = config.Bind("Movement", "SprintMultiplier", 1.8f,
             "How much faster sprinting (left stick click) is than walking.");
 
-        s_leftLaser = config.Bind("Controls", "LeftLaser", true,
+        s_leftLaser = config.Bind("Controls", "LeftLaser", false,
             "Draw a pointer line from the left controller.");
         s_itemHandRight = config.Bind("Controls", "ItemHandRight", false,
             "Hold items in the right hand instead of the left.");
