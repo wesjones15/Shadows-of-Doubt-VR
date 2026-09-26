@@ -269,7 +269,7 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
             if (canvas == null || canvas.gameObject.name != CanvasName) continue;
             try
             {
-                _panel.Attach(canvas, ScreenWorldWidth);
+                _panel.Attach(canvas, ScreenWorldWidth, transparent: true);
                 _view = _panel.CreateView(WindowPath, extension: this);
                 _view.Visible = false;
                 _wasOpen = false;

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using BepInEx.Logging;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -18,7 +19,7 @@ internal static class TransparentUIRender
 
     // UI shaders carry no LightMode tag; this is the tag SRPs match untagged passes by.
     private static readonly ShaderTagId UnlitTag = new("SRPDefaultUnlit");
-    private static bool s_loggedFirstRender;
+    private static readonly HashSet<string> s_loggedFirstRender = new();
     private static int s_warnings;
 
     public static void Install(HDAdditionalCameraData hd, Camera camera)
@@ -49,8 +50,7 @@ internal static class TransparentUIRender
             context.DrawRenderers(culling, ref drawing, ref filtering);
             context.Submit();
 
-            if (s_loggedFirstRender) return;
-            s_loggedFirstRender = true;
+            if (!s_loggedFirstRender.Add(camera.name)) return;
             Log.LogInfo($"[TransparentUIRender] First render of '{camera.name}' into {camera.targetTexture.width}x{camera.targetTexture.height}.");
         }
         catch (Exception ex)
