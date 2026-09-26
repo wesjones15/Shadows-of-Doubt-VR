@@ -22,12 +22,13 @@ internal sealed class ControllerInteraction
     private Canvas? _leftDotCanvas;
     private Image? _leftDotImage;
     private bool _leftDotVisible;
-    private Canvas? _leftLabelCanvas;
-    private TextMeshProUGUI? _leftLabelText;
 
     /// <summary>What the left hand last pointed at, as the interact log reports it.</summary>
     public static string AimTarget { get; private set; } = "nothing";
-    private bool _leftLabelVisible;
+
+    /// <summary>The name and actions of the interactable the left hand points at within reach, and
+    /// where — what the interact label shows; null when there is none.</summary>
+    public (string name, string actions, Vector3 point)? Label { get; private set; }
 
     private readonly List<GameObject> _aimDotPool = new();
     private readonly List<(float depth, Canvas canvas, Vector3 worldHit)> _aimDotHits = new();
@@ -41,13 +42,10 @@ internal sealed class ControllerInteraction
     /// <summary>Called once from BuildCameraRig after the left-hand marker GameObjects and the
     /// aim-dot pool are constructed — construction itself stays in BuildCameraRig, this just
     /// takes ownership of the references.</summary>
-    public void Discover(Canvas? leftDotCanvas, Image? leftDotImage, Canvas? leftLabelCanvas,
-                          TextMeshProUGUI? leftLabelText, List<GameObject> aimDotPool)
+    public void Discover(Canvas? leftDotCanvas, Image? leftDotImage, List<GameObject> aimDotPool)
     {
         _leftDotCanvas = leftDotCanvas;
         _leftDotImage = leftDotImage;
-        _leftLabelCanvas = leftLabelCanvas;
-        _leftLabelText = leftLabelText;
         _aimDotPool.Clear();
         _aimDotPool.AddRange(aimDotPool);
     }
@@ -196,6 +194,7 @@ internal sealed class ControllerInteraction
                                           Camera? gameCamRef, Camera? leftCam,
                                           int interactionLayerMask, float baseInteractionRange)
     {
+        Label = null;
         if (leftControllerGO == null) return;
         // Skip when VR Settings panel or pause menu is open
         if (VRSettingsPanel.RootGO?.activeSelf == true) return;
@@ -204,7 +203,6 @@ internal sealed class ControllerInteraction
         if (menuOpen || ComputerUse.InUse)
         {
             if (_leftDotVisible  && _leftDotCanvas != null) { _leftDotCanvas.gameObject.SetActive(false); _leftDotVisible = false; }
-            if (_leftLabelVisible && _leftLabelCanvas != null) { _leftLabelCanvas.gameObject.SetActive(false); _leftLabelVisible = false; }
             return;
         }
 
@@ -283,72 +281,43 @@ internal sealed class ControllerInteraction
             }
 
             // ── Label: only when pointing at an interactable within range ─
-            if (_leftLabelCanvas != null)
+            if (isInteractable && hitIC != null)
             {
-                if (isInteractable && hitIC != null)
+                string objName = "";
+                try
                 {
-                    // Build label: object name + available actions
-                    string objName = "";
-                    try
-                    {
-                        if (hitIC.interactable != null)
-                            objName = hitIC.interactable.GetName();
-                        if (string.IsNullOrEmpty(objName))
-                            objName = hitIC.gameObject.name ?? "?";
-                    }
-                    catch { objName = hitIC.gameObject.name ?? "?"; }
+                    if (hitIC.interactable != null)
+                        objName = hitIC.interactable.GetName();
+                    if (string.IsNullOrEmpty(objName))
+                        objName = hitIC.gameObject.name ?? "?";
+                }
+                catch { objName = hitIC.gameObject.name ?? "?"; }
 
-                    // Get action text from game's current interaction state.
-                    // We read currentInteractions regardless of which direction the head camera
-                    // is aimed — the label shows actions for what the HAND is pointing at.
-                    string actionText = "";
-                    try
+                // The game's current interactions follow Camera.main, which is aimed with this
+                // hand — so these are the actions for what the hand points at.
+                string actionText = "";
+                try
+                {
+                    var ic2 = InteractionController.Instance;
+                    if (ic2?.currentInteractions != null)
                     {
-                        var ic2 = InteractionController.Instance;
-                        if (ic2?.currentInteractions != null)
+                        foreach (var kvp in ic2.currentInteractions)
                         {
-                            foreach (var kvp in ic2.currentInteractions)
+                            if (kvp.Value?.currentSetting == null) continue;
+                            if (!kvp.Value.currentSetting.enabled || !kvp.Value.currentSetting.display) continue;
+                            string aText = kvp.Value.actionText ?? "";
+                            if (!string.IsNullOrEmpty(aText))
                             {
-                                if (kvp.Value?.currentSetting == null) continue;
-                                if (!kvp.Value.currentSetting.enabled || !kvp.Value.currentSetting.display) continue;
-                                string aText = kvp.Value.actionText ?? "";
-                                if (!string.IsNullOrEmpty(aText))
-                                {
-                                    if (actionText.Length > 0) actionText += " | ";
-                                    actionText += aText;
-                                }
+                                if (actionText.Length > 0) actionText += " | ";
+                                actionText += aText;
                             }
                         }
                     }
-                    catch { }
-
-                    string fullLabel = string.IsNullOrEmpty(actionText) ? objName : $"{objName}\n{actionText}";
-                    AimTarget = $"'{hitIC.name}' labelled {fullLabel.Replace("\n", " | ")}";
-                    if (_leftLabelText != null)
-                        _leftLabelText.text = fullLabel;
-
-                    // Position: at hit point, offset 0.08m above, billboard toward VR head
-                    Vector3 labelPos = lHit.point + Vector3.up * 0.08f;
-                    _leftLabelCanvas.transform.position = labelPos;
-                    if (leftCam != null)
-                    {
-                        // Billboard: face toward VR camera, Y-axis only (no tilt)
-                        Vector3 toCam = leftCam.transform.position - labelPos;
-                        toCam.y = 0f;
-                        if (toCam.sqrMagnitude > 0.001f)
-                            _leftLabelCanvas.transform.rotation = Quaternion.LookRotation(-toCam, Vector3.up);
-                    }
-                    if (!_leftLabelVisible)
-                    {
-                        _leftLabelCanvas.gameObject.SetActive(true);
-                        _leftLabelVisible = true;
-                    }
                 }
-                else if (_leftLabelVisible)
-                {
-                    _leftLabelCanvas.gameObject.SetActive(false);
-                    _leftLabelVisible = false;
-                }
+                catch { }
+
+                AimTarget = actionText.Length > 0 ? $"'{hitIC.name}' labelled {objName} | {actionText}" : $"'{hitIC.name}' labelled {objName}";
+                Label = (objName, actionText, lHit.point);
             }
         }
         catch { }

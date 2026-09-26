@@ -74,6 +74,7 @@ public class VRCamera : MonoBehaviour
     private HudRTPanels _hudRT = null!;
     private ClueMessagePanel _clueRT = null!;
     private WorldMarksPanel _worldMarks = null!;
+    private InteractLabelPanel _interactLabel = null!;
     private VRSettingsRTPanel _vrSettingsRT = null!;
     private readonly PostFXOverlayCompositor _overlay = new();
     // Render throttle: call Camera.Render() every N stereo frames.
@@ -240,6 +241,7 @@ public class VRCamera : MonoBehaviour
         _hudRT = new HudRTPanels(UILayer, _rtPanelInput);
         _clueRT = new ClueMessagePanel(UILayer, _rtPanelInput);
         _worldMarks = new WorldMarksPanel(UILayer, _rtPanelInput);
+        _interactLabel = new InteractLabelPanel(UILayer, _rtPanelInput);
         _vrSettingsRT = new VRSettingsRTPanel(UILayer, _rtPanelInput, _rtPanelGrip);
         Log.LogInfo("[VRCamera] Awake — polling for SYNCHRONIZED state before swapchain setup.");
     }
@@ -388,6 +390,8 @@ public class VRCamera : MonoBehaviour
 
             try { _worldMarks.Tick(_hudRT); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] WorldMarksPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
+            try { _interactLabel.Tick(_hudRT); }
+            catch (Exception ex) { Log.LogWarning($"[VRCamera] InteractLabelPanel.Tick: {ex.Message}"); }
 
             try { _vrSettingsRT.Tick(_leftCam); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] VRSettingsRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
@@ -820,64 +824,6 @@ public class VRCamera : MonoBehaviour
         }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] Left dot creation failed: {ex.Message}"); }
 
-        // Floating label for interactable name — small WorldSpace canvas with TMP text.
-        // IL2CPP pitfall: AddComponent<TextMeshProUGUI>() on a GO that already has Image
-        // returns null. Use SEPARATE child GOs for background and text.
-        Canvas? leftLabelCanvas = null;
-        TextMeshProUGUI? leftLabelText = null;
-        try
-        {
-            var labelGO = new GameObject("VRLeftInteractLabel");
-            labelGO.layer = UILayer;
-            UnityEngine.Object.DontDestroyOnLoad(labelGO);
-            leftLabelCanvas = labelGO.AddComponent<Canvas>();
-            leftLabelCanvas.renderMode = RenderMode.WorldSpace;
-            leftLabelCanvas.sortingOrder = 200;
-            var labelRT = labelGO.GetComponent<RectTransform>();
-            if (labelRT != null) labelRT.sizeDelta = new Vector2(400f, 60f);
-            // Scale: 400px at 0.001 = 0.4m wide — readable at arm's length
-            labelGO.transform.localScale = Vector3.one * 0.001f;
-
-            // Background: child with Image (creates RectTransform via Image)
-            var bgGO = new GameObject("LabelBG");
-            bgGO.layer = UILayer;
-            bgGO.transform.SetParent(labelGO.transform, false);
-            var bgImg = bgGO.AddComponent<Image>();
-            bgImg.raycastTarget = false;
-            bgImg.color = new Color(0f, 0f, 0f, 0.6f); // semi-transparent dark bg
-            var bgRT = bgGO.GetComponent<RectTransform>();
-            if (bgRT != null)
-            {
-                bgRT.anchorMin = Vector2.zero; bgRT.anchorMax = Vector2.one;
-                bgRT.sizeDelta = Vector2.zero;
-            }
-
-            // Text: SEPARATE child (TMP needs its own GO without Image)
-            var txtGO = new GameObject("LabelTMP");
-            txtGO.layer = UILayer;
-            txtGO.transform.SetParent(labelGO.transform, false);
-            leftLabelText = txtGO.AddComponent<TextMeshProUGUI>();
-            Log.LogInfo($"[VRCamera] Label TMP AddComponent result: {(leftLabelText != null ? "OK" : "NULL")}");
-            if (leftLabelText != null)
-            {
-                leftLabelText.fontSize = 32;
-                leftLabelText.color = new Color(32f, 32f, 32f, 1f); // HDR white (HDRP text boost)
-                leftLabelText.alignment = TextAlignmentOptions.Center;
-                leftLabelText.raycastTarget = false;
-                leftLabelText.text = "";
-                var txtRT = txtGO.GetComponent<RectTransform>();
-                if (txtRT != null)
-                {
-                    txtRT.anchorMin = Vector2.zero; txtRT.anchorMax = Vector2.one;
-                    txtRT.sizeDelta = Vector2.zero;
-                }
-            }
-
-            labelGO.SetActive(false);
-            Log.LogInfo("[VRCamera] VRLeftInteractLabel created");
-        }
-        catch (Exception ex) { Log.LogWarning($"[VRCamera] Left label creation failed: {ex.Message}"); }
-
         // Cursor dot: ScreenSpaceOverlay canvas created here, converted to WorldSpace by
         // ScanAndConvertCanvases — same pipeline as all game canvases, giving HDRP registration.
         // NOT in _ownedCanvasIds so RescanCanvasAlpha applies the ZTest Always material patch.
@@ -974,7 +920,7 @@ public class VRCamera : MonoBehaviour
             Log.LogWarning($"[VRCamera] Aim dot pool creation failed: {ex.Message}");
         }
 
-        _controllerInteraction.Discover(leftDotCanvas, leftDotImage, leftLabelCanvas, leftLabelText, _aimDotPool);
+        _controllerInteraction.Discover(leftDotCanvas, leftDotImage, _aimDotPool);
 
         // ── Phase 1: VR Settings Panel ───────────────────────────────────────────
         try
@@ -1117,6 +1063,8 @@ public class VRCamera : MonoBehaviour
 
                 try { _worldMarks.BeforeRender(_hudRT, _leftCam, _caseBoardRT.IsOpen); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] WorldMarksPanel.BeforeRender: {ex.Message}"); }
+                try { _interactLabel.BeforeRender(_controllerInteraction.Label, _leftCam); }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] InteractLabelPanel.BeforeRender: {ex.Message}"); }
 
                 // Awareness compass: reposition and reorient for VR head view.
                 _hud.UpdateCompass(_leftCam);
@@ -1130,6 +1078,8 @@ public class VRCamera : MonoBehaviour
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] ClueMessagePanel.Render: {ex.Message}"); }
                 try { _worldMarks.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] WorldMarksPanel.Render: {ex.Message}"); }
+                try { _interactLabel.Render(); }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] InteractLabelPanel.Render: {ex.Message}"); }
                 try { _menuRTPanel.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.Render: {ex.Message}"); }
                 try { _tooltipRTPanel.Render(); }
@@ -1155,6 +1105,7 @@ public class VRCamera : MonoBehaviour
                     _hudRT.AppendOverlay(_overlay);
                     _clueRT.AppendOverlay(_overlay);
                     _worldMarks.AppendOverlay(_overlay);
+                    _interactLabel.AppendOverlay(_overlay);
                     _menuRTPanel.AppendOverlay(_overlay);
                     _tooltipRTPanel.AppendOverlay(_overlay);
                     _caseBoardRT.AppendOverlay(_overlay);
