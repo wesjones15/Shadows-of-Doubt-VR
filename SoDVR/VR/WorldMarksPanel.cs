@@ -92,7 +92,11 @@ internal sealed class WorldMarksPanel
         foreach (var id in gone) { _panel.DestroyView(_marks[id].View); _marks.Remove(id); }
     }
 
-    public void Render() => _panel.Render();
+    public void Render()
+    {
+        _panel.Render();
+        ProbeRenderedMarks();
+    }
     public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay);
 
     /// <summary>Puts one mark in texture slot <paramref name="slot"/> and its view at its target.
@@ -135,7 +139,8 @@ internal sealed class WorldMarksPanel
         if (graphics == 0) return false;
 
         int id = markTransform.GetInstanceID();
-        if (!_marks.TryGetValue(id, out var mark))
+        bool created = !_marks.TryGetValue(id, out var mark);
+        if (created)
         {
             mark = new Mark(_panel.CreateView($"{kind}/{markTransform.name}", interactive: false));
             _marks[id] = mark;
@@ -162,7 +167,47 @@ internal sealed class WorldMarksPanel
 
         if (_loggedKinds.Add($"{kind}:{isPlayerSpeech}"))
             Log.LogInfo($"[WorldMarks] First {kind}{(isPlayerSpeech ? " (player)" : "")} '{markTransform.name}' target={target?.ToString() ?? "none"} crop={pixels}");
+        if (created && _probesLeft > 0)
+        {
+            _probesLeft--;
+            _probes.Enqueue(($"{kind} '{markTransform.name}'", pixels, mark.View, head.transform.position));
+        }
         return true;
+    }
+
+    // ── Diagnostics (temporary: do the marks reach the texture, and where are their views?) ────
+
+    private int _probesLeft = 6;
+    private readonly Queue<(string label, Rect crop, RTPanelView view, Vector3 head)> _probes = new();
+
+    private void ProbeRenderedMarks()
+    {
+        while (_probes.Count > 0)
+        {
+            var (label, crop, view, head) = _probes.Dequeue();
+            try
+            {
+                int w = Mathf.Max(1, (int)crop.width), h = Mathf.Max(1, (int)crop.height);
+                var readback = new Texture2D(w, h, TextureFormat.RGBA32, false);
+                var previous = RenderTexture.active;
+                try
+                {
+                    RenderTexture.active = _panel.Texture;
+                    readback.ReadPixels(new Rect(crop.x, crop.y, w, h), 0, 0);
+                    readback.Apply();
+                }
+                finally { RenderTexture.active = previous; }
+                var pixels = readback.GetPixels32();
+                int drawn = 0;
+                for (int i = 0; i < pixels.Length; i++) if (pixels[i].a > 8) drawn++;
+                UnityEngine.Object.Destroy(readback);
+
+                var position = view.Transform.position;
+                Log.LogInfo($"[WorldMarks] Probe {label}: drawn={drawn}/{pixels.Length} px in crop {crop}; view visible={view.Visible} " +
+                            $"at {position} ({Vector3.Distance(head, position):F2} m from head) size={view.WorldSize}");
+            }
+            catch (Exception ex) { Log.LogWarning($"[WorldMarks] Probe {label}: {ex.Message}"); }
+        }
     }
 
     /// <summary>Moves the mark's pivot to the centre of slot <paramref name="slot"/> on the texture —

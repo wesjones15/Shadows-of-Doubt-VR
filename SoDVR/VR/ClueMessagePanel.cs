@@ -70,6 +70,28 @@ internal sealed class ClueMessagePanel
         if (_wasBesideDialogue == besideDialogue) return;
         _wasBesideDialogue = besideDialogue;
         Log.LogInfo($"[ClueMessage] Showing {(besideDialogue ? "beside the dialogue" : "on the HUD")}: rect={rect} graphics={count}");
+        LogGraphicsOnce();
+    }
+
+    // Temporary: what the clue message is drawn with, to tell its own backdrop from a blend
+    // artefact of drawing it onto a transparent texture.
+    private bool _loggedGraphics;
+
+    private void LogGraphicsOnce()
+    {
+        if (_loggedGraphics || _container == null) return;
+        _loggedGraphics = true;
+        var sb = new System.Text.StringBuilder("[ClueMessage] Graphics:");
+        foreach (var g in _container.GetComponentsInChildren<UnityEngine.UI.Graphic>(false))
+        {
+            if (g == null || !g.enabled) continue;
+            string shader = "?";
+            try { shader = g.materialForRendering?.shader?.name ?? "null"; } catch { }
+            float alpha = g.color.a;
+            try { alpha *= g.canvasRenderer.GetAlpha() * g.canvasRenderer.GetInheritedAlpha(); } catch { }
+            sb.Append($"\n  '{g.name}' ({g.GetType().Name}) shader='{shader}' colour={g.color} drawnAlpha={alpha:F2} rect={_panel.PixelRectOf(g.rectTransform)}");
+        }
+        Log.LogInfo(sb.ToString());
     }
 
     public void Render() => _panel.Render();
