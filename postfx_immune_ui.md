@@ -91,6 +91,46 @@ rt.Create();
 
 Each frame, before the eyes render: `projectorCam.Render(); rt.GenerateMips();`
 
+**Transparent panels: render the UI outside HDRP too.** A projector set up as above always
+produces an opaque texture, whatever it clears to. HDRP renders into its own colour buffer, which
+has no alpha channel, and copies that into the target with alpha 1. Clearing to `(0,0,0,0)` still
+gave a black box (the HUD sheet, 2026-09-25), just as the second UI camera of
+`postfx_immunity_investigation.md` §2b came back opaque. The fix is to skip HDRP's render of that
+camera completely. `HDAdditionalCameraData.customRender` is a per-camera hook: when it's set,
+HDRP calls it *instead of* rendering the camera, and the hook draws the canvases itself straight
+into the ARGB32 target (`TransparentUIRender.cs`):
+
+```csharp
+hd.add_customRender((Action<ScriptableRenderContext, HDCamera>)((context, _) =>
+{
+    camera.TryGetCullingParameters(out var p);
+    var culling = context.Cull(ref p);
+    context.SetupCameraProperties(camera);
+    cmd.SetRenderTarget(camera.targetTexture);
+    cmd.ClearRenderTarget(true, true, Color.clear);        // transparent clear
+    context.ExecuteCommandBuffer(cmd);
+    var drawing = new DrawingSettings(new ShaderTagId("SRPDefaultUnlit"),  // UI shaders' untagged pass
+        new SortingSettings(camera) { criteria = SortingCriteria.CommonTransparent });
+    var filtering = new FilteringSettings(new Il2CppSystem.Nullable<RenderQueueRange>(RenderQueueRange.all),
+        camera.cullingMask);
+    context.DrawRenderers(culling, ref drawing, ref filtering);
+    context.Submit();
+}));
+```
+
+The texture's alpha is then the canvas's own coverage. The compositor already alpha-blends each
+quad, so the world shows through wherever the canvas draws nothing.
+- **Verified** by a one-time readback of the HUD texture: every cleared pixel had alpha 0, and
+  about 96% of the texture was fully clear.
+- **To use it:** `RTCanvasPanel.Attach(canvas, width, transparent: true)` (or
+  `CameraRig.SetupRTPanelProjectorCamera(..., transparent: true)`).
+- **In use on:** the HUD (`HudRTPanels`), the clue messages (`ClueMessagePanel`) and the
+  dialogue window (`DialogueRTPanel`). Other panels keep the opaque HDRP path.
+- **Not camera stacking:** this camera still renders into its own texture, and HDRP just doesn't
+  render it (see §2e of the investigation for why stacking is out).
+- **Not in this path:** HDRP's post, exposure and the rest of its pipeline. None of it is wanted
+  on UI anyway.
+
 **Where projectors sit.** Every projector culls the shared UI layer (all 32 layers are named by the
 game, so there's no free one), and a ScreenSpaceCamera canvas sits `planeDistance` in front of its
 projector. So each projector gets its own spot, 50 m apart and 500 m below the city
@@ -100,6 +140,14 @@ and at -10000 m a float resolves only ~1 mm, about 2 canvas pixels. That snapped
 steps and made a 24 px button miss its own hit test. Don't give projectors one shared pose either:
 it was tried, and after a save load it delayed the pause menu and case board by a long time
 (cause unknown, `caseboard_findings.md` §7).
+
+**One exception: the clue-message projector.** `ClueMessagePanel` shares the HUD projector's pose
+on purpose, but on a different layer (1, `TransparentFX`), so each still sees only its own canvas.
+The game's centre messages were moved out of GameCanvas onto a canvas of our own. They fly into a
+HUD status icon when a clue is finished, and sharing the pose keeps that flight in one world space.
+Only two projectors share a pose here, and neither renders the other's canvas, unlike the
+reverted case. The post-load delay's cause is still unknown, though. If menus get slow after a
+load again, suspect this shared pose first.
 
 **Separate projectors break the game's cross-canvas position copies.** In the flat game every
 canvas is one screen, and the game copies world positions between canvases (the pin quick-menu
@@ -223,6 +271,9 @@ compositor; it owns no renderer.
   accessors are silently dropped across the interop boundary.
 - Create the `CommandBuffer` lazily on first use rather than in a field initializer of an injected
   `MonoBehaviour`.
+- `HDAdditionalCameraData.customRender` is an event. The interop exposes it as `add_customRender`,
+  which takes a managed `Action<ScriptableRenderContext, HDCamera>` directly. `FilteringSettings`'
+  constructor wants an `Il2CppSystem.Nullable<RenderQueueRange>`, not the bare struct.
 
 ## Adding another immune panel
 
@@ -248,8 +299,8 @@ Use `RTCanvasPanel`, which does the projector, texture, quads and pointer regist
   accepted deliberately. Occluding them would need HDRP's internal depth buffer, which isn't
   exposed through the camera target.
 - **Only what goes through the compositor is immune.** Anything still rendered as world-space canvas
-  geometry by the eye cameras (here: HUD, minimap and the other not-yet-migrated canvases) still gets
-  DoF, TAA and the rest.
+  geometry by the eye cameras (here: the VR Settings panel and the other not-yet-migrated canvases)
+  still gets DoF, TAA and the rest.
 - **Text resolution is bounded by the eye buffer.** The panel is resampled into the eye RT (rendered
   at 0.7× the headset's recommended resolution here), then again by the compositor's lens
   distortion. For sharper text, a panel could be submitted as an OpenXR `XrCompositionLayerQuad`
