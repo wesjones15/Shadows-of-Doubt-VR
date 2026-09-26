@@ -41,6 +41,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     private readonly string?[] _regionPaths;
     private readonly Func<bool>? _shownWhile;
     private readonly bool _wholeCanvas;
+    private readonly bool _transparent;
     private readonly List<Region> _regions = new();
 
     private int _discoveryCooldown;
@@ -63,12 +64,14 @@ internal sealed class CaseBoardPanel : IRTGripTarget
     /// and hiding it then would leave nothing to pan back with).</param>
     /// <param name="shownWhile">The game's own "this is open" state, for a panel that fades out after
     /// closing: the panel hides the moment it turns false instead of waiting out the fade.</param>
+    /// <param name="transparent">See <see cref="CameraRig.SetupRTPanelProjectorCamera"/>.</param>
     public CaseBoardPanel(string canvasName, float screenWorldWidth, float distanceInFrontOfAnchor,
         bool draggable, int quadLayer, RTPanelInput input, RTPanelGrip grip,
         IRTPointerExtension? pointerExtension = null, string[]? regions = null, Func<bool>? shownWhile = null,
-        bool wholeCanvas = false)
+        bool wholeCanvas = false, bool transparent = false)
     {
         _wholeCanvas = wholeCanvas;
+        _transparent = transparent;
         _shownWhile = shownWhile;
         _pointerExtension = pointerExtension;
         _canvasName = canvasName;
@@ -234,7 +237,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
             if (canvas == null || canvas.gameObject.name != _canvasName) continue;
             try
             {
-                _panel.Attach(canvas, _screenWorldWidth);
+                _panel.Attach(canvas, _screenWorldWidth, _transparent);
                 foreach (var path in _regionPaths)
                     _regions.Add(new Region(path, _panel.CreateView(path ?? "Content", extension: _pointerExtension)));
                 _wasShowing = false;
