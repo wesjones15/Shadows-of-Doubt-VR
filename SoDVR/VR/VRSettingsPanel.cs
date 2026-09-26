@@ -594,6 +594,29 @@ public static class VRSettingsPanel
         SetPaneVisible(_controlsPaneRT,  _controlsGroup,  false);
         SetPaneVisible(_generalPaneRT,   _generalGroup,   false);
         Log.LogInfo("[VRSettingsPanel] Shown.");
+        LogGameSettingsOnce();
+    }
+
+    // Temporary: every setting the game's own options menu defines, to compare with the tabs here.
+    private static bool s_loggedGameSettings;
+
+    private static void LogGameSettingsOnce()
+    {
+        if (s_loggedGameSettings) return;
+        try
+        {
+            var controls = PlayerPrefsController.Instance?.gameSettingControls;
+            if (controls == null) return;
+            s_loggedGameSettings = true;
+            var sb = new System.Text.StringBuilder($"[VRSettingsPanel] Game settings ({controls.Count}):");
+            for (int i = 0; i < controls.Count; i++)
+            {
+                var s = controls[i];
+                if (s != null) sb.Append($"\n  '{s.identifier}' = {s.intValue}");
+            }
+            Log.LogInfo(sb.ToString());
+        }
+        catch (Exception ex) { Log.LogWarning($"[VRSettingsPanel] Game settings log: {ex.Message}"); }
     }
 
     public static void Hide()
