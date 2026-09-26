@@ -67,10 +67,10 @@ internal sealed class DialogueRTPanel : IRTGripTarget, IRTPointerExtension
     public bool IsOpen => _view != null && _view.Visible;
     public RTPanelView? OpenView => IsOpen ? _view : null;
 
-    public void Tick(Camera? head)
+    public void Tick(Camera? head, HudRTPanels hud)
     {
         TickWindow(head);
-        _speech.Tick(OpenView, () => PoseInFrontOf(head != null ? head.transform : null));
+        _speech.Tick(OpenView, hud);
     }
 
     private void TickWindow(Camera? head)

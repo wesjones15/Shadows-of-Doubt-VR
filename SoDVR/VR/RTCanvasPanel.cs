@@ -385,6 +385,9 @@ internal sealed class RTPanelView
     /// <summary>World size of one texture pixel on this view.</summary>
     public float MetersPerPixel => _metersPerPixel * _scale;
 
+    /// <summary>World size of one texture pixel at <see cref="Scale"/> 1 — the panel's own scale.</summary>
+    public float BaseMetersPerPixel => _metersPerPixel;
+
     private float _scale = 1f;
 
     /// <summary>Size multiplier on the panel's metres-per-pixel, for this view alone.</summary>

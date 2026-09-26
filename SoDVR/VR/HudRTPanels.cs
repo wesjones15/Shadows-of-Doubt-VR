@@ -115,7 +115,7 @@ internal sealed class HudRTPanels
         if (!IsShowing || _panel.Texture == null) return false;
         if (!_onBoard)
         {
-            view.Scale = _sheet!.Scale;
+            view.Scale = _sheet!.MetersPerPixel / view.BaseMetersPerPixel;
             view.SetCanvasPose(_sheet.Transform.position, _sheet.Transform.rotation);
             return true;
         }
@@ -135,7 +135,7 @@ internal sealed class HudRTPanels
         var texture = _panel.Texture;
         var fromCentre = (pixel - new Vector2(texture.width, texture.height) * 0.5f) * _sheet.MetersPerPixel;
         var rotation = _sheet.Transform.rotation;
-        view.Scale = _sheet.Scale;
+        view.Scale = _sheet.MetersPerPixel / view.BaseMetersPerPixel;
         view.SetPose(_sheet.Transform.position + rotation * new Vector3(fromCentre.x, fromCentre.y, 0f), rotation);
         return true;
     }
@@ -273,7 +273,7 @@ internal sealed class HudRTPanels
         var anchor = _boardAnchor!;
         var texture = _panel.Texture!;
         float mpp = BoardMetersPerPixel;
-        view.Scale = mpp / _panel.MetersPerPixel;
+        view.Scale = mpp / view.BaseMetersPerPixel;
 
         var center = rect.center + shift;
         var fromBoardCentre = new Vector3((center.x - 0.5f * texture.width) * mpp, (center.y - 0.5f * texture.height) * mpp, 0f);

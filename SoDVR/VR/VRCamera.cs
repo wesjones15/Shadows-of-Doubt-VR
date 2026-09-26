@@ -371,7 +371,7 @@ public class VRCamera : MonoBehaviour
             try { _caseBoardRT.Tick(_leftCam); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] CaseBoardRTController.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
-            try { _dialogueRT.Tick(_leftCam); }
+            try { _dialogueRT.Tick(_leftCam, _hudRT); }
             catch (Exception ex) { Log.LogWarning($"[VRCamera] DialogueRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
             try { _minimapRT.Tick(_leftCam, transform, _caseBoardRT.IsOpen, _caseBoardRT.Anchor); }

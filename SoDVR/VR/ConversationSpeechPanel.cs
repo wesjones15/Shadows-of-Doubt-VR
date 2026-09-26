@@ -25,7 +25,7 @@ internal sealed class ConversationSpeechPanel
     private RTPanelView? _view;
     private RectTransform? _anchor;
     private int _discoveryCooldown;
-    private bool _wasShowingAlone;
+    private bool _wasOnHud;
     private bool _loggedTurnedBubble;
 
     public ConversationSpeechPanel(int quadLayer, RTPanelInput input, float screenWorldWidth)
@@ -35,8 +35,8 @@ internal sealed class ConversationSpeechPanel
     }
 
     /// <param name="dialogueView">The dialogue window while a conversation is open, else null.</param>
-    /// <param name="aloneFallback">Where to show subtitles that come up outside a conversation.</param>
-    public void Tick(RTPanelView? dialogueView, Func<(Vector3 position, Quaternion rotation)> aloneFallback)
+    /// <param name="hud">Subtitles that come up outside a conversation go where the HUD shows them.</param>
+    public void Tick(RTPanelView? dialogueView, HudRTPanels hud)
     {
         if (!_panel.IsAttached || _anchor == null)
         {
@@ -51,23 +51,23 @@ internal sealed class ConversationSpeechPanel
         var rect = _panel.ContentPixelRect(_anchor, ContentMarginPixels, out int count);
         bool showing = count > 0;
         _view!.Visible = showing;
-        if (!showing) { _wasShowingAlone = false; return; }
+        if (!showing) { _wasOnHud = false; return; }
         _view.SetPixelRect(rect);
 
         if (dialogueView != null)
         {
+            _view.Scale = 1f;
             var rotation = dialogueView.Transform.rotation;
             float lift = 0.5f * (dialogueView.WorldSize.y + _view.WorldSize.y) + GapMeters;
             _view.SetPose(dialogueView.Transform.position + rotation * (Vector3.up * lift), rotation);
-            _wasShowingAlone = false;
+            _wasOnHud = false;
+            return;
         }
-        else if (!_wasShowingAlone)
-        {
-            var (position, rotation) = aloneFallback();
-            _view.SetPose(position, rotation);
-            _wasShowingAlone = true;
-            Log.LogInfo("[ConversationSpeech] Subtitles outside a conversation — placed in front of the head");
-        }
+
+        _view.Visible = hud.PlaceLikeHud(_view);
+        if (_wasOnHud || !_view.Visible) return;
+        _wasOnHud = true;
+        Log.LogInfo("[ConversationSpeech] Subtitles outside a conversation — shown on the HUD");
     }
 
     public void Render()
@@ -125,7 +125,7 @@ internal sealed class ConversationSpeechPanel
         _panel.Detach();
         _view = null;
         _anchor = null;
-        _wasShowingAlone = false;
+        _wasOnHud = false;
         Log.LogInfo("[ConversationSpeech] Anchor gone (scene reload?) — RT panel torn down, will rediscover.");
     }
 }
