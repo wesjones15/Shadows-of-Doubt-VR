@@ -333,6 +333,23 @@ internal static class CameraRig
     /// never draw it themselves (that's what put it under their post stack). The GameObject's
     /// active state remains the panel's visibility flag.
     /// </summary>
+    // Panel textures come out of the UI render with colour already weighted by coverage
+    // (premultiplied), so they composite as they are: UI/Default would weight them again — darkening
+    // soft edges — and can't show additive glows, which add colour without coverage.
+    private const string PremultipliedShaderName = "Legacy Shaders/Particles/Alpha Blended Premultiply";
+    private static Shader? s_panelShader;
+
+    private static Shader? PanelShader()
+    {
+        if (s_panelShader != null) return s_panelShader;
+        s_panelShader = Shader.Find(PremultipliedShaderName);
+        Log.LogInfo(s_panelShader != null
+            ? $"[CameraRig] RT panels composite premultiplied ('{PremultipliedShaderName}')"
+            : $"[CameraRig] '{PremultipliedShaderName}' isn't in this build — RT panels composite with UI/Default");
+        if (s_panelShader == null) s_panelShader = Shader.Find("UI/Default");
+        return s_panelShader;
+    }
+
     public static (GameObject quad, Collider collider, Material material, Mesh mesh) CreateRTPanelQuad(
         string logTag, int layer, RenderTexture rt)
     {
@@ -345,7 +362,7 @@ internal static class CameraRig
         var mesh = quadGO.GetComponent<MeshFilter>().sharedMesh;
 
         var mr = quadGO.GetComponent<MeshRenderer>();
-        var shader = Shader.Find("UI/Default");
+        var shader = PanelShader();
         var material = shader != null ? new Material(shader) : mr.material;
         material.mainTexture = rt;
         mr.material = material;
@@ -366,6 +383,9 @@ internal static class CameraRig
         var (quadGO, collider, material, primitiveMesh) = CreateRTPanelQuad(logTag, layer, rt);
         var viewMesh = UnityEngine.Object.Instantiate(primitiveMesh);
         viewMesh.name = $"SoDVR_{logTag}_ViewMesh";
+        var white = new Color[viewMesh.vertexCount];
+        for (int i = 0; i < white.Length; i++) white[i] = Color.white;
+        viewMesh.colors = white;
         quadGO.GetComponent<MeshFilter>().sharedMesh = viewMesh;
         return (quadGO, collider, material, viewMesh);
     }

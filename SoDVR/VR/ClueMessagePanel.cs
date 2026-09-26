@@ -55,7 +55,6 @@ internal sealed class ClueMessagePanel
         _view!.Visible = showing;
         if (!showing) { _wasBesideDialogue = null; return; }
         _view.SetPixelRect(rect);
-        AdditiveGraphics.MakeAlphaBlended(_container);
 
         if (dialogueView != null)
         {

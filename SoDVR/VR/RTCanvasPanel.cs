@@ -39,6 +39,10 @@ internal sealed class RTCanvasPanel
         _input = input;
     }
 
+    private const int AdditiveSweepFrames = 10;
+    private bool _transparent;
+    private int _additiveSweepCountdown;
+
     public Canvas? Canvas { get; private set; }
     public Camera? ProjectorCamera { get; private set; }
     public RenderTexture? Texture { get; private set; }
@@ -103,6 +107,8 @@ internal sealed class RTCanvasPanel
         gr.blockingMask = 0;
 
         Canvas = canvas;
+        _transparent = transparent;
+        _additiveSweepCountdown = 0;
         MetersPerPixel = metersPerPixel;
         s_attached.Add(this);
         var scaler = canvas.GetComponent<CanvasScaler>();
@@ -145,6 +151,12 @@ internal sealed class RTCanvasPanel
         if (ProjectorCamera == null || Texture == null || !AnyViewVisible()) return;
         try
         {
+            // The game spawns UI all the time (messages, menus), so glows are caught as they appear.
+            if (_transparent && Canvas != null && --_additiveSweepCountdown <= 0)
+            {
+                _additiveSweepCountdown = AdditiveSweepFrames;
+                AdditiveGraphics.Sweep(Canvas.transform);
+            }
             ProjectorCamera.Render();
             Texture.GenerateMips();
         }
