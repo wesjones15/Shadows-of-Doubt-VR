@@ -9,7 +9,6 @@ namespace SoDVR.VR;
 /// Every screen canvas no dedicated RT panel owns — the splash, mod.io, the prototype builder, and
 /// whatever else the game puts up — each on an RT panel of its own: cropped to what it shows, opened
 /// in front of the head, clickable, grip-draggable, and reopened where the player last left it.
-/// Canvases are claimed before the legacy scanner runs, so it never converts them.
 /// </summary>
 internal sealed class LooseCanvasPanels
 {
@@ -17,10 +16,11 @@ internal sealed class LooseCanvasPanels
 
     // The screen's width in the world; the same as the menu panel, so a full-screen canvas reads alike.
     private const float ScreenWorldWidth = 1.6f;
+    // The game can spawn hundreds of map-component canvases; looking every frame would stall.
+    private const int DiscoveryFrames = 90;
 
     private static readonly HashSet<string> s_excluded = new(StringComparer.Ordinal)
     {
-        "VRCursorCanvasInternal",             // the legacy cursor
         "VirtualCursorCanvas & EventSystem",  // the game's gamepad cursor
     };
 
@@ -32,6 +32,7 @@ internal sealed class LooseCanvasPanels
     private readonly Dictionary<int, LoosePanel> _panels = new();
     // Head-yaw-relative pose each canvas was last left at, by name: it outlives the canvas.
     private readonly Dictionary<string, (Vector3 offset, Quaternion rotation)> _layouts = new(StringComparer.Ordinal);
+    private int _discoveryCountdown;
 
     public LooseCanvasPanels(int quadLayer, RTPanelInput input, RTPanelGrip grip)
     {
@@ -40,8 +41,7 @@ internal sealed class LooseCanvasPanels
         _grip = grip;
     }
 
-    /// <summary>Finds and claims new canvases. Runs just before the legacy scan.</summary>
-    public void Discover()
+    private void Discover()
     {
         Canvas[] all;
         try { all = Resources.FindObjectsOfTypeAll<Canvas>(); }
@@ -56,7 +56,6 @@ internal sealed class LooseCanvasPanels
             if (rejection != null) continue;
             try
             {
-                RTOwnedCanvases.Claim(canvas);
                 _panels[id] = new LoosePanel(this, canvas);
             }
             catch (Exception ex) { Log.LogWarning($"[LooseCanvas] '{canvas.name}' setup failed: {ex.Message}"); }
@@ -65,6 +64,11 @@ internal sealed class LooseCanvasPanels
 
     public void Tick(Camera? head)
     {
+        if (--_discoveryCountdown <= 0)
+        {
+            _discoveryCountdown = DiscoveryFrames;
+            Discover();
+        }
         List<int>? dead = null;
         foreach (var (id, panel) in _panels)
             if (!panel.Tick(head)) (dead ??= new()).Add(id);

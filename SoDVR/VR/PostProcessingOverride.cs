@@ -7,10 +7,8 @@ using UnityEngine.Rendering.HighDefinition;
 namespace SoDVR.VR;
 
 /// <summary>
-/// Temporary global override, not a permanent fix. RT panels no longer need it (they're drawn after
-/// HDRP's post stack; see postfx_immune_ui.md), but legacy WorldSpace canvases such as the case
-/// board are still rendered by the eye cameras and get blurred by DepthOfField. This keeps them
-/// readable while they're investigated and migrated to RT panels; delete it once they are.
+/// Global switch that forces HDRP DepthOfField off. The mod's panels are drawn after HDRP's post stack
+/// (postfx_immune_ui.md) and never need it; it remains as a player preference.
 /// </summary>
 internal static class PostProcessingOverride
 {

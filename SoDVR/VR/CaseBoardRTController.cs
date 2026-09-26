@@ -7,10 +7,7 @@ namespace SoDVR.VR;
 /// Coordinates the case board's RT panels. Owns the one verified board-open signal
 /// (<c>ActionPanelCanvas.activeInHierarchy</c> — see caseboard_findings.md §6) and the board anchor:
 /// a transform captured in front of the player each time the board opens, which every case-board
-/// panel (and, until they migrate, the legacy case-board canvases) is laid out relative to.
-///
-/// The anchor sits exactly where the legacy pipeline used to put ActionPanelCanvas's centre, so
-/// legacy code that measured offsets from that canvas keeps working unchanged against the anchor.
+/// panel is laid out relative to.
 /// </summary>
 internal sealed class CaseBoardRTController
 {

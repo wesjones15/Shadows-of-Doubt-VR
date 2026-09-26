@@ -22,7 +22,7 @@ internal interface IRTGripTarget
 }
 
 /// <summary>
-/// Grip 6DOF drag of RT panels — the legacy WorldSpace grip-drag's math, ported: the point grabbed
+/// Grip 6DOF drag of RT panels: the point grabbed
 /// stays under the controller ray and the panel keeps its rotation relative to the controller.
 /// Belongs to whichever hand carries the laser (RTPanelInput's active hand), so pointing and
 /// grabbing are always the same hand.
@@ -53,12 +53,7 @@ internal sealed class RTPanelGrip
         if (_dragging == target) _dragging = null;
     }
 
-    /// <summary>Returns true while this frame's grip belongs to an RT panel (grabbed one this
-    /// press, or is mid-drag) — the legacy grip-drag must not start then.</summary>
-    /// <param name="legacyHitDistance">Ray distance to the legacy UI the right-hand ray last hit,
-    /// or +Infinity: an RT target behind it (a panel behind a legacy canvas) must not take
-    /// the grip from it.</param>
-    public bool Update(GameObject? rightControllerGO, GameObject? leftControllerGO, bool activeHandIsRight, float legacyHitDistance)
+    public void Update(GameObject? rightControllerGO, GameObject? leftControllerGO, bool activeHandIsRight)
     {
         OpenXRManager.GetGripState(true, out bool rightGrip);
         OpenXRManager.GetGripState(false, out bool leftGrip);
@@ -74,13 +69,13 @@ internal sealed class RTPanelGrip
         bool released = _dragging != null && !gripNow;
 
         var hand = useRight ? rightControllerGO : leftControllerGO;
-        if (hand == null) { EndDrag(); return false; }
+        if (hand == null) { EndDrag(); return; }
         var ctrl = hand.transform;
         var ray = new Ray(ctrl.position, ctrl.forward);
 
         if (pressed && _dragging == null)
         {
-            TryBeginDrag(ctrl, ray, useRight ? legacyHitDistance : float.PositiveInfinity);
+            TryBeginDrag(ctrl, ray);
             _draggingWithRightHand = useRight;
         }
 
@@ -91,14 +86,12 @@ internal sealed class RTPanelGrip
             _dragging.SetGripPose(newHit - newRot * _hitOffsetFromTarget, newRot);
         }
 
-        bool owned = _dragging != null;
         if (released) EndDrag();
-        return owned;
     }
 
-    private void TryBeginDrag(Transform ctrl, Ray ray, float legacyHitDistance)
+    private void TryBeginDrag(Transform ctrl, Ray ray)
     {
-        float bestDist = Mathf.Min(MaxGrabDistance, legacyHitDistance);
+        float bestDist = MaxGrabDistance;
         IRTGripTarget? best = null;
         foreach (var target in _targets)
             if (target.TryGripHit(ray, out float d) && d < bestDist) { best = target; bestDist = d; }

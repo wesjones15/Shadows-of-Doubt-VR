@@ -59,10 +59,7 @@ public class VRCamera : MonoBehaviour
     private readonly HeldItemTracker _heldItem = new();
     private readonly HudController _hud = new();
     private readonly LocomotionController _locomotion = new();
-    private readonly ControllerInteraction _controllerInteraction = new();
-    private readonly LegacyCanvasInteraction _legacyCanvases = new();
-    private readonly CanvasMaterialPatcher _materialPatcher = new();
-    private readonly CanvasPlacement _canvasPlacement = new();
+    private readonly ControllerPoses _controllerPoses = new();
     private readonly RTPanelInput _rtPanelInput = new();
     private readonly RTPanelGrip _rtPanelGrip = new();
     private MenuRTPanel _menuRTPanel = null!;
@@ -90,10 +87,6 @@ public class VRCamera : MonoBehaviour
     // ── UI / Canvas constants ─────────────────────────────────────────────────
     private const float UIDistance       = 2.0f;    // metres in front of head (fallback for uncategorised)
     private const float UIVerticalOffset = 0.0f;    // metres up/down from eye level (fallback)
-    // Scan rate reduced from 30 → 90 frames: the game can spawn hundreds of
-    // map-component canvases; scanning them all at 2 Hz caused freezes.
-    private const int   UICanvasScanRate = 90;      // Unity frames between canvas scans
-
     // Per-frame state
     private long  _displayTime;
     private bool  _frameOpen;
@@ -105,62 +98,9 @@ public class VRCamera : MonoBehaviour
     private OpenXRManager.EyePose _leftEye, _rightEye;
     private bool _posesValid;
 
-    // ── UI canvas tracking ────────────────────────────────────────────────────
-    // Maps Canvas instanceID → Canvas for every screen-space canvas we've converted
-    // to WorldSpace.  Each canvas is placed in front of the head ONCE on first appearance
-    // and then stays at that world position so the player can look around it freely.
-    private readonly Dictionary<int, Canvas> _managedCanvases = new();
-    private int _canvasTick; // counts Update() calls; resets at UICanvasScanRate
-    private int _forceScanFrames; // when >0, force a scan every frame (counts down)
-    // Rate-limit RescanCanvasAlpha: maps canvas instance ID → frame number of last rescan.
-    // Prevents rescanning the same canvas every 90 frames (a huge canvas — the map had 1300+
-    // graphics — creates that many materials per rescan cycle, causing D3D device loss crashes).
-    private readonly Dictionary<int, int> _lastRescanFrame = new();
-
-    // Tracks which canvas IDs have already been placed in world space.
-    // Once in this set the canvas transform is never moved again by us.
-    private readonly HashSet<int>         _positionedCanvases = new();
-    // Last VR-placed world position + rotation for each canvas (set in LateUpdate/pre-render,
-    // re-enforced in Update before aim-dot scan so the game's overwrites don't desync visuals vs interaction).
-    private readonly Dictionary<int, (Vector3 pos, Quaternion rot, Vector3 scale)> _canvasVRPose = new();
-    // Tracks the last-known active state of each managed canvas (by instance ID).
-    // When a canvas transitions false→true AND its name is in s_recentreOnActivate,
-    // we clear it from _positionedCanvases so it gets repositioned at the current head.
-    // HUD canvases (StatusDisplayCanvas, …) are NOT in the whitelist and are
-    // never auto-repositioned, regardless of how long they were inactive.
-    private readonly Dictionary<int,bool> _canvasWasActive = new();
-    // Nested canvas IDs: these live inside a parent canvas and must not be independently
-    // positioned (their transform is driven by the parent canvas hierarchy).
-    private readonly HashSet<int>         _nestedCanvasIds = new();
-
-    // ── CaseBoard grip-relocate ───────────────────────────────────────────────
-    // Grip-drag offset stored relative to the case-board anchor, which is re-placed each time the
-    // case board opens, so offsets stay consistent.
-    private readonly Dictionary<int, (Vector3 offset, Quaternion rot)> _gripDragAnchorOffsets = new();
-    private readonly Dictionary<int, (Vector3 pos, Quaternion rot)> _gripDragEnforce = new(); // absolute world positions enforced every LateUpdate
-
-    // Canvases without CanvasGroup that have enough active Graphics to be considered
-    // "actually showing content".  Updated every scan cycle.  Used by depth scan / click
-    // system to skip MenuCanvas when the pause menu is hidden (game hides it without CG).
-    private readonly HashSet<int> _noGroupInteractable = new();
-
-    // Canvas instance IDs that belong to VRMod itself (settings panel, cursor, etc.).
-    // Every mutation pass (RescanCanvasAlpha, etc.) must skip canvases in this set —
-    // we own those materials and manage them directly.
-    private readonly HashSet<int> _ownedCanvasIds = new();
-
-    // Fullscreen "fade overlay" Graphics that should stay at alpha=0 during VR gameplay.
-    // The game uses these for fade-to-black transitions; they end up opaque and bury buttons.
-    // We force their vertex alpha to 0 every frame so the menu remains readable.
-    // Key = Graphic instanceID.
-    private readonly Dictionary<int, Graphic> _managedFades = new();
-
-    // ── VR settings panel (Phase 0 test canvas) ──────────────────────────────
-
-    // ── Controller / cursor dot / laser ─────────────────────────────────────
+    // ── Controllers ────────────────────────────────────────────────────────────
     private GameObject?   _rightControllerGO;
     private GameObject?   _leftControllerGO;
-    private LineRenderer? _laserLine;         // laser pointer beam from right controller
 
     // ── Left hand raycast params (cached from game) ──────────────────
     private int   _interactionLayerMask = ~0;     // Toolbox.Instance.interactionRayLayerMask
@@ -176,7 +116,7 @@ public class VRCamera : MonoBehaviour
 
     // ── Scene-change guard ────────────────────────────────────────────────────
     // When Unity loads a new scene (save load, new game) we stop calling
-    // ScanAndConvertCanvases for 120 frames.  This gives SaveStateController
+    // ticking the panels for 120 frames.  This gives SaveStateController
     // and other scene-init code a clean window before we start touching canvases
     // and camera components — the source of the "Can't remove Rigidbody" crash.
     private int  _lastSceneHandle;
@@ -200,28 +140,8 @@ public class VRCamera : MonoBehaviour
     private FirstPersonItemController? _fpsItemController; // cached for item hand tracking
     private InteractionController? _interactionController;  // cached for carried-object tracking
 
-    // Cursor: ScreenSpaceOverlay canvas "VRCursorCanvasInternal" created at rig-build time.
-    // ScanAndConvertCanvases converts it to WorldSpace via the normal pipeline — giving it proper
-    // HDRP registration and the ZTest Always material patch from RescanCanvasAlpha.
-    // It is NOT in _ownedCanvasIds so all mutation passes (including the ZTest patch) run on it.
-    // PositionCanvases repositions it every frame (never added to _positionedCanvases).
-    // The dot moves via anchoredPosition (2D) inside this fixed-distance canvas.
-    private Canvas?        _cursorCanvas;         // VRCursorCanvasInternal once scan converts it
-    private RectTransform? _cursorRect;           // the dot's RectTransform inside _cursorCanvas
-    private Vector3?       _uiPointerPoint;       // where the laser is on UI (RT panel or legacy canvas) — TooltipRTPanel places menus and tooltips there
-    private float          _lastLegacyHitDistance = float.PositiveInfinity; // last frame's — the grip runs before this frame's aim scan
-    private bool           _cursorHasTarget;      // true when depth scan found a canvas rect hit this frame
-    private Canvas?        _cursorTargetCanvas;   // the nearest aimed-at canvas (for button mapping: A=RMB, B=MMB)
-    private Vector3        _cursorTargetPos;      // world pos of nearest aimed-at canvas
-    private Quaternion     _cursorTargetRot;      // world rot of nearest aimed-at canvas
-
-    // ── Multi-dot aim system ─────────────────────────────────────────────────
-    // World-space quads that show an aim dot on EVERY canvas the controller ray passes through,
-    // not just the nearest.  Lets user see where they're aiming on the pin board even with
-    // notes/notebook in front of it.
-    private readonly List<GameObject> _aimDotPool = new();
-    private const int   AimDotPoolSize = 8;
-    private const float AimDotSize     = 0.012f; // 1.2 cm world-space quad
+    // Where the laser is on an RT panel — TooltipRTPanel places menus and tooltips there.
+    private Vector3? _uiPointerPoint;
 
     // ── New controller button state (edge detection) ──────────────────────────
     private bool _jumpBtnPrev;
@@ -269,8 +189,8 @@ public class VRCamera : MonoBehaviour
         PostProcessingOverride.Tick();
         _voidRoom.UpdatePressAnyKeyClick(_gameCam == null);
 
-        // Detect scene changes and apply a grace period during which we skip
-        // ScanAndConvertCanvases.  This prevents us from touching canvas/camera
+        // Detect scene changes and apply a grace period during which the panels don't tick.
+        // This prevents us from touching canvas/camera
         // components while SaveStateController is reconstructing the physics hierarchy.
         try
         {
@@ -278,7 +198,6 @@ public class VRCamera : MonoBehaviour
             if (_lastSceneHandle != 0 && sh != _lastSceneHandle)
             {
                 _sceneLoadGrace = 120;  // ~2 s at 60 fps
-                _canvasTick     = 0;
                 _movementDiscoveryDone = false;
                 _locomotion.ResetForRealSceneChange();
 
@@ -298,7 +217,6 @@ public class VRCamera : MonoBehaviour
             if (_prevGameCamValid && !gcValid)
             {
                 _sceneLoadGrace = 120;
-                _canvasTick     = 0;
                 _movementDiscoveryDone = false;
 
                 _fpsControllerTransform = null;
@@ -341,30 +259,7 @@ public class VRCamera : MonoBehaviour
             }
         }
 
-        // Scan for new screen-space canvases and convert them to WorldSpace.
-        // Skipped during the post-scene-load grace period.
-        bool forceScan = _forceScanFrames > 0;
-        if (forceScan) _forceScanFrames--;
-        if ((++_canvasTick >= UICanvasScanRate || forceScan) && _sceneLoadGrace == 0)
-        {
-            _canvasTick = 0;
-            try { _looseCanvases.Discover(); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] LooseCanvasPanels.Discover: {ex.Message}"); }
-            try
-            {
-                CanvasConversionScanner.ScanAndConvertCanvases(
-                    _materialPatcher, _ownedCanvasIds,
-                    _managedCanvases, _positionedCanvases, _canvasWasActive, _nestedCanvasIds,
-                    _gripDragEnforce,
-                    _frameCount, _lastRescanFrame,
-                    _managedFades, _leftCam,
-                    _noGroupInteractable);
-            }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] ScanAndConvertCanvases outer: {ex.GetType().Name}: {ex.Message}"); }
-        }
-
-        // MenuCanvas is owned outright by MenuRTPanel, not the scanner above — same
-        // scene-load-grace gating so it never touches canvas/camera state mid-load either.
+        // Panels never touch canvas/camera state mid-load.
         if (_sceneLoadGrace == 0)
         {
             try { _menuRTPanel.Tick(_leftCam); }
@@ -414,25 +309,16 @@ public class VRCamera : MonoBehaviour
             catch (Exception ex) { Log.LogWarning($"[VRCamera] LooseCanvasPanels.Tick: {ex.Message}"); }
         }
 
-        // F8: re-centre all canvases in front of the current head pose.
-        // Useful after loading or if menus appear at the wrong height/direction.
+        // F8: re-place the case board in front of the current head pose.
         if (Input.GetKeyDown(KeyCode.F8))
         {
-            _positionedCanvases.Clear();
-            _canvasVRPose.Clear();
             _caseBoardRT.Recenter(_leftCam);
-            Log.LogInfo("[VRCamera] Recenter: canvases will be re-placed on next LateUpdate.");
+            Log.LogInfo("[VRCamera] Recenter: case board re-placed.");
         }
 
         // F10: toggle the VR settings panel.
         if (Input.GetKeyDown(KeyCode.F10))
             VRSettingsPanel.Toggle();
-
-        // End key: diagnostic dump — logs active text graphics on all managed canvases.
-        // Shows vertex colour, _FaceColor (TMP), mat.color and local-Z so we can diagnose
-        // invisible text (colour too dark at EV=0, wrong alpha, z-fighting, etc.).
-        if (Input.GetKeyDown(KeyCode.End))
-            TextGraphicDump.DumpAll(_managedCanvases);
 
         // F9: diagnostic dump — logs every Canvas in the scene (not just managed ones), so an
         // unfamiliar canvas (e.g. Inventory, or whichever WindowCanvas-nested Note/Notebook is
@@ -617,11 +503,11 @@ public class VRCamera : MonoBehaviour
                 bool isPausedForLocomotion = caseBoardOpenForInput || _menuRTPanel.IsShowing;
                 bool vrSettingsOpenForInput = VRSettingsPanel.RootGO?.activeSelf == true;
 
-                bool pointerOnUI = _cursorHasTarget || _rtPanelInput.HasFocus;
+                bool pointerOnUI = _rtPanelInput.HasFocus;
 
                 _locomotion.UpdateSnapTurn(transform, _voidRoom.InVoidMode, _rtPanelInput.HasFocus);
                 _locomotion.UpdateLocomotion(_leftCam, _voidRoom.InVoidMode, isPausedForLocomotion, _sceneLoadGrace);
-                if (_locomotion.UpdateMenuButton()) _canvasTick = UICanvasScanRate;
+                _locomotion.UpdateMenuButton();
                 _locomotion.UpdateJump(caseBoardOpenForInput, pointerOnUI, _movementDiscoveryDone, _sceneLoadGrace);
                 _locomotion.UpdateInteract(pointerOnUI || isPausedForLocomotion);
                 _locomotion.UpdateCrouch();
@@ -688,15 +574,6 @@ public class VRCamera : MonoBehaviour
 
     private void BuildCameraRig()
     {
-        // Clear cached UI material clones so they're rebuilt with current boost settings.
-        TextMaterialPatcher.s_uiZTestMats.Clear();
-        TextMaterialPatcher.s_vertexAlphaFixed.Clear();
-        TextMaterialPatcher.s_patchedMaterialIds.Clear();
-        TextMaterialPatcher.s_patchedGraphicPtrs.Clear();
-        TextMaterialPatcher.s_patchedMats.Clear();
-        TextMaterialPatcher.s_matCapWarned = false;
-        _lastRescanFrame.Clear();
-
         int w = OpenXRManager.SwapchainWidth;
         int h = OpenXRManager.SwapchainHeight;
 
@@ -740,141 +617,6 @@ public class VRCamera : MonoBehaviour
         leftCtrlGO.layer = UILayer;
         leftCtrlGO.transform.SetParent(_cameraOffset, false);
         _leftControllerGO = leftCtrlGO;
-
-        // Laser pointer beam: a LineRenderer from the right controller forward.
-        // Uses Sprites/Default with ZTest=Always so it renders over all 3D geometry.
-        try
-        {
-            var laserGO = new GameObject("VRLaserBeam");
-            UnityEngine.Object.DontDestroyOnLoad(laserGO);
-            laserGO.transform.SetParent(ctrlGO.transform, false);
-            _laserLine = laserGO.AddComponent<LineRenderer>();
-            _laserLine.useWorldSpace  = true;
-            _laserLine.positionCount  = 2;
-            _laserLine.startWidth     = 0.012f;  // 12 mm at hand — thick enough to see
-            _laserLine.endWidth       = 0.006f;  // 6 mm at target
-            _laserLine.numCapVertices = 4;
-            _laserLine.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            _laserLine.receiveShadows = false;
-            // HDRP/Unlit renders in the 3D scene without lighting; Sprites/Default is ignored by HDRP.
-            var laserShader = Shader.Find("HDRP/Unlit") ?? Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default");
-            if (laserShader != null)
-            {
-                var laserMat = new Material(laserShader);
-                laserMat.name = "VRLaserMat";
-                // UI overlay camera renders on its own layer without HDRP exposure — normal colors work.
-                // HDR cyan — compensates for HDRP inherited auto-exposure (EV≈8–12).
-                var laserColor = new Color(0f, 4096f, 4096f, 1f);
-                laserMat.color = laserColor;
-                try { laserMat.SetColor("_UnlitColor", laserColor); } catch { }
-                try { laserMat.SetColor("_BaseColor",  laserColor); } catch { }
-                laserMat.renderQueue = 5000;
-                _laserLine.material = laserMat;
-                Log.LogInfo($"[VRCamera] Laser shader: {laserShader.name}");
-            }
-            else Log.LogWarning("[VRCamera] Laser: no shader found");
-            _laserLine.enabled = false; // hidden until controller pose is valid
-            Log.LogInfo("[VRCamera] VRLaserBeam created");
-        }
-        catch (Exception ex) { Log.LogWarning($"[VRCamera] Laser beam creation failed: {ex.Message}"); }
-
-        // Cursor dot: ScreenSpaceOverlay canvas created here, converted to WorldSpace by
-        // ScanAndConvertCanvases — same pipeline as all game canvases, giving HDRP registration.
-        // NOT in _ownedCanvasIds so RescanCanvasAlpha applies the ZTest Always material patch.
-        // PositionCanvases keeps it at UIDistance in front of the head every frame.
-        // The dot moves via anchoredPosition inside the canvas (2D projection).
-        try
-        {
-            var ccGO = new GameObject("VRCursorCanvasInternal");
-            ccGO.layer = UILayer;
-            UnityEngine.Object.DontDestroyOnLoad(ccGO); // survive loading→menu scene transition
-            var cc = ccGO.AddComponent<Canvas>();
-            cc.renderMode   = RenderMode.ScreenSpaceOverlay;
-            cc.sortingOrder = 100; // above all game canvases
-            _cursorCanvas = cc; // cache immediately — don't rely on name-lookup in PositionCanvases
-            _ownedCanvasIds.Add(cc.GetInstanceID()); // protect from RescanCanvasAlpha overwriting our material
-
-            var dotGO = new GameObject("Dot");
-            dotGO.layer = UILayer;
-            // Set parent BEFORE adding Image so RectTransform is created in the right hierarchy.
-            dotGO.transform.SetParent(ccGO.transform, false);
-            // AddComponent<Image> creates a RectTransform internally; get it via GetComponent.
-            // Do NOT call AddComponent<RectTransform>() on a fresh GO — it may return null in
-            // IL2CPP because the GO already has a plain Transform component.
-            var img = dotGO.AddComponent<Image>();
-            img.raycastTarget = false;
-            // HDR white — bright enough to overcome HDRP inherited auto-exposure.
-            // Scene camera EV can be 8–12 (multiplier 1/256–1/4096).
-            // Setting material._Color to (4096,4096,4096) means after ÷4096 exposure we get (1,1,1) white.
-            // HDR magenta — bright enough to overcome HDRP inherited auto-exposure.
-            // Scene camera EV≈8–12 → multiplier 1/256–1/4096.  (4096,0,4096) survives EV12.
-            img.color = new Color(64f, 0f, 64f, 1f);
-            try
-            {
-                var dotMat = new Material(img.material);
-                dotMat.name = "VRCursorDotMat";
-                dotMat.SetInt("unity_GUIZTestMode", 8);
-                try { if (dotMat.HasProperty("_ZTestMode")) dotMat.SetInt("_ZTestMode", 8); } catch { }
-                dotMat.color = new Color(64f, 0f, 64f, 1f);
-                dotMat.renderQueue = 5000;
-                img.material = dotMat;
-            }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] Cursor dot material: {ex.Message}"); }
-
-            _cursorRect = dotGO.GetComponent<RectTransform>();
-            if (_cursorRect != null)
-            {
-                _cursorRect.sizeDelta        = new Vector2(12f, 12f);  // 12 canvas units ≈ 15mm at default scale
-                _cursorRect.anchorMin        = new Vector2(0.5f, 0.5f);
-                _cursorRect.anchorMax        = new Vector2(0.5f, 0.5f);
-                _cursorRect.pivot            = new Vector2(0.5f, 0.5f);
-                _cursorRect.anchoredPosition = Vector2.zero;
-            }
-
-            dotGO.SetActive(false); // hidden until controller pose is valid
-            Log.LogInfo($"[VRCamera] VRCursorCanvasInternal created — cursorRect={_cursorRect != null}");
-        }
-        catch (Exception ex)
-        {
-            Log.LogWarning($"[VRCamera] Cursor canvas creation failed: {ex.Message}");
-        }
-
-        // ── Multi-dot aim pool ────────────────────────────────────────────────────
-        try
-        {
-            var dotShader = Shader.Find("UI/Default");
-            for (int i = 0; i < AimDotPoolSize; i++)
-            {
-                var adGO = GameObject.CreatePrimitive(PrimitiveType.Quad);
-                adGO.name = $"VRAimDot_{i}";
-                adGO.layer = UILayer;
-                adGO.transform.localScale = Vector3.one * AimDotSize;
-                // Remove collider — dot is visual only
-                var col = adGO.GetComponent<Collider>();
-                if (col != null) UnityEngine.Object.Destroy(col);
-                var mr = adGO.GetComponent<MeshRenderer>();
-                if (mr != null && dotShader != null)
-                {
-                    mr.material = new Material(dotShader);
-                    // HDR magenta — contrasts against both dark (case board) and light (note paper)
-                    // backgrounds; same colour as the cursor canvas dot.  Plain white was invisible
-                    // on the white/paper-tone evidence note panel background.
-                    mr.material.color = new Color(64f, 0f, 64f, 1f);
-                    mr.material.renderQueue = 4000; // render on top of everything
-                }
-                adGO.SetActive(false);
-                DontDestroyOnLoad(adGO);
-                _aimDotPool.Add(adGO);
-            }
-
-            Log.LogInfo($"[VRCamera] Aim dot pool created: {_aimDotPool.Count} dots");
-        }
-        catch (Exception ex)
-        {
-            Log.LogWarning($"[VRCamera] Aim dot pool creation failed: {ex.Message}");
-        }
-
-        _controllerInteraction.Discover(_aimDotPool);
 
         // ── Phase 1: VR Settings Panel ───────────────────────────────────────────
         try
@@ -937,22 +679,6 @@ public class VRCamera : MonoBehaviour
 
         try
         {
-            _canvasPlacement.PositionCanvases(
-                _managedFades, _frameCount,
-                _leftCam, _posesValid,
-                _cursorCanvas,
-                _managedCanvases, _nestedCanvasIds,
-                _canvasWasActive, _positionedCanvases,
-                _lastRescanFrame,
-                _gripDragAnchorOffsets,
-                _gripDragEnforce,
-                _caseBoardRT.JustOpened, _caseBoardRT.Anchor, _caseBoardRT.AnchorPlaced,
-                _cursorHasTarget, _cursorTargetPos, _cursorTargetRot);
-        }
-        catch (Exception ex) { Log.LogWarning($"[VRCamera] PositionCanvases exception: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}"); }
-
-        try
-        {
             if (!_posesValid)
             {
                 OpenXRManager.FrameEndEmpty(_displayTime);
@@ -990,30 +716,6 @@ public class VRCamera : MonoBehaviour
                 // Canvas.ForceUpdateCanvases() above recalculates RectTransform positions,
                 // which overrides our LateUpdate position writes on LagPivot.
                 ForceItemPositionPreRender();
-
-
-                // Re-apply grip-drag position for top-level canvas.
-                // Game scripts / Canvas layout may reset position between Update and LateUpdate.
-                var gripDragCanvas = _legacyCanvases.GripDragCanvas;
-                if (gripDragCanvas != null)
-                {
-                    gripDragCanvas.transform.position = _legacyCanvases.GripDragDesiredPos;
-                    gripDragCanvas.transform.rotation = _legacyCanvases.GripDragDesiredRot;
-                }
-
-                // Enforce stored positions for ALL previously grip-dragged top-level canvases.
-                // Game scripts / Canvas layout reset positions every frame.
-                if (_gripDragEnforce.Count > 0)
-                {
-                    foreach (var kvp in _gripDragEnforce)
-                    {
-                        // Skip the canvas currently being dragged (handled above)
-                        if (gripDragCanvas != null && gripDragCanvas.GetInstanceID() == kvp.Key) continue;
-                        if (!_managedCanvases.TryGetValue(kvp.Key, out var ec) || ec == null || !ec.gameObject.activeSelf) continue;
-                        ec.transform.position = kvp.Value.pos;
-                        ec.transform.rotation = kvp.Value.rot;
-                    }
-                }
 
                 try { _worldMarks.BeforeRender(_hudRT, _leftCam, _caseBoardRT.ShowsBoard); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] WorldMarksPanel.BeforeRender: {ex.Message}"); }
@@ -1120,31 +822,16 @@ public class VRCamera : MonoBehaviour
 
 
     /// <summary>
-    /// Reads the right controller pose, applies OpenXR-to-Unity coord flip, updates the
-    /// cursor dot, and fires a canvas click on trigger press.
+    /// Reads both controller poses and runs what they aim: RT panel grip-drag, the left-hand world
+    /// pointer, and the RT panel laser.
     /// </summary>
     private void UpdateControllerPose(long displayTime)
     {
         if (_rightControllerGO == null) return;
+        if (!_controllerPoses.UpdateRightPose(displayTime, transform, _rightControllerGO)) return;
 
-        if (!_controllerInteraction.UpdateRightPose(displayTime, transform, _rightControllerGO,
-                _cursorRect, _cursorCanvas, _managedCanvases))
-            return;
-
-        _legacyCanvases.SetFrameContext(
-            _managedCanvases, _noGroupInteractable,
-            _lastRescanFrame, () => _forceScanFrames = 30,
-            _leftCam, _gameCamRef, _rightControllerGO, _leftControllerGO,
-            _caseBoardRT.IsOpen, _caseBoardRT.Anchor,
-            _gripDragEnforce, _gripDragAnchorOffsets,
-            _canvasVRPose,
-            _cursorHasTarget, _cursorTargetCanvas);
-
-        // Grip-drag: move CaseBoard canvases with the grip button.
-        bool rtOwnsGrip = false;
-        try { rtOwnsGrip = _rtPanelGrip.Update(_rightControllerGO, _leftControllerGO, _rtPanelInput.ActiveHandIsRight, _lastLegacyHitDistance); }
+        try { _rtPanelGrip.Update(_rightControllerGO, _leftControllerGO, _rtPanelInput.ActiveHandIsRight); }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] RTPanelGrip.Update: {ex.Message}"); }
-        _legacyCanvases.UpdateGripDrag(rtOwnsGrip);
 
         try
         {
@@ -1155,54 +842,17 @@ public class VRCamera : MonoBehaviour
         }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] LeftHandPointer.Update: {ex.Message}"); }
 
-        _legacyCanvases.PreAimScan();
-
-        // Legacy depth scan first, so RTPanelInput can tell whether a legacy WorldSpace canvas sits
-        // in front of the nearest RT panel. The whole void-room period (_gameCam == null) has no
-        // legacy canvases worth reaching, and skipping it there avoids stray aim dots where the menu
-        // panel is about to appear.
-        bool voidPeriod = _gameCam == null;
-        AimScanResult aim = voidPeriod
-            ? default
-            : _controllerInteraction.ScanAndRenderAimDots(_rightControllerGO, _leftCam,
-                _managedCanvases, _cursorCanvas, _nestedCanvasIds, _noGroupInteractable);
-
-        float legacyHitDistance = _legacyCanvases.HasActiveGesture ? 0f
-                                : aim.HasTarget ? _controllerInteraction.NearestLegacyUIHitDistance(_rightControllerGO.transform.position)
-                                : float.PositiveInfinity;
-        _lastLegacyHitDistance = legacyHitDistance;
         try
         {
-            _rtPanelInput.Update(_rightControllerGO, _leftControllerGO, legacyHitDistance,
-                new RTPanelClickContext(() => _forceScanFrames = 30, field => _keyboard.OpenFor(field, _leftCam)));
+            _rtPanelInput.Update(_rightControllerGO, _leftControllerGO,
+                new RTPanelClickContext(field => _keyboard.OpenFor(field, _leftCam)));
         }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] RTPanelInput.Update: {ex.Message}"); }
 
         bool rtOwnsPointer = _rtPanelInput.HasFocus || _rtPanelInput.IsCapturing;
-        _uiPointerPoint = rtOwnsPointer ? _rtPanelInput.FocusPoint
-            : legacyHitDistance > 0f && !float.IsPositiveInfinity(legacyHitDistance)
-                ? _rightControllerGO.transform.position + _rightControllerGO.transform.forward * legacyHitDistance
-                : null;
-        if (voidPeriod || rtOwnsPointer)
-        {
-            _controllerInteraction.HideAllAimDots();
-            aim = default;
-            if (_cursorRect != null && _cursorRect.gameObject.activeSelf) _cursorRect.gameObject.SetActive(false);
-            if (_laserLine != null && _laserLine.enabled) _laserLine.enabled = false;
-        }
-        else
-        {
-            _controllerInteraction.UpdateCursorDot(_cursorRect, _cursorCanvas, _rightControllerGO);
-            _controllerInteraction.UpdateLaser(_laserLine, _rightControllerGO, aim.HasTarget, aim.TargetPos);
-        }
-        _cursorHasTarget    = aim.HasTarget;
-        _cursorTargetCanvas = aim.TargetCanvas;
-        _cursorTargetPos    = aim.TargetPos;
-        _cursorTargetRot    = aim.TargetRot;
+        _uiPointerPoint = rtOwnsPointer ? _rtPanelInput.FocusPoint : null;
 
-        _legacyCanvases.Tick(rtOwnsPointer);
-
-        _controllerInteraction.UpdateLeftPose(displayTime, transform, _leftControllerGO);
+        _controllerPoses.UpdateLeftPose(displayTime, transform, _leftControllerGO);
     }
 
     private void UpdateHeldItemTracking() => _heldItem.Tick(_interactionController, _rightControllerGO, _leftControllerGO);
@@ -1214,20 +864,6 @@ public class VRCamera : MonoBehaviour
         // (Animator/game scripts may have overwritten what Update() set earlier this frame).
         _heldItem.ReapplyBeforeRender(_interactionController, _rightControllerGO, _leftControllerGO);
 
-        // Snapshot all managed canvas poses RIGHT BEFORE rendering.
-        // These are re-enforced in Update (before aim-dot scan) to counteract
-        // the game overwriting canvas transforms between frames.
-        foreach (var kvpSnap in _managedCanvases)
-        {
-            if (kvpSnap.Value == null) continue;
-            if (_nestedCanvasIds.Contains(kvpSnap.Key)) continue;
-            try
-            {
-                _canvasVRPose[kvpSnap.Key] = (kvpSnap.Value.transform.position, kvpSnap.Value.transform.rotation, kvpSnap.Value.transform.localScale);
-                // One-shot diagnostic: compare snapshot position with what we set in PositionCanvases
-            }
-            catch { }
-        }
     }
 
     private void DiscoverMovementSystem()
@@ -1455,7 +1091,6 @@ public class VRCamera : MonoBehaviour
     private void OnSaveLoadButtonClicked()
     {
         _sceneLoadGrace = 180;   // ~3 s at 60 fps
-        _canvasTick     = 0;
         _fpsControllerTransform = null;
         _cameraPivotTransform   = null;
         _cameraLookDisabled     = false;
@@ -1478,18 +1113,6 @@ public class VRCamera : MonoBehaviour
         if (_rightRT != null) { _rightRT.Release(); Destroy(_rightRT); }
 
         VRSettingsPanel.Destroy();
-
-        // Restore any canvases we converted so the desktop view isn't broken
-        // if VR is disabled mid-session.
-        foreach (var kvp in _managedCanvases)
-            if (kvp.Value != null)
-                kvp.Value.renderMode = RenderMode.ScreenSpaceOverlay;
-        _managedCanvases.Clear();
-        _positionedCanvases.Clear();
-        _canvasWasActive.Clear();
-        _canvasVRPose.Clear();
-        _nestedCanvasIds.Clear();
-        _managedFades.Clear();
 
         Log.LogInfo("[VRCamera] Destroyed.");
     }

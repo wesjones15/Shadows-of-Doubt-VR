@@ -53,7 +53,6 @@ internal static class CanvasDump
     {
         string name = c.gameObject.name;
         bool active = c.gameObject.activeInHierarchy;
-        CanvasCategory cat = CanvasCategoryInfo.GetCanvasCategory(name);
         var rt = c.GetComponent<RectTransform>();
         string size = rt != null ? $"{rt.sizeDelta.x:F0}x{rt.sizeDelta.y:F0}" : "n/a";
         bool hasRaycaster = c.GetComponent<GraphicRaycaster>() != null;
@@ -63,7 +62,7 @@ internal static class CanvasDump
         try { graphicCount = c.GetComponentsInChildren<Graphic>(true).Count(g => g != null && g.gameObject.activeInHierarchy); }
         catch { }
         Log.LogInfo($"[CanvasDump] '{name}' active={active} root={c.isRootCanvas} mode={c.renderMode} " +
-                    $"category={cat} size={size} parent='{parent}' hasRaycaster={hasRaycaster} " +
+                    $"owned={RTOwnedCanvases.IsOwned(c)} size={size} parent='{parent}' hasRaycaster={hasRaycaster} " +
                     $"worldCam={cam} activeGraphics={graphicCount} enabled={c.enabled} " +
                     $"canvasGroups=[{DescribeCanvasGroupChain(c.transform)}]");
     }

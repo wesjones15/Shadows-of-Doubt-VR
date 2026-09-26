@@ -13,9 +13,7 @@ namespace SoDVR.VR;
 /// the pause menu) both clicked on the same press.
 ///
 /// A panel stays captured from press to release even if the ray leaves it, so drags never get
-/// handed to another panel mid-gesture. Focus is only taken when the RT hit is nearer than whatever
-/// the legacy WorldSpace pipeline is aiming at, so a legacy canvas in front of an RT panel still
-/// gets the pointer.
+/// handed to another panel mid-gesture.
 /// </summary>
 internal sealed class RTPanelInput
 {
@@ -51,7 +49,7 @@ internal sealed class RTPanelInput
     public float FocusDistance { get; private set; }
 
     /// <summary>A trigger or A press on the active hand, raised before it is delivered, with the
-    /// RT panel it lands on (null when it lands on legacy UI or nothing) — for popups the game
+    /// RT panel it lands on (null when it lands on nothing) — for popups the game
     /// dismisses on a click anywhere else, which it detects from the real mouse.</summary>
     public event Action<RTPanelPointer?>? Pressed;
 
@@ -68,10 +66,7 @@ internal sealed class RTPanelInput
         if (_captured == pointer) _captured = null;
     }
 
-    /// <param name="legacyHitDistance">Ray distance to what the legacy right-hand aim scan hit this
-    /// frame, or +Infinity; 0 while a legacy gesture is in progress so it keeps the pointer.</param>
-    public void Update(GameObject? rightControllerGO, GameObject? leftControllerGO,
-        float legacyHitDistance, in RTPanelClickContext ctx)
+    public void Update(GameObject? rightControllerGO, GameObject? leftControllerGO, in RTPanelClickContext ctx)
     {
         OpenXRManager.GetTriggerState(true, out bool rightTrigger);
         OpenXRManager.GetTriggerState(false, out bool leftTrigger);
@@ -131,8 +126,6 @@ internal sealed class RTPanelInput
             if (d < nearestDist) { nearest = pointer; nearestDist = d; nearestPoint = p; }
         }
 
-        float legacyLimit = _useRightHand ? legacyHitDistance : float.PositiveInfinity;
-        if (nearest != null && nearestDist >= legacyLimit) nearest = null;
         if (input.Press || input.SecondaryClick) Pressed?.Invoke(nearest);
         if (nearest == null) { DropFocus(); return; }
 

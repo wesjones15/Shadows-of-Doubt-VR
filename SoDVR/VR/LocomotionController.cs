@@ -317,18 +317,14 @@ internal sealed class LocomotionController
     ///   Idle          → on press: fire ESC, go to Held
     ///   Held          → on release: start 0.5 s post-release cooldown
     ///   ReleaseCooldown → after 0.5 s: back to Idle
-    ///
-    /// Returns true if it fired — the caller forces an immediate canvas scan tick so any
-    /// brand-new canvas (not yet managed) is discovered quickly rather than waiting up to
-    /// 90 frames.
     /// </summary>
-    public bool UpdateMenuButton()
+    public void UpdateMenuButton()
     {
         // Phase 1 — post-fire lockout (WALL-CLOCK time, NOT Time.deltaTime).
         // Time.deltaTime can be >> 1s when the game drops to <1fps processing the pause menu's
         // 2000+ canvas elements, which would evaporate a deltaTime-based 1s countdown in one frame.
         // Time.realtimeSinceStartup always advances at real-world speed regardless of frame rate.
-        if (Time.realtimeSinceStartup < _menuBtnCooldownUntil) return false;
+        if (Time.realtimeSinceStartup < _menuBtnCooldownUntil) return;
 
         OpenXRManager.GetMenuButtonState(out bool menuNow);
 
@@ -337,11 +333,11 @@ internal sealed class LocomotionController
         if (_menuBtnNeedsRelease)
         {
             if (!menuNow) _menuBtnNeedsRelease = false;
-            return false;
+            return;
         }
 
         // Phase 3 — armed: fire on press.
-        if (!menuNow) return false;
+        if (!menuNow) return;
 
         _menuBtnNeedsRelease = true;
         _menuBtnCooldownUntil = Time.realtimeSinceStartup + 1.5f;  // 1.5 s real-time lockout
@@ -355,8 +351,6 @@ internal sealed class LocomotionController
             Log.LogInfo("[Locomotion] Menu button → ESC");
         }
         catch (Exception ex) { Log.LogWarning($"[Locomotion] UpdateMenuButton: {ex.Message}"); }
-
-        return true;
     }
 
     /// <summary>
