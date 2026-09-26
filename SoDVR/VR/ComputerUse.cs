@@ -5,9 +5,9 @@ using UnityEngine;
 namespace SoDVR.VR;
 
 /// <summary>
-/// Whether the player is using an in-game computer: locked into an interaction, with a computer
-/// under the player's control. The HUD sheet would otherwise float between the player and the
-/// monitor.
+/// Whether the player is using an in-game computer — locked into an interaction, with a computer
+/// under the player's control — and where its screen is: the HUD is laid out around it rather
+/// than floating over it.
 /// </summary>
 internal static class ComputerUse
 {
@@ -21,6 +21,22 @@ internal static class ComputerUse
 
     public static bool InUse { get; private set; }
 
+    /// <summary>Where the screen of the computer in use is, in the world.</summary>
+    public static Bounds? ScreenBounds
+    {
+        get
+        {
+            try
+            {
+                var screen = InUse ? s_computer?.screenRenderer : null;
+                return screen != null ? screen.bounds : null;
+            }
+            catch { return null; }
+        }
+    }
+
+    private static ComputerController? s_computer;
+
     public static void Tick()
     {
         bool lockedIn;
@@ -29,7 +45,7 @@ internal static class ComputerUse
 
         if (!lockedIn)
         {
-            if (s_wasLockedIn) Set(false, "left the locked-in interaction");
+            if (s_wasLockedIn) { s_computer = null; Set(false, "left the locked-in interaction"); }
             s_wasLockedIn = false;
             return;
         }
@@ -45,7 +61,14 @@ internal static class ComputerUse
                 if (computer != null && computer.playerControlled) { used = computer; break; }
         }
         catch (Exception ex) { Log.LogWarning($"[ComputerUse] Search: {ex.Message}"); }
-        Set(used != null, used != null ? $"using '{used.name}'" : "locked in, but no computer under the player's control");
+        s_computer = used;
+        Set(used != null, used != null ? $"using '{used.name}', screen {ScreenBoundsText(used)}" : "locked in, but no computer under the player's control");
+    }
+
+    private static string ScreenBoundsText(ComputerController computer)
+    {
+        try { return computer.screenRenderer != null ? computer.screenRenderer.bounds.ToString() : "unknown"; }
+        catch { return "unknown"; }
     }
 
     private static void Set(bool inUse, string why)
