@@ -27,6 +27,8 @@ internal sealed class WorldMarksPanel
     private const int SlotRows = 4;
     private const float SpeechAboveHeadMeters = 0.35f;
     private const float ReactionAboveHeadMeters = 0.5f;
+    // The game draws reaction indicators about 13 pixels across — unreadable at HUD scale in VR.
+    private const float ReactionScale = 10f;
     // A pointer target inside this much of the eye's viewport counts as in view.
     private const float InViewMargin = 0.05f;
     // How far from the sheet's centre an off-view pointer sits, as a fraction of the sheet.
@@ -45,6 +47,7 @@ internal sealed class WorldMarksPanel
     private readonly List<Transform> _containers = new();
     private readonly Dictionary<int, Mark> _marks = new();
     private readonly HashSet<string> _loggedKinds = new();
+    private readonly Dictionary<int, Vector3> _enlargedScales = new();
     private Canvas? _canvas;
     private int _discoveryCooldown;
     private int _containerScan;
@@ -89,7 +92,7 @@ internal sealed class WorldMarksPanel
             mark.View.Visible = mark.Seen;
             if (!mark.Seen && !IsAlive(id)) gone.Add(id);
         }
-        foreach (var id in gone) { _panel.DestroyView(_marks[id].View); _marks.Remove(id); }
+        foreach (var id in gone) { _panel.DestroyView(_marks[id].View); _marks.Remove(id); _enlargedScales.Remove(id); }
     }
 
     public void Render()
@@ -133,6 +136,7 @@ internal sealed class WorldMarksPanel
                 edge = new Vector2((0.5f + fromCentre.x) * texture.width, (0.5f + fromCentre.y) * texture.height);
             }
         }
+        if (reaction != null) EnlargeOnTexture(rect, markTransform.GetInstanceID());
         PutInSlot(rect, slot);
 
         var pixels = _panel.ContentPixelRect(markTransform, MarginPixels, out int graphics);
@@ -166,7 +170,8 @@ internal sealed class WorldMarksPanel
         }
 
         if (_loggedKinds.Add($"{kind}:{isPlayerSpeech}"))
-            Log.LogInfo($"[WorldMarks] First {kind}{(isPlayerSpeech ? " (player)" : "")} '{markTransform.name}' target={target?.ToString() ?? "none"} crop={pixels}");
+            Log.LogInfo($"[WorldMarks] First {kind}{(isPlayerSpeech ? " (player)" : "")} '{markTransform.name}' target={target?.ToString() ?? "none"} crop={pixels}" +
+                        (reaction != null ? $" sprite='{reaction.img?.sprite?.name}'" : ""));
         if (created && _probesLeft > 0)
         {
             _probesLeft--;
@@ -208,6 +213,15 @@ internal sealed class WorldMarksPanel
             }
             catch (Exception ex) { Log.LogWarning($"[WorldMarks] Probe {label}: {ex.Message}"); }
         }
+    }
+
+    /// <summary>Draws a reaction indicator bigger on the texture, so it stays sharp shown bigger. The
+    /// game resizes indicators by distance whenever it updates them: enlarge what it last set, once.</summary>
+    private void EnlargeOnTexture(RectTransform rect, int id)
+    {
+        if (_enlargedScales.TryGetValue(id, out var applied) && rect.localScale == applied) return;
+        rect.localScale *= ReactionScale;
+        _enlargedScales[id] = rect.localScale;
     }
 
     /// <summary>Moves the mark's pivot to the centre of slot <paramref name="slot"/> on the texture —
