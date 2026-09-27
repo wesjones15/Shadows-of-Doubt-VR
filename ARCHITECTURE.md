@@ -142,6 +142,6 @@ classDiagram
 | `CanvasDump.cs` | static | F9 debug dump of every canvas. |
 | `NativeInput.cs` | static | Win32 input injection. |
 | `LocomotionController.cs` | instance | Movement, turning and the buttons forwarded to the game as keys. |
-| `HeldItemTracker.cs` | instance | Held items and arms following the controllers. |
+| `HeldItemTracker.cs` | instance | Held items and arms following the controllers; the item arm on the main hand, the rig mirrored when that is the left. |
 | `Rooms/VoidRoomController.cs` + `Rooms/VoidRoom.cs` | instance | The void room for pre-game screens — independent island. |
 | `Plugin.cs` | BepInPlugin | Instantiates `VRCamera`, binds config. |

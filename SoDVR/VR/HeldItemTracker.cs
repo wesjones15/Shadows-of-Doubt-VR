@@ -6,7 +6,8 @@ namespace SoDVR.VR;
 /// <summary>
 /// VR arm/held-item display: overrides carried-object position onto the controller, and drives
 /// the flat-game's first-person arm rig (LagPivot → FirstPersonModels → Arms → Left/RightArm)
-/// so each arm tracks its own VR controller instead of the mouse-look aim direction.
+/// so the arms track the VR controllers instead of the mouse-look aim direction, the item arm on
+/// the main hand.
 ///
 /// _interactionController and _fpsItemController stay on VRCamera rather than becoming owned
 /// state here — they're also touched near the still-deferred ForceItemPositionPreRender/
@@ -27,6 +28,7 @@ internal sealed class HeldItemTracker
     // Additional forward offset along controller forward to shift arm back so game hand
     // aligns with real hand (positive = push hand forward away from player).
     private const float ArmForwardOffset = -0.25f;
+    private static readonly Vector3 MirrorScale = new(-1f, 1f, 1f);
 
     private Transform? _lagPivotTransform;
     private Transform? _playerRoot;
@@ -40,6 +42,7 @@ internal sealed class HeldItemTracker
     private Transform? _leftFistTransform;           // 'LeftFist' — hand position (child of LeftArm)
     private Transform? _rightFistTransform;          // 'RightFist' — hand position (child of RightArm)
     private int _armsDiagCounter;
+    private bool? _loggedMirrored;
 
     /// <summary>Called once from DiscoverMovementSystem when FirstPersonItemController is found.</summary>
     public void Discover(Transform? lagPivot, Transform playerRoot)
@@ -153,11 +156,7 @@ internal sealed class HeldItemTracker
                 _armsTransform.localRotation = Quaternion.identity;
             }
 
-            // Position each arm so its FIST (hand) aligns with the VR controller.
-            // The arm transform origin is at the elbow/upper arm, so we offset by the
-            // fist-to-arm vector to put the hand at the controller position.
-            PositionArmAtController(_leftArmTransform, _leftFistTransform, leftControllerGO, ArmRotOffsetLeft);
-            PositionArmAtController(_rightArmTransform, _rightFistTransform, rightControllerGO, ArmRotOffsetRight);
+            PlaceArms(rightControllerGO, leftControllerGO);
 
             // Diagnostic
             _armsDiagCounter++;
@@ -200,8 +199,7 @@ internal sealed class HeldItemTracker
                 _armsTransform.localPosition = Vector3.zero;
                 _armsTransform.localRotation = Quaternion.identity;
             }
-            PositionArmAtController(_leftArmTransform, _leftFistTransform, leftControllerGO, ArmRotOffsetLeft);
-            PositionArmAtController(_rightArmTransform, _rightFistTransform, rightControllerGO, ArmRotOffsetRight);
+            PlaceArms(rightControllerGO, leftControllerGO);
         }
         catch { }
     }
@@ -229,17 +227,40 @@ internal sealed class HeldItemTracker
     }
 
     /// <summary>
+    /// The game's item and its animations belong to the right arm. With the left hand as main hand
+    /// the whole rig is mirrored (negative X scale on Arms), which turns the right arm, item and
+    /// animations included, into a left one without new assets, and the arms swap controllers.
+    /// </summary>
+    private void PlaceArms(GameObject? rightControllerGO, GameObject? leftControllerGO)
+    {
+        bool mirrored = !MainHand.IsRight;
+        if (_armsTransform != null) _armsTransform.localScale = mirrored ? MirrorScale : Vector3.one;
+        if (mirrored != _loggedMirrored)
+        {
+            _loggedMirrored = mirrored;
+            Log.LogInfo($"[HeldItemTracker] Arms {(mirrored ? "mirrored: item arm on the LEFT controller" : "unmirrored: item arm on the RIGHT controller")}.");
+        }
+        PositionArmAtController(_rightArmTransform, _rightFistTransform, mirrored ? leftControllerGO : rightControllerGO, ArmRotOffsetRight, mirrored);
+        PositionArmAtController(_leftArmTransform, _leftFistTransform, mirrored ? rightControllerGO : leftControllerGO, ArmRotOffsetLeft, mirrored);
+    }
+
+    /// <summary>
     /// Positions an arm so its fist (hand) aligns with the VR controller aim point.
     /// Uses per-arm rotation offset to align the flat-screen arm mesh with VR controller orientation.
     /// Arm origin is at the elbow — we offset so the fist child sits at the controller position,
     /// then apply ArmForwardOffset along the controller forward axis to fine-tune hand alignment.
     /// </summary>
-    private static void PositionArmAtController(Transform? arm, Transform? fist, GameObject? ctrlGO, Quaternion rotOffset)
+    private void PositionArmAtController(Transform? arm, Transform? fist, GameObject? ctrlGO, Quaternion rotOffset, bool mirrored)
     {
-        if (arm == null || ctrlGO == null) return;
+        if (arm == null || ctrlGO == null || _armsTransform == null) return;
         var ctrlT = ctrlGO.transform;
-        // Apply rotation: controller aim rotation + model alignment offset
-        arm.rotation = ctrlT.rotation * rotOffset;
+        // Set locally: a world rotation is ambiguous under the mirrored (negatively scaled) Arms.
+        // Mirrored, the arm is posed at the controller's reflection, so the rig's mirror puts it back
+        // on the real controller as the other hand.
+        var frame = _armsTransform.parent.rotation * _armsTransform.localRotation;
+        var local = Quaternion.Inverse(frame) * ctrlT.rotation;
+        if (mirrored) local = new Quaternion(local.x, -local.y, -local.z, local.w);
+        arm.localRotation = local * rotOffset;
         if (fist != null)
         {
             // After setting arm rotation, compute where the fist ended up,
