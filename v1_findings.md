@@ -76,6 +76,14 @@ behind most of the "what didn't work" entries in §4, not incidental to them.
 
 ## 1. Key learnings
 
+- **A load's asset unload destroys any mod-made asset nothing in a scene references.** Every save
+  load (and the press-any-key → main menu scene load) runs Unity's unused-asset unload. A `Mesh`,
+  `Material` or `RenderTexture` the mod creates and holds only from C# is destroyed by it — even
+  when a `DontDestroyOnLoad` object "uses" it through a camera's former `targetTexture`. Seen
+  twice: the overlay's laser/dot meshes (DrawMesh then threw away the whole overlay) and five of the
+  stall cube's six face textures (only the camera's current target survived). Give such assets
+  `hideFlags = HideFlags.DontUnloadUnusedAsset` when they're created.
+
 - **A load from in game reloads the whole Unity scene; a load from the main menu doesn't.**
   Logged 2026-09-27: the pause-menu load changes the active scene handle and destroys the player,
   `Main Camera` and every game canvas, then builds a fresh generic player; the main-menu load
