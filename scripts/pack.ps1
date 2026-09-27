@@ -41,8 +41,9 @@ if (-not $SkipBuild) {
 $SoDVRDll   = "$Root\SoDVR\bin\Release\net6.0\SoDVR.dll"
 $PreloadDll = "$Root\SoDVR.Preload\bin\Release\net6.0\SoDVR.Preload.dll"
 $LoaderDll  = "$Root\RuntimeDeps\Native\openxr_loader.dll"
+$ConfigFile = "$Root\SoDVR\com.sodvr.mod.cfg"
 
-foreach ($f in @($SoDVRDll, $PreloadDll, $LoaderDll)) {
+foreach ($f in @($SoDVRDll, $PreloadDll, $LoaderDll, $ConfigFile)) {
     if (-not (Test-Path $f)) { throw "Required file not found: $f" }
 }
 
@@ -51,12 +52,15 @@ Step "Assembling package"
 
 if (Test-Path $TmpDir) { Remove-Item $TmpDir -Recurse -Force }
 New-Item -ItemType Directory -Path "$TmpDir\BepInEx\plugins" -Force | Out-Null
+New-Item -ItemType Directory -Path "$TmpDir\BepInEx\config" -Force | Out-Null
 New-Item -ItemType Directory -Path "$TmpDir\BepInEx\patchers\SoDVR\RuntimeDeps\Native" -Force | Out-Null
 
 Copy-Item $SoDVRDll   "$TmpDir\BepInEx\plugins\SoDVR.dll"
 Copy-Item $PreloadDll "$TmpDir\BepInEx\patchers\SoDVR\SoDVR.Preload.dll"
 Copy-Item $LoaderDll  "$TmpDir\BepInEx\patchers\SoDVR\RuntimeDeps\Native\openxr_loader.dll"
+Copy-Item $ConfigFile "$TmpDir\BepInEx\config\com.sodvr.mod.cfg"
 Copy-Item "$Root\README.md" "$TmpDir\README.md"
+Copy-Item "$Root\LICENSE" "$TmpDir\LICENSE"
 
 # ── 4. Zip ────────────────────────────────────────────────────────────────────
 if (Test-Path $ZipOut) { Remove-Item $ZipOut -Force }
@@ -70,4 +74,4 @@ Write-Host "Package: $ZipOut" -ForegroundColor Green
 Write-Host ""
 Write-Host "Upload to Nexus Mods: https://www.nexusmods.com/shadowsofdoubt"
 Write-Host "Create GitHub release:"
-Write-Host "  gh release create v$Version $ZipOut --title 'SoDVR v$Version'"
+Write-Host "  gh release create v$Version $ZipOut $SoDVRDll $ConfigFile --title 'SoDVR v$Version'"
