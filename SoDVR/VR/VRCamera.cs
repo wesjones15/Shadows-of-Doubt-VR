@@ -200,6 +200,7 @@ public class VRCamera : MonoBehaviour
                 _sceneLoadGrace = 120;  // ~2 s at 60 fps
                 _movementDiscoveryDone = false;
                 _locomotion.ResetForRealSceneChange();
+                _heldItem.ResetForSceneReload();
 
                 Log.LogInfo($"[VRCamera] Scene changed (handle {_lastSceneHandle}→{sh}) — canvas scan paused for 120 frames.");
             }
@@ -993,7 +994,7 @@ public class VRCamera : MonoBehaviour
                 {
                     _fpsItemController = fpsIC;
                     Log.LogInfo("[Movement] FirstPersonItemController found.");
-                    _heldItem.Discover(fpsIC.lagPivotTransform);
+                    _heldItem.Discover(fpsIC.lagPivotTransform, cc.transform);
                 }
                 else
                     Log.LogInfo("[Movement] FirstPersonItemController not found on FPSController.");

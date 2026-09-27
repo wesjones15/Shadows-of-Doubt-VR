@@ -28,8 +28,8 @@ internal sealed class HeldItemTracker
     // aligns with real hand (positive = push hand forward away from player).
     private const float ArmForwardOffset = -0.25f;
 
-    private Transform? _lagPivotTransform;                  // LagPivot — reparented to controller
-    private Transform? _lagPivotOrigParent;                 // original parent (3DUI) for restore
+    private Transform? _lagPivotTransform;
+    private Transform? _playerRoot;
     private bool _lagPivotReparented;
     private int _carryDiagCounter;
     private bool _armsActivated;
@@ -41,14 +41,14 @@ internal sealed class HeldItemTracker
     private Transform? _rightFistTransform;          // 'RightFist' — hand position (child of RightArm)
     private int _armsDiagCounter;
 
-    /// <summary>Called once from DiscoverMovementSystem when FirstPersonItemController is found.
-    /// We do NOT reparent here — the game's FirstPersonItemController sets LagPivot position in
-    /// Update(). We override it in LateUpdate() so our write wins.</summary>
-    public void Discover(Transform? lagPivot)
+    /// <summary>Called once from DiscoverMovementSystem when FirstPersonItemController is found.</summary>
+    public void Discover(Transform? lagPivot, Transform playerRoot)
     {
         _lagPivotTransform = lagPivot;
-        _lagPivotOrigParent = lagPivot?.parent;
-        if (lagPivot != null) Log.LogInfo("[HeldItemTracker] Cached LagPivot for hand tracking.");
+        _playerRoot = playerRoot;
+        if (lagPivot != null)
+            Log.LogInfo($"[HeldItemTracker] Cached LagPivot for hand tracking: parent='{lagPivot.parent?.name}' " +
+                        $"scene='{lagPivot.gameObject.scene.name}', player '{playerRoot.name}' scene='{playerRoot.gameObject.scene.name}'.");
     }
 
     public void Tick(InteractionController? interactionController, GameObject? rightControllerGO, GameObject? leftControllerGO)
@@ -63,16 +63,17 @@ internal sealed class HeldItemTracker
             // activate Arms, cache LeftArm/RightArm, apply pixel→meter scale.
             if (!_armsActivated)
             {
-                // Parent LagPivot to VROrigin so it's in world space but not tied to one controller
-                if (!_lagPivotReparented)
+                // The rig stays inside the player so a load that unloads the player takes the arms
+                // with it — the VR origin outlives every load, and arms left there were orphaned.
+                if (!_lagPivotReparented && _playerRoot != null)
                 {
-                    _lagPivotTransform.SetParent(_vrOrigin, false);
-                    _lagPivotTransform.localPosition = Vector3.zero;
-                    _lagPivotTransform.localRotation = Quaternion.identity;
-                    _lagPivotTransform.localScale = Vector3.one;
+                    _lagPivotTransform.SetParent(_playerRoot, false);
+                    Vector3 parentScale = _playerRoot.lossyScale;
+                    _lagPivotTransform.localScale = new Vector3(1f / parentScale.x, 1f / parentScale.y, 1f / parentScale.z);
                     _lagPivotReparented = true;
-                    Log.LogInfo("[HeldItemTracker] LagPivot → VROrigin");
+                    Log.LogInfo($"[HeldItemTracker] LagPivot → player root '{_playerRoot.name}'");
                 }
+                FollowOrigin();
 
                 if (_lagPivotTransform.childCount > 0)
                 {
@@ -138,6 +139,7 @@ internal sealed class HeldItemTracker
             }
 
             // Every frame: keep intermediate transforms zeroed, keep Arms active
+            FollowOrigin();
             if (_firstPersonModelsTransform != null)
             {
                 _firstPersonModelsTransform.localPosition = Vector3.zero;
@@ -187,6 +189,7 @@ internal sealed class HeldItemTracker
 
         try
         {
+            FollowOrigin();
             if (_firstPersonModelsTransform != null)
             {
                 _firstPersonModelsTransform.localPosition = Vector3.zero;
@@ -255,17 +258,21 @@ internal sealed class HeldItemTracker
     private Transform _vrOrigin = null!;
     public void SetOrigin(Transform vrOrigin) => _vrOrigin = vrOrigin;
 
-    /// <summary>Restores LagPivot to its original parent before clearing references — called
-    /// only from the scene-reload reset path (not the save/load-click reset, which never
-    /// touched arm state either).</summary>
+    /// <summary>The rig's root sits on the VR origin, as it did when parented there; the arms
+    /// themselves are then placed on the controllers in world space.</summary>
+    private void FollowOrigin()
+    {
+        if (_lagPivotReparented && _lagPivotTransform != null)
+            _lagPivotTransform.SetPositionAndRotation(_vrOrigin.position, _vrOrigin.rotation);
+    }
+
+    /// <summary>The player (and the rig inside it) is being replaced — drop every cached reference
+    /// so the next discovery picks up the new player's arms.</summary>
     public void ResetForSceneReload()
     {
-        if (_lagPivotTransform != null && _lagPivotOrigParent != null)
-        {
-            try { _lagPivotTransform.SetParent(_lagPivotOrigParent, false); } catch { }
-        }
         _lagPivotTransform = null;
-        _lagPivotOrigParent = null;
+        _playerRoot = null;
+        _lagPivotReparented = false;
         _armsActivated = false;
         _armsTransform = null;
         _firstPersonModelsTransform = null;
