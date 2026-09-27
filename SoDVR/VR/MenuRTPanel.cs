@@ -235,8 +235,9 @@ internal sealed class MenuRTPanel
     {
         _pointer.Clear();
         _pointer.Enabled = false;
+        // _quadMesh is Unity's built-in Quad, shared by every primitive: destroying it breaks the
+        // rebuilt menu quad and every later CreatePrimitive(Quad) ("Quad.fbx could not be loaded").
         try { UnityEngine.Object.Destroy(_quadGO); } catch { }
-        try { UnityEngine.Object.Destroy(_quadMesh); } catch { }
         try { UnityEngine.Object.Destroy(_quadMaterial); } catch { }
         if (_projectorCam != null) { try { UnityEngine.Object.Destroy(_projectorCam.gameObject); } catch { } }
         if (_rt != null)
