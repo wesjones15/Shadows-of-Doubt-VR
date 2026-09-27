@@ -50,6 +50,7 @@ internal sealed class LocomotionController
     private bool  _hasBeenGrounded;            // true once isGrounded was true in current scene
     private float _jumpCooldownUntil;
     private bool  _jumpBtnNeedsRelease;
+    private bool  _airPressLogged;             // a held A keeps trying every frame; log it once
 
     private bool _interactBtnPrev;
 
@@ -444,16 +445,18 @@ internal sealed class LocomotionController
         if (_jumpBtnNeedsRelease) { if (!aStateNow) _jumpBtnNeedsRelease = false; return; }
 
         // Phase 3: fire on press, only when grounded
-        if (!aStateNow) return;
+        if (!aStateNow) { _airPressLogged = false; return; }
         if (grounded)
         {
             _jumpVerticalVelocity = VRSettings.JumpSpeed;
             _jumpBtnNeedsRelease = true;
             _jumpCooldownUntil = now + 0.3f;
+            _airPressLogged = false;
             Log.LogInfo("[Locomotion] Jump!");
         }
-        else
+        else if (!_airPressLogged)
         {
+            _airPressLogged = true;
             Log.LogInfo($"[Locomotion] Jump pressed but NOT grounded (vel={_jumpVerticalVelocity:F2})");
         }
     }
