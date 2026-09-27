@@ -61,6 +61,7 @@ internal static class QuestGlyphs
             InteractionKey.map or InteractionKey.CreateString or InteractionKey.WeaponSelect => "quest_button_b",
             InteractionKey.moveHorizontal or InteractionKey.moveVertical => "quest_stick_l",
             InteractionKey.lookHorizontal or InteractionKey.lookVertical => "quest_stick_r",
+            InteractionKey.CaseBoardZoomAxis => "quest_stick_r_vertical",
             InteractionKey.Menu or InteractionKey.Back => "quest_button_menu",
             _ => null,
         };
