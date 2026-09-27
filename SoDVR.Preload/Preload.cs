@@ -12,7 +12,7 @@ namespace SoDVR.Preload;
 ///   1. Creating the UnitySubsystems manifest so Unity discovers the OpenXR provider
 ///   2. Copying native OpenXR DLLs (UnityOpenXR.dll, openxr_loader.dll) into the game's plugin directory
 /// </summary>
-[PatcherPluginInfo("com.sodvr.preload", "SoDVR.Preload", "0.1.0")]
+[PatcherPluginInfo("com.sodvr.preload", "SoDVR.Preload", "2.0.0")]
 public class Preload : BasePatcher
 {
     private string GameDataDir => Path.Combine(
