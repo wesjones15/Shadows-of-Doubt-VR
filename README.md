@@ -4,8 +4,21 @@ Full 6DOF VR for **Shadows of Doubt** over OpenXR: head-tracked view, motion con
 game's whole UI (menus, case board, notes, map, dialogue, HUD) on panels you can point at and grab.
 
 This is a heavily reworked continuation of [Blah64's SoDVR](https://github.com/Blah64/Shadows-of-Doubt-VR)
-(v1.0.0). Thanks to Blah64 for the original mod: the OpenXR bootstrap and much of the groundwork are
-theirs. See [How this version differs](#how-this-version-differs-from-blah64s) below.
+(v1.0.0). See [How this version differs](#how-this-version-differs-from-blah64s) below.
+
+## Credits
+
+- **[Blah64](https://github.com/Blah64)** created the original SoDVR mod
+  ([Blah64/Shadows-of-Doubt-VR](https://github.com/Blah64/Shadows-of-Doubt-VR)). The OpenXR
+  bootstrap, the preloader and much of the groundwork are theirs, and this version keeps their
+  MIT license and copyright.
+- **[Kenney](https://www.kenney.nl)** made the Quest button glyphs, from the
+  [Input Prompts](https://kenney.nl/assets/input-prompts) pack (CC0). Consider supporting Kenney at
+  [kenney.nl/donate](https://www.kenney.nl/donate).
+- **Khronos Group** made the [OpenXR loader](https://github.com/KhronosGroup/OpenXR-SDK) that ships
+  with the mod (Apache 2.0).
+- **ColePowered Games** made [Shadows of Doubt](https://store.steampowered.com/app/986130/Shadows_of_Doubt/).
+- This version by Wes Jones ([wesjones15](https://github.com/wesjones15)).
 
 ## Tested on
 
@@ -233,5 +246,7 @@ attach to a bug report.
 ## License
 
 MIT, see [LICENSE](LICENSE). Original work © Blah64; changes in this version © Wes Jones.
-`RuntimeDeps/Native/openxr_loader.dll` is the Khronos OpenXR Loader (Apache 2.0).
-The Quest button glyphs (`SoDVR/Assets/QuestGlyphs`) are from Kenney's Input Prompts (www.kenney.nl, CC0).
+
+Third-party parts keep their own licenses (full texts in [licenses/](licenses/)):
+- `RuntimeDeps/Native/openxr_loader.dll`: the Khronos OpenXR Loader, Apache 2.0
+- `SoDVR/Assets/QuestGlyphs`: Kenney's Input Prompts (www.kenney.nl), CC0 1.0
