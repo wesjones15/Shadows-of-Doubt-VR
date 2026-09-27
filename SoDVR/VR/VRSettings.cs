@@ -14,6 +14,8 @@ internal static class VRSettings
     private static ConfigEntry<float>? s_smoothTurnSpeed;
     private static ConfigEntry<float>? s_moveSpeed;
     private static ConfigEntry<float>? s_sprintMultiplier;
+    private static ConfigEntry<float>? s_jumpSpeed;
+    private static ConfigEntry<float>? s_gravity;
     private static ConfigEntry<bool>? s_worldLaser;
     private static ConfigEntry<bool>? s_mainHandRight;
     private static ConfigEntry<float>? s_menuDistance;
@@ -35,6 +37,10 @@ internal static class VRSettings
             "Walking speed in metres per second at full stick.");
         s_sprintMultiplier = config.Bind("Movement", "SprintMultiplier", 1.8f,
             "How much faster sprinting (left stick click) is than walking.");
+        s_jumpSpeed = config.Bind("Movement", "JumpSpeed", 5f,
+            "Upward speed of a jump in metres per second.");
+        s_gravity = config.Bind("Movement", "Gravity", 15f,
+            "Downward acceleration in metres per second squared.");
 
         s_worldLaser = config.Bind("Controls", "WorldLaser", false,
             "Draw a pointer line from the main hand into the world.");
@@ -62,6 +68,8 @@ internal static class VRSettings
     public static float SmoothTurnSpeed => s_smoothTurnSpeed!.Value;
     public static float MoveSpeed => s_moveSpeed!.Value;
     public static float SprintMultiplier => s_sprintMultiplier!.Value;
+    public static float JumpSpeed => s_jumpSpeed!.Value;
+    public static float Gravity => s_gravity!.Value;
     public static bool WorldLaser => s_worldLaser!.Value;
     public static bool MainHandRight => s_mainHandRight!.Value;
     public static float MenuDistance => s_menuDistance!.Value;
@@ -76,6 +84,8 @@ internal static class VRSettings
     public static ConfigEntry<float> SmoothTurnSpeedEntry => s_smoothTurnSpeed!;
     public static ConfigEntry<float> MoveSpeedEntry => s_moveSpeed!;
     public static ConfigEntry<float> SprintMultiplierEntry => s_sprintMultiplier!;
+    public static ConfigEntry<float> JumpSpeedEntry => s_jumpSpeed!;
+    public static ConfigEntry<float> GravityEntry => s_gravity!;
     public static ConfigEntry<bool> WorldLaserEntry => s_worldLaser!;
     public static ConfigEntry<bool> MainHandRightEntry => s_mainHandRight!;
     public static ConfigEntry<float> MenuDistanceEntry => s_menuDistance!;

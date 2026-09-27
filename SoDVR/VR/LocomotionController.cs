@@ -25,8 +25,6 @@ internal sealed class LocomotionController
     private const float MoveDeadZone = 0.15f;
     private const float PauseMoveRadius = 2.0f; // max distance (metres) from pause origin
     private const float DuctSpeedFraction = 0.3f; // matches game's 0.3× walk speed in ducts
-    private const float JumpForce = 5.0f;   // m/s upward impulse
-    private const float Gravity   = -15.0f; // m/s² (slightly stronger than real for game feel)
 
     private float _snapCooldown;
     private bool  _snapArmed = true;
@@ -424,7 +422,7 @@ internal sealed class LocomotionController
         if (grounded)
             _jumpVerticalVelocity = -_stickToGround;
         else
-            _jumpVerticalVelocity += Gravity * dt;
+            _jumpVerticalVelocity -= VRSettings.Gravity * dt;
         if (_jumpVerticalVelocity < -20f) _jumpVerticalVelocity = -20f;
         _verticalReady = true;
         _verticalDt = dt;
@@ -449,7 +447,7 @@ internal sealed class LocomotionController
         if (!aStateNow) return;
         if (grounded)
         {
-            _jumpVerticalVelocity = JumpForce;
+            _jumpVerticalVelocity = VRSettings.JumpSpeed;
             _jumpBtnNeedsRelease = true;
             _jumpCooldownUntil = now + 0.3f;
             Log.LogInfo("[Locomotion] Jump!");

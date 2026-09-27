@@ -54,6 +54,8 @@ public static class VRSettingsPanel
     private static readonly float[] SmoothSpeedOptions = { 60f, 120f, 180f, 240f };
     private static readonly float[] MoveSpeedOptions   = { 2f, 4f, 6f, 8f };
     private static readonly float[] SprintOptions      = { 1.4f, 1.8f, 2.5f, 3f };
+    private static readonly float[] JumpSpeedOptions   = { 3f, 4f, 5f, 6f, 7f };
+    private static readonly float[] GravityOptions     = { 9.8f, 12f, 15f, 20f };
     private static readonly float[] HudSizeOptions     = { 0.6f, 0.75f, 0.9f, 1f, 1.1f, 1.25f, 1.5f };
     private static readonly float[] HudHeightOptions   = { -0.3f, -0.2f, -0.15f, -0.1f, 0f, 0.1f, 0.2f, 0.3f };
     private static readonly float[] RenderScaleOptions = { 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1f, 1.2f, 1.4f };
@@ -334,6 +336,8 @@ public static class VRSettingsPanel
         SectionHeader(t, "─── MOVEMENT ───");
         ConfigFloat(t, "Move Speed", VRSettings.MoveSpeedEntry, MoveSpeedOptions, v => $"{v} m/s");
         ConfigFloat(t, "Sprint Multi", VRSettings.SprintMultiplierEntry, SprintOptions, v => $"{v}×");
+        ConfigFloat(t, "Jump Speed", VRSettings.JumpSpeedEntry, JumpSpeedOptions, v => $"{v} m/s");
+        ConfigFloat(t, "Gravity", VRSettings.GravityEntry, GravityOptions, v => $"{v} m/s²");
 
         SectionHeader(t, "─── CONTROLS ───");
         ConfigToggle(t, "Main Hand: Right", VRSettings.MainHandRightEntry);
