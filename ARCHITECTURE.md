@@ -32,6 +32,7 @@ classDiagram
     VRCamera *-- HeldItemTracker : _heldItem
     VRCamera *-- HudController : _hud
     VRCamera *-- LocomotionController : _locomotion
+    VRCamera *-- FallDamage : _fallDamage
     VRCamera *-- ControllerPoses : _controllerPoses
     VRCamera *-- HandPointer : _handPointer
     VRCamera *-- RTPanelInput : _rtPanelInput
@@ -142,6 +143,7 @@ classDiagram
 | `CanvasDump.cs` | static | F9 debug dump of every canvas. |
 | `NativeInput.cs` | static | Win32 input injection. |
 | `LocomotionController.cs` | instance | Movement, turning and the buttons forwarded to the game as keys. |
+| `FallDamage.cs` | instance | The game's landing handler (fall damage, broken legs, landing sounds, trip knockdown, "Shafted"), reimplemented because the mod disables `FirstPersonController`, which runs it. |
 | `HeldItemTracker.cs` | instance | Held items and arms following the controllers; the item arm on the main hand, the rig mirrored when that is the left. |
 | `Rooms/VoidRoomController.cs` + `Rooms/VoidRoom.cs` | instance | The void room for pre-game screens — independent island. |
 | `Plugin.cs` | BepInPlugin | Instantiates `VRCamera`, binds config. |

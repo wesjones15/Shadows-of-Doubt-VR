@@ -70,6 +70,10 @@ internal sealed class LocomotionController
     public bool HasPlayerController => _playerCC != null;
     public bool InAirVent => _inAirVent;
 
+    /// <summary>This frame's ApplyMove included gravity: off during load grace, in vents and before
+    /// the player has first stood on ground.</summary>
+    public bool GravityActive { get; private set; }
+
     /// <summary>Called once from DiscoverMovementSystem with whatever it found — the searching
     /// (walking the hierarchy, GetComponent calls) stays there, this just stores the results.</summary>
     /// <param name="stickToGround">The game's FirstPersonController.m_StickToGroundForce: how hard it
@@ -286,6 +290,7 @@ internal sealed class LocomotionController
     /// </summary>
     public void ApplyMove()
     {
+        GravityActive = _verticalReady;
         Vector3 move = _horizontalMove;
         if (_verticalReady) move.y += _jumpVerticalVelocity * _verticalDt;
         _horizontalMove = Vector3.zero;

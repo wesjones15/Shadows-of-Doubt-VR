@@ -59,6 +59,7 @@ public class VRCamera : MonoBehaviour
     private readonly HeldItemTracker _heldItem = new();
     private readonly HudController _hud = new();
     private readonly LocomotionController _locomotion = new();
+    private readonly FallDamage _fallDamage = new();
     private readonly ControllerPoses _controllerPoses = new();
     private readonly RTPanelInput _rtPanelInput = new();
     private readonly RTPanelGrip _rtPanelGrip = new();
@@ -518,6 +519,7 @@ public class VRCamera : MonoBehaviour
                 _locomotion.UpdateMenuButton();
                 _locomotion.UpdateJump(caseBoardOpenForInput, pointerOnUI, _movementDiscoveryDone, _sceneLoadGrace);
                 _locomotion.ApplyMove();
+                _fallDamage.Update(_locomotion.GravityActive);
                 _locomotion.UpdateInteract(pointerOnUI || isPausedForLocomotion || _voidRoom.OnPressAnyKeyScreen);
                 _locomotion.UpdateCrouch();
                 try { _radialMenu.Update(_leftControllerGO, _leftCam, _soloScreens, _caseBoardRT.IsOpen); }
@@ -1110,15 +1112,17 @@ public class VRCamera : MonoBehaviour
 
         // Unity Standard Assets' default, which the game's controller is built on.
         float stickToGround = 10f;
+        UnityStandardAssets.Characters.FirstPerson.FirstPersonController? fpc = null;
         try
         {
-            var fpc = cc?.GetComponent<UnityStandardAssets.Characters.FirstPerson.FirstPersonController>();
+            fpc = cc?.GetComponent<UnityStandardAssets.Characters.FirstPerson.FirstPersonController>();
             if (fpc != null) stickToGround = fpc.m_StickToGroundForce;
             else Log.LogWarning("[Movement] FirstPersonController not found; stick-to-ground force stays at the default.");
         }
         catch (Exception ex) { Log.LogWarning($"[Movement] FirstPersonController lookup: {ex.Message}"); }
 
         _locomotion.Discover(cc, rb, playerComponent, stickToGround);
+        _fallDamage.Discover(fpc, cc, playerComponent);
 
         // 6. Camera.main diagnostic — confirm it's non-null so SaveStateController won't crash
     }
