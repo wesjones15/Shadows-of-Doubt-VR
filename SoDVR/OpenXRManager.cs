@@ -1119,7 +1119,8 @@ public static class OpenXRManager
                 Log.LogInfo($"  [FS#{_stereoCallCount}] displayTime={displayTime}  session=0x{_session:X}");
             }
 
-            int rc = _dEndFrame(_session, _bFrameEndInfo);
+            int rc = 0;
+            if (!SoDVR.VR.StallFrames.EndMainFrame(() => rc = _dEndFrame(_session, _bFrameEndInfo))) return;
             if (rc != 0)
                 Log.LogWarning($"  xrEndFrame(stereo)#{_stereoCallCount} rc={rc}  space=0x{ReferenceSpace:X} L-sc=0x{LeftSwapchain:X} R-sc=0x{RightSwapchain:X} lidx={leftIdx} ridx={rightIdx}");
         }
@@ -1149,9 +1150,33 @@ public static class OpenXRManager
         Marshal.WriteInt32(p, 88, 0);              // imageArrayIndex = 0
     }
 
-    // Public thin wrappers so VRCamera can call frame functions
-    public static long FrameWaitPublic(out int rc) => FrameWait(out rc);
-    public static int  FrameBeginPublic()           { FrameBegin(out int rc); return rc; }
+    // The main thread's xrWaitFrame/xrBeginFrame, called by StallFrames under its gate.
+    internal static long MainFrameWait(out int rc) => FrameWait(out rc);
+    internal static int  MainFrameBegin()           { FrameBegin(out int rc); return rc; }
+
+    // The same calls with the caller's own structs, for StallFrames' thread.
+    internal static long WaitFrameWith(IntPtr waitInfo, IntPtr frameState, out int rc)
+    {
+        rc = -1;
+        if (_dWaitFrame == null || _session == 0) return 0;
+        rc = _dWaitFrame(_session, waitInfo, frameState);
+        return Marshal.ReadInt64(frameState, 16);
+    }
+    internal static int BeginFrameWith(IntPtr beginInfo) =>
+        _dBeginFrame == null || _session == 0 ? -1 : _dBeginFrame(_session, beginInfo);
+    internal static int EndFrameWith(IntPtr endInfo) =>
+        _dEndFrame == null || _session == 0 ? -1 : _dEndFrame(_session, endInfo);
+
+    /// <summary>A colour swapchain like the eyes', for StallFrames' quad layers.</summary>
+    internal static bool CreateLayerSwapchain(int w, int h, out ulong swapchain, out IntPtr[] images)
+    {
+        images = System.Array.Empty<IntPtr>();
+        if (!CreateSwapchain(w, h, out swapchain)) return false;
+        images = EnumSwapchainImages(swapchain);
+        return images.Length > 0;
+    }
+
+    internal static IntPtr D3D11Device => GetD3D11Device();
 
     /// <summary>Submits xrEndFrame with zero composition layers (keeps session alive).</summary>
     public static void FrameEndEmpty(long displayTime)
@@ -1163,7 +1188,7 @@ public static class OpenXRManager
             Marshal.WriteInt64(_bFrameEndInfo, 16, displayTime);
             Marshal.WriteInt32(_bFrameEndInfo, 28, 0);              // layerCount = 0
             Marshal.WriteIntPtr(_bFrameEndInfo, 32, IntPtr.Zero);
-            _dEndFrame(_session, _bFrameEndInfo);
+            SoDVR.VR.StallFrames.EndMainFrame(() => _dEndFrame(_session, _bFrameEndInfo));
             // Restore to stereo (1-layer) config for the next real frame.
             Marshal.WriteInt32(_bFrameEndInfo, 28, 1);
             Marshal.WriteIntPtr(_bFrameEndInfo, 32, _bLayerPtr);

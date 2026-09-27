@@ -80,6 +80,7 @@ public class VRCamera : MonoBehaviour
     private readonly CompassDisplay _compass = new(UILayer);
     private readonly PostFXOverlayCompositor _overlay = new();
     private readonly MonitorMirror _mirror = new();
+    private readonly StallCube _stallCube = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
     // The swapchain copy still runs every frame, so head tracking stays smooth via ATW.
@@ -332,13 +333,9 @@ public class VRCamera : MonoBehaviour
             _waitFrameCount++;
 
             HangWatch.Mark("xrWaitFrame (pre-stereo)");
-            long t = OpenXRManager.FrameWaitPublic(out int wrc);
-            if (wrc >= 0)
-            {
-                OpenXRManager.FrameBeginPublic();
-                OpenXRManager.FrameEndEmpty(t > 0 ? t : 1);
-            }
-            else if ((_waitFrameCount % 60) == 1)
+            if (StallFrames.BeginMainFrame(out long t, out int wrc, out _))
+                OpenXRManager.FrameEndEmpty(t);
+            else if (wrc < 0 && (_waitFrameCount % 60) == 1)
             {
                 Log.LogWarning($"[VRCamera] xrWaitFrame rc={wrc} (empty frame {_waitFrameCount})");
             }
@@ -417,8 +414,8 @@ public class VRCamera : MonoBehaviour
         }
 
         LoadStallLog.BeforeFrameWait();
-        HangWatch.Mark("xrWaitFrame");
-        _displayTime = OpenXRManager.FrameWaitPublic(out int waitRc);
+        HangWatch.Mark("xrWaitFrame + xrBeginFrame");
+        StallFrames.BeginMainFrame(out _displayTime, out int waitRc, out int beginRc);
         if (waitRc < 0)
         {
             if (_frameCount < 5 || (_frameCount % 300) == 0)
@@ -427,10 +424,7 @@ public class VRCamera : MonoBehaviour
             _posesValid = false;
             return;
         }
-        if (_displayTime == 0) _displayTime = 1;
 
-        HangWatch.Mark("xrBeginFrame");
-        int beginRc = OpenXRManager.FrameBeginPublic();
         if (beginRc < 0)
         {
             // Error from xrBeginFrame — do NOT proceed to render or CopyResource.
@@ -723,6 +717,7 @@ public class VRCamera : MonoBehaviour
             // With the room disabled in config, those frames are submitted empty instead.
             bool inReloadGrace = _sceneLoadGrace > 0 && _prevGameCamValid;
             bool voidMode = _voidRoom.Tick(_gameCam, _leftCam, _rightCam, inReloadGrace);
+            StallFrames.Armed = voidMode && _stallCube.HasCapture;
             if (!voidMode && (_gameCam == null || inReloadGrace))
             {
                 OpenXRManager.FrameEndEmpty(_displayTime);
@@ -807,6 +802,7 @@ public class VRCamera : MonoBehaviour
             }
 
             _mirror.Tick(_leftRT, _leftEye);
+            if (voidMode) _stallCube.Refresh(_cameraOffset, _leftCam, _leftEye, _overlay);
 
             HangWatch.Mark("swapchain copy");
             bool leftOk = CameraRig.CopyEye("L", OpenXRManager.LeftSwapchain, OpenXRManager.LeftSwapchainImages, _leftRT, _frameCount, out uint leftIdx);
