@@ -71,6 +71,8 @@ public static class OpenXRManager
     public  static ulong   RightSwapchain        { get; private set; }
     public  static int     SwapchainWidth        { get; private set; }
     public  static int     SwapchainHeight       { get; private set; }
+    /// <summary>The runtime's recommended eye width before render scale: the display's own density.</summary>
+    public  static int     RecommendedWidth      { get; private set; }
     public  static IntPtr[] LeftSwapchainImages  { get; private set; } = System.Array.Empty<IntPtr>();
     public  static IntPtr[] RightSwapchainImages { get; private set; } = System.Array.Empty<IntPtr>();
     public  static ulong   Session               => _session;
@@ -875,6 +877,7 @@ public static class OpenXRManager
             if (maxW > 0) scaledW = Math.Min(scaledW, maxW & ~1);
             if (maxH > 0) scaledH = Math.Min(scaledH, maxH & ~1);
             Log.LogInfo($"  Render scale {renderScale}: {recW}x{recH} → {scaledW}x{scaledH}");
+            RecommendedWidth = recW;
             SwapchainWidth  = scaledW;
             SwapchainHeight = scaledH;
 

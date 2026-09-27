@@ -815,7 +815,7 @@ public class VRCamera : MonoBehaviour
                     _rtPanelInput.AppendOverlay(_overlay);
                     // Crisp menus: the menu and top bands as quad layers over the eyes, the lasers
                     // in a layer above them; everything else stays in the eye image.
-                    _panelCopy.BeginFrame();
+                    _panelCopy.BeginFrame(_leftCam.transform.position, _leftEye);
                     var above = VRSettings.PanelLayers && _overlay.HasPanelsAbove
                         ? _mainLayers.PanelLayers(_cameraOffset, _overlay.PanelsAbove(_leftCam.transform.position), _panelCopy)
                         : null;
