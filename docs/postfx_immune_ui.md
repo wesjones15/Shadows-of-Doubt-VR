@@ -246,12 +246,13 @@ compositor; it owns no renderer.
 - **TAA history isn't disturbed.** HDRP's TAA history lives in its own buffers, not the camera
   target, so drawing into the target after the fact doesn't feed UI into next frame's
   reprojection.
-- **Ordering.** Panels are stacked by band (`PanelLayer`: `Normal`, `Menu`, `Top`), then sorted
+- **Ordering.** Panels are stacked by band (`PanelLayer`: `World`, `Normal`, `Menu`, `Top`), then sorted
   farthest-first within a band (they're alpha-blended), then lasers are drawn last. The order is
   fixed once per frame, from the left eye passed to `BeginFrame`, so both eyes and the panel layers
   agree on it. The sort uses each quad's centre, which misorders a small quad just in front of a
   large one's edge (a tooltip over the navbar's edge is farther than the navbar's centre), which is
-  why tooltips are in the `Top` band.
+  why tooltips are in the `Top` band. The world marks are in `World`, under all screen UI, as the flat
+  game draws them.
 - **Throttled rendering.** If you skip `Camera.Render()` on some frames and resubmit the last image,
   composite inside the same block as the render, so the resubmitted image already contains the UI.
 - **Colour.** The panel's pixels reach the headset exactly as the projector camera produced them, with
@@ -289,7 +290,7 @@ Use `RTCanvasPanel`, which does the projector, texture, quads and pointer regist
    `Visible` each tick.
 4. Call the panel's `Render()` from the coordinator's `LateUpdate` before the eyes render, and its
    `AppendOverlay` between `BeginFrame(head)` and the `Composite` calls. With Crisp Panels on, it
-   becomes a quad layer by itself (see below).
+   can become a quad layer, by the `LayerRank` it was constructed with (see below).
 
 `TooltipRTPanel.cs` (many small views of one canvas), `CaseBoardPanel.cs` (screen layout) and
 `CaseBoardWindows.cs` (sheet layout) are the reference implementations. `MenuRTPanel.cs` predates
@@ -387,28 +388,41 @@ worked, but in the headset the laser felt low-rate and stuttery, so it was repla
 
 ### Which panels are layered
 
-Every panel the overlay draws is a candidate: the HUD and its key hints, the controls panel, the
-interact label, world marks, the case board, dialogue, the minimap, the menu, popups, tooltips, the
-keyboard and VR Settings. `PostFXOverlayCompositor.Panels` is the frame's stacking order, bottom
-first. `MainLayers.Build` walks it from the top down and layers each panel it can, until
-`OpenXRManager.MaxFrameLayers - 1` are layered (the last slot is the eyes'). It then writes them
-bottom first, and `MainLayers.Layered` says which ones it took. That same set is what the eye image
-skips and what the dim step covers, so every panel is shown exactly once.
+Each `RTCanvasPanel` is constructed with a `LayerRank`, which decides which panels get layers first
+when there are more candidates than fit. The ranks, highest first:
 
-- **Over budget,** the topmost panels are layered and the rest stay in the eye image, which puts them
-  under every layered one, as the order has them.
-- **Not layerable:** a draw whose material's texture isn't a `RenderTexture`, or whose shader isn't
-  the premultiplied panel shader (`CameraRig.PremultipliedShaderName`), stays in the eye image. A
-  layer is blended as premultiplied colour, so only such a panel looks the same as one; if the shader
-  is missing from the build, the panels fall back to `UI/Default` and none are layered. Each
-  exclusion is logged once: `[MainLayers] '<material>' stays in the eye image: <reason>.`
-- **A failed copy** (no swapchain of that size) leaves that panel in the eye image; the others are
-  still layered. `PanelLayerCopy` logs each unavailable size once.
+| Rank | Panels |
+|---|---|
+| `Menu` | the pause/main menu, VR Settings |
+| `Popup` | tooltips, the keyboard, the radial menu, loose canvases (dialogs, splash, mod.io) |
+| `Controls` | the controls panel and its live row |
+| `Hints` | the HUD (key hints included), the interact label |
+| `Board` | the case board's panels, dialogue, conversation subtitles, clue messages, the map |
+| `Notes` | open notes and other board windows (the player can bring them closer instead) |
+| `Never` | the world marks: overhead alert icons, speech bubbles, objective pointers |
 
-A panel that stays in the eye image is under every layered one. That's the stacking order whenever
-the eye panels are all at the bottom of it, which is always true of the budget. It's only wrong for
-a non-layerable panel, or one whose copy failed, that sits above a layered one: it's then drawn
-beneath it.
+`PostFXOverlayCompositor.Panels` is the frame's stacking order, bottom first. `MainLayers.Build` then:
+
+1. **Picks** up to `OpenXRManager.MaxFrameLayers - 1` (15) candidates, by rank and, within a rank,
+   topmost first. It skips any draw whose material's texture isn't a `RenderTexture`, or whose shader
+   isn't the premultiplied panel shader (`CameraRig.PremultipliedShaderName`). A layer is blended as
+   premultiplied colour, so only such a panel looks the same as one. Each exclusion is logged once:
+   `[MainLayers] '<material>' stays in the eye image: <reason>.` Going over 15 candidates, and back
+   under, is logged too.
+2. **Walks the stacking order from the top down.** A panel that wasn't picked goes to the eye image.
+   So does a picked panel that overlaps, on either eye's screen, an eye-image panel above it, and one
+   whose copy fails (`PanelLayerCopy` logs each unavailable swapchain size once). The rest are copied
+   and become layers.
+3. **Writes the layers bottom first.** `MainLayers.Layered` says which panels it took. That same set
+   is what the eye image skips and what the dim step covers, so every panel is shown exactly once.
+
+Rule 2 is what keeps the order right. A panel in the eye image is always under every layered one, so
+a layered panel must never be one that the flat order puts under an eye-image panel it overlaps. For
+example, a note left in the eye image keeps the corkboard behind it in the eye image too. Overlap is
+tested on each quad's bounding box in normalized device coordinates. A quad partly behind the eye
+counts as covering the whole screen. The world marks are at the bottom of the order, so they never
+push a panel out of the layers. A panel that is pushed out doesn't free its slot for the next-ranked
+one.
 
 - **World dots** stay in the eye image, under every panel, as they are now.
 - **The monitor mirror** shows the left eye RT, which no longer contains layered panels. It gets its
@@ -416,11 +430,12 @@ beneath it.
 
 The main-frame version with the menu and top bands layered was **checked in the headset on
 2026-09-27**. The layered menu and popup text was crisp, but borders aliased and the separate laser
-layer stuttered. Both were fixed as described above. Those fixes, and layering every panel (HUD,
-hints, controls, labels and the rest), are **not yet tested in the headset**. Things to watch for:
-the GPU cost of copying every shown panel texture each frame, the runtime's own layer limit if it's
-below 16, and the interact label, whose layer pose and copy level change every frame as it follows
-the hit point.
+layer stuttered. Both were fixed as described above. Those fixes, the ranks, the 15-layer cap and the
+overlap rule are **not yet tested in the headset**. Things to watch for: whether the HUD's elements
+and the controls fill the 15 with the board open (the board itself then stays in the eye image), the
+GPU cost of copying every shown panel texture each frame, the runtime's own layer limit if it's below
+16, and the interact label, whose layer pose and copy level change every frame as it follows the hit
+point.
 
 ## Verifying it works
 
