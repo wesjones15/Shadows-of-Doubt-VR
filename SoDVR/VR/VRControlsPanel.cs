@@ -8,14 +8,17 @@ using UnityEngine.UI;
 namespace SoDVR.VR;
 
 /// <summary>
-/// The controls the mod adds, which the game's key hints can't show, listed under those hints in
-/// the same row style: with the case board open, a Menus page and a World page and a "Show in
-/// world" switch; in the world, when switched on, the World page alone. With the board open, live
-/// rows for what the laser is on (a pin, a string, the map, a window to grab) sit right under the
-/// key hints as a view of their own, and the panel below them. Both are drawn on a canvas of our
-/// own and posed as if they hung under the key hints, so they move with them — folded beside the
-/// board, or on the walking sheet. With the board open the panel (not the live rows) can be
-/// grip-dragged; the move is kept relative to its spot, so it holds in the world too.
+/// Two things on one canvas of our own, both posed on the HUD so they move with it — folded beside
+/// the board, or on the walking sheet:
+/// <list type="bullet">
+/// <item>The controls panel: the controls the mod adds, in the game's hint-row style. With the case
+/// board open it has a Menus page, a World page and a "Show in world" switch; in the world, when
+/// switched on, the World page alone. Its home is the HUD's right side, beside the board; with the
+/// board open it can be grip-dragged, and the move is kept relative to that home, so it holds in
+/// the world too.</item>
+/// <item>The live row: with the board open, what the controls do on what the laser is on (a pin, a
+/// string, the map, a window to grab), laid out like the game's key hints right under them.</item>
+/// </list>
 /// </summary>
 internal sealed class VRControlsPanel : IRTGripTarget
 {
@@ -34,6 +37,10 @@ internal sealed class VRControlsPanel : IRTGripTarget
     private const float GripMargin = 1.1f;
     // The live row's own band on the canvas, below the panel's box (canvas units).
     private const float LiveBoxTop = 900f;
+    // The panel's home on the HUD: its top this far up the screen, just under the objectives (which
+    // end about three quarters up), and this far in from the right edge (texture pixels).
+    private const float HomeTopFraction = 0.7f;
+    private const float RightEdgePixels = 48f;
 
     private enum Page { Menus, World }
 
@@ -91,19 +98,19 @@ internal sealed class VRControlsPanel : IRTGripTarget
         bool settingsOpen = VRSettingsPanel.RootGO != null && VRSettingsPanel.RootGO.activeSelf;
         bool inWorld = !boardOpen && VRSettings.ControlsInWorld && hud.SheetPose != null;
         bool showing = hud.IsShowing && !settingsOpen && (boardOpen || inWorld);
-        if (!showing || HintsRect(hud) is not { } hints) { _view!.Visible = false; _liveView!.Visible = false; return; }
+        if (!showing) { _view!.Visible = false; _liveView!.Visible = false; return; }
 
         _live.Clear();
         if (boardOpen) CollectLive(input);
-        PlaceLive(hud, hints);
+        if (HintsRect(hud) is { } hints) PlaceLive(hud, hints);
+        else _liveView!.Visible = false;
 
         Rebuild(boardOpen ? _page : Page.World, withButtons: boardOpen);
         var rect = _panel.ContentPixelRect(_box, 0f, out int count);
         if (count == 0) { _view!.Visible = false; return; }
         _view!.SetPixelRect(rect);
-        float top = hints.yMin - GapPixels - LiveReservePixels;
-        var under = new Rect(hints.xMax - rect.width, top - rect.height, rect.width, rect.height);
-        _view.Visible = hud.PlaceAt(_view, under, hints);
+        var home = HomeRect(rect.size);
+        _view.Visible = hud.PlaceAt(_view, home, home);
         if (_view.Visible) ApplyLayout();
         // In the world it's only looked at: the laser and the world pointer pass through it.
         _view.Interactive = boardOpen;
@@ -111,11 +118,17 @@ internal sealed class VRControlsPanel : IRTGripTarget
 
         if (_loggedPlacement) return;
         _loggedPlacement = true;
-        Log.LogInfo($"[VRControls] Under the key hints at {hints}: box {rect} posed as {under}.");
+        Log.LogInfo($"[VRControls] Box {rect} posed on the HUD's right side as {home}.");
     }
 
-    private float LiveReservePixels =>
-        (_rowHeight + SectionGap) * (_canvas != null ? _canvas.scaleFactor : 1f);
+    /// <summary>The panel's own spot on the HUD, at its right edge below the objectives: beside the
+    /// case board with the rest of that side, and at the sheet's right in the world.</summary>
+    private Rect HomeRect(Vector2 size)
+    {
+        var texture = _panel.Texture!;
+        float top = HomeTopFraction * texture.height;
+        return new Rect(texture.width - RightEdgePixels - size.x, top - size.y, size.x, size.y);
+    }
 
     /// <summary>The live rows, right under the key hints like more of them; they don't move with
     /// the panel.</summary>
@@ -412,7 +425,7 @@ internal sealed class VRControlsPanel : IRTGripTarget
         var inverse = Quaternion.Inverse(_baseRotation);
         var top = held.position + HalfHeight(held.rotation);
         _layout = (inverse * (top - _baseTop) / _baseMetersPerPixel, inverse * held.rotation);
-        Log.LogInfo($"[VRControls] Moved: {_layout.Value.topOffset} px from under the key hints.");
+        Log.LogInfo($"[VRControls] Moved: {_layout.Value.topOffset} px from its home.");
     }
 
     private void Teardown()
