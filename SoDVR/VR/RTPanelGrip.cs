@@ -62,6 +62,14 @@ internal sealed class RTPanelGrip
 
     public static bool HoldsStick(bool rightHand) => DraggingHandIsRight == rightHand;
 
+    /// <summary>A grip press along <paramref name="ray"/> would grab a panel.</summary>
+    public bool CanGripAt(Ray ray)
+    {
+        foreach (var target in _targets)
+            if (target.TryGripHit(ray, out float d) && d < MaxGrabDistance) return true;
+        return false;
+    }
+
     public void Update(GameObject? rightControllerGO, GameObject? leftControllerGO, bool activeHandIsRight)
     {
         OpenXRManager.GetGripState(true, out bool rightGrip);

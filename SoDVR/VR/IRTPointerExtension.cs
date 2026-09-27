@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace SoDVR.VR;
@@ -52,4 +53,12 @@ internal interface IRTPointerExtension
 
     /// <summary>Panel closed or input dropped mid-gesture: cancel cleanly.</summary>
     void Cancel();
+
+    /// <summary>What this panel's own gestures do on what the pointer was last on (as
+    /// <see cref="OnPointer"/> saw it), for the live rows under the key hints.</summary>
+    void AddHints(List<ControlHint> into) { }
 }
+
+/// <summary>A control the mod adds, as <see cref="VRControlsPanel"/> lists it: its buttons'
+/// glyphs (<see cref="QuestGlyphs"/> sprite names) and what it does.</summary>
+internal readonly record struct ControlHint(string[] Glyphs, string Text);

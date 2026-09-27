@@ -302,7 +302,7 @@ public class VRCamera : MonoBehaviour
 
         try { _clueRT.Tick(_hudRT, _dialogueRT.OpenView); }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] ClueMessagePanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
-        try { _controlsRT.Tick(_hudRT, _caseBoardRT.ShowsBoard); }
+        try { _controlsRT.Tick(_hudRT, _caseBoardRT.ShowsBoard, _rtPanelInput, _rtPanelGrip); }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] VRControlsPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
         try { _worldMarks.Tick(_hudRT); }

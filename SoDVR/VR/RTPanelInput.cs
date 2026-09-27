@@ -39,6 +39,12 @@ internal sealed class RTPanelInput
 
     public bool HasFocus => _focus != null;
 
+    /// <summary>The panel the laser is on, if any.</summary>
+    public RTPanelPointer? Focus => _focus;
+
+    /// <summary>This frame's laser ray from the main hand; null with no panel to point at.</summary>
+    public Ray? LaserRay { get; private set; }
+
     public bool IsCapturing => _captured != null;
     public Vector3 FocusPoint => _laserEnd;
     public float FocusDistance { get; private set; }
@@ -81,6 +87,7 @@ internal sealed class RTPanelInput
         _prevA = aNow;
         _prevB = bNow;
 
+        LaserRay = null;
         if (!AnyPointerEnabled() && _captured == null) { DropFocus(); return; }
 
         bool useRightHand = MainHand.IsRight;
@@ -88,6 +95,7 @@ internal sealed class RTPanelInput
         if (hand == null) { DropFocus(); return; }
 
         var ray = new Ray(hand.transform.position, hand.transform.forward);
+        LaserRay = ray;
         bool triggerHeld = useRightHand ? rightTrigger : leftTrigger;
         // A and B are the right controller's, but act on the laser's target whichever hand aims it.
         var input = new RTPointerInput(

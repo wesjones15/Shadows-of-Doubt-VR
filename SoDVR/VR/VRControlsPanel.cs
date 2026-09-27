@@ -10,7 +10,8 @@ namespace SoDVR.VR;
 /// <summary>
 /// The controls the mod adds, which the game's key hints can't show, listed under those hints in
 /// the same row style: with the case board open, a Menus page and a World page and a "Show in
-/// world" switch; in the world, when that's on, the World page alone. The rows are drawn on a
+/// world" switch, and above them live rows for what the laser is on (a pin, a string, the map, a
+/// window to grab); in the world, when switched on, the World page alone. The rows are drawn on a
 /// canvas of our own and the view is posed as if they hung just under the key hints, so they move
 /// with them — folded beside the board, or on the walking sheet.
 /// </summary>
@@ -22,6 +23,7 @@ internal sealed class VRControlsPanel
     private const int DiscoveryRetryFrames = 90;
     private const float GapPixels = 8f;
     private const float RowGap = 4f;
+    private const float SectionGap = 16f;
     private const float RowPaddingX = 14f;
     private const float TabPaddingX = 18f;
     private const float DimAlpha = 0.45f;
@@ -29,8 +31,6 @@ internal sealed class VRControlsPanel
     private const float RowHeightPerFontSize = 1.6f;
 
     private enum Page { Menus, World }
-
-    private readonly record struct Hint(string[] Glyphs, string Text);
 
     private readonly RTCanvasPanel _panel;
     private readonly Dictionary<int, Action> _clickMap = new();
@@ -42,6 +42,7 @@ internal sealed class VRControlsPanel
     private float _rowHeight;
     private int _discoveryCooldown;
     private Page _page = Page.Menus;
+    private readonly List<ControlHint> _live = new();
     private string? _built;
     private Rect? _lastHintsRect;
     private bool _loggedPlacement;
@@ -51,8 +52,9 @@ internal sealed class VRControlsPanel
         _panel = new RTCanvasPanel("VRControls", quadLayer, input);
     }
 
-    /// <param name="boardOpen">The case board is up: the full panel, with its buttons.</param>
-    public void Tick(HudRTPanels hud, bool boardOpen)
+    /// <param name="boardOpen">The case board is up: the full panel, with its buttons, and the live
+    /// rows for what the laser is on.</param>
+    public void Tick(HudRTPanels hud, bool boardOpen, RTPanelInput input, RTPanelGrip grip)
     {
         if (!_panel.IsAttached || _box == null)
         {
@@ -68,6 +70,12 @@ internal sealed class VRControlsPanel
         bool showing = hud.IsShowing && !settingsOpen && (boardOpen || inWorld);
         if (!showing || HintsRect(hud) is not { } hints) { _view!.Visible = false; return; }
 
+        // Kept while the laser is on this panel itself, so its tabs don't move out from under it.
+        if (!boardOpen || input.Focus != _view!.Pointer)
+        {
+            _live.Clear();
+            if (boardOpen) CollectLive(input, grip);
+        }
         Rebuild(boardOpen ? _page : Page.World, withButtons: boardOpen);
         var rect = _panel.ContentPixelRect(_box, 0f, out int count);
         if (count == 0) { _view!.Visible = false; return; }
@@ -97,12 +105,23 @@ internal sealed class VRControlsPanel
         return _lastHintsRect;
     }
 
-    private static Hint[] Hints(Page page)
+    /// <summary>What the controls do on what the laser is on: the focused panel's own gestures, and
+    /// grabbing it.</summary>
+    private void CollectLive(RTPanelInput input, RTPanelGrip grip)
+    {
+        input.Focus?.Extension?.AddHints(_live);
+        if (RTPanelGrip.DraggingHandIsRight is { } dragging)
+            _live.Add(new(new[] { QuestGlyphs.GripName(dragging), dragging ? "quest_stick_r_vertical" : "quest_stick_l_vertical" }, "Push / pull the window"));
+        else if (input.LaserRay is { } ray && grip.CanGripAt(ray))
+            _live.Add(new(new[] { QuestGlyphs.GripName(MainHand.IsRight) }, "Hold: move this window"));
+    }
+
+    private static ControlHint[] Hints(Page page)
     {
         bool right = MainHand.IsRight;
         string offTrigger = QuestGlyphs.TriggerName(!right), grip = QuestGlyphs.GripName(right);
         return page == Page.Menus
-            ? new Hint[]
+            ? new ControlHint[]
             {
                 new(new[] { offTrigger }, "Swap laser hand"),
                 new(new[] { grip }, "Hold: move a window"),
@@ -113,7 +132,7 @@ internal sealed class VRControlsPanel
                 new(new[] { "quest_stick_r_vertical" }, "Zoom the board or map, scroll"),
                 new(new[] { "quest_button_y" }, "Close the case board"),
             }
-            : new Hint[]
+            : new ControlHint[]
             {
                 new(new[] { offTrigger }, "Swap hands"),
                 new(new[] { "quest_stick_r_horizontal" }, "Turn"),
@@ -127,6 +146,7 @@ internal sealed class VRControlsPanel
     {
         bool glyphs = QuestGlyphs.Sprite("quest_button_a") != null;
         string key = $"{page}|{withButtons}|{MainHand.IsRight}|{VRSettings.ControlsInWorld}|{glyphs}";
+        foreach (var hint in _live) key += $"|{string.Join("+", hint.Glyphs)} {hint.Text}";
         if (key == _built) return;
         _built = key;
 
@@ -140,6 +160,8 @@ internal sealed class VRControlsPanel
         _clickMap.Clear();
 
         var rows = new List<RectTransform>();
+        foreach (var hint in _live) rows.Add(AddHintRow(hint));
+        int liveRows = rows.Count;
         if (withButtons)
         {
             var bar = NewRect("Bar", _box);
@@ -151,23 +173,26 @@ internal sealed class VRControlsPanel
             bar.sizeDelta = new Vector2(x, _rowHeight);
             rows.Add(bar);
         }
-        foreach (var hint in Hints(page))
-        {
-            string tags = "";
-            foreach (var g in hint.Glyphs) tags += QuestGlyphs.Sprite(g) ?? "";
-            rows.Add(AddRow(_box, tags.Length > 0 ? $"{tags} {hint.Text}" : hint.Text));
-        }
+        foreach (var hint in Hints(page)) rows.Add(AddHintRow(hint));
 
-        // Right-aligned, top down, as the game stacks its hints.
+        // Right-aligned, top down, as the game stacks its hints; the live rows first, set apart.
         float width = 0f;
         foreach (var r in rows) width = Mathf.Max(width, r.sizeDelta.x);
         float y = 0f;
-        foreach (var r in rows)
+        for (int i = 0; i < rows.Count; i++)
         {
-            r.anchoredPosition = new Vector2(width - r.sizeDelta.x, -y);
-            y += r.sizeDelta.y + RowGap;
+            if (i == liveRows && i > 0) y += SectionGap;
+            rows[i].anchoredPosition = new Vector2(width - rows[i].sizeDelta.x, -y);
+            y += rows[i].sizeDelta.y + RowGap;
         }
         _box.sizeDelta = new Vector2(width, y);
+    }
+
+    private RectTransform AddHintRow(ControlHint hint)
+    {
+        string tags = "";
+        foreach (var g in hint.Glyphs) tags += QuestGlyphs.Sprite(g) ?? "";
+        return AddRow(_box!, tags.Length > 0 ? $"{tags} {hint.Text}" : hint.Text);
     }
 
     private void ToggleInWorld()

@@ -93,6 +93,8 @@ internal sealed class RTPanelPointer
         _extension = extension;
     }
 
+    public IRTPointerExtension? Extension => _extension;
+
     /// <summary>Set by the owning panel every tick: whether this panel can currently take focus.</summary>
     public bool Enabled { get; set; }
 

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using BepInEx.Logging;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -43,6 +44,9 @@ internal sealed class CorkboardInput : IRTPointerExtension
 
     private ZoomContent? _zoom;
     private bool _loggedZoomLookup;
+
+    private enum Pointed { Other, Board, Pin, String, Linking, HoldingString }
+    private Pointed _pointedAt;
 
     private PinnedItemController? _stringSource;
     private RectTransform? _stringFrom;
@@ -271,7 +275,49 @@ internal sealed class CorkboardInput : IRTPointerExtension
         return _zoom;
     }
 
-    public void OnPointer(GameObject? hitGo, in RTPointerSample sample) { }
+    public void OnPointer(GameObject? hitGo, in RTPointerSample sample)
+    {
+        _pointedAt = _linkFollowsLaser ? Pointed.Linking
+            : _stringSource != null ? Pointed.HoldingString
+            : TryFindPin(hitGo, sample, out _, out _) ? Pointed.Pin
+            : hitGo != null && StringControllerOf(hitGo.transform) != null ? Pointed.String
+            : (hitGo == null || !HasSelectableAncestor(hitGo.transform)) && OverBoard(sample) ? Pointed.Board
+            : Pointed.Other;
+    }
+
+    public void AddHints(List<ControlHint> into)
+    {
+        string trigger = QuestGlyphs.TriggerName(MainHand.IsRight);
+        switch (_pointedAt)
+        {
+            case Pointed.Linking:
+                into.Add(new(new[] { trigger }, "On another pin: link to it"));
+                into.Add(new(new[] { "quest_button_b" }, "Cancel the link"));
+                break;
+            case Pointed.HoldingString:
+                into.Add(new(new[] { "quest_button_b" }, "Release on another pin: link"));
+                break;
+            case Pointed.Pin:
+                into.Add(new(new[] { trigger }, "Drag: move the pin"));
+                into.Add(new(new[] { "quest_button_a" }, "Context menu"));
+                into.Add(new(new[] { "quest_button_b" }, "Hold, release on another pin: link"));
+                break;
+            case Pointed.String:
+                into.Add(new(new[] { "quest_button_a" }, "Context menu"));
+                break;
+            case Pointed.Board:
+                into.Add(new(new[] { trigger }, "Drag: pan the board"));
+                into.Add(new(new[] { "quest_stick_r_vertical" }, "Zoom"));
+                break;
+        }
+    }
+
+    private static bool OverBoard(in RTPointerSample sample)
+    {
+        var content = CasePanelController.Instance?.corkBoard;
+        var viewport = content != null && content.parent != null ? content.parent.GetComponent<RectTransform>() : null;
+        return viewport != null && RectTransformUtility.RectangleContainsScreenPoint(viewport, sample.ScreenPosition, sample.EventCamera);
+    }
 
     public void Cancel()
     {

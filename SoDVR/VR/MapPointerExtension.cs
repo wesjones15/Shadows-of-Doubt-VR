@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using BepInEx.Logging;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -32,13 +33,23 @@ internal sealed class MapPointerExtension : IRTPointerExtension
     private GameObject? _lastClickedGo;
     private float _lastClickTime;
     private int _loggedZooms;
+    private bool _onMap;
 
     public bool AltGestureActive => false;
 
     public void OnPointer(GameObject? hitGo, in RTPointerSample sample)
     {
         var map = MapController.Instance;
-        if (map != null && InViewport(map, hitGo, sample)) UpdateCursorNode(sample);
+        _onMap = map != null && InViewport(map, hitGo, sample);
+        if (_onMap) UpdateCursorNode(sample);
+    }
+
+    public void AddHints(List<ControlHint> into)
+    {
+        if (!_onMap) return;
+        into.Add(new(new[] { QuestGlyphs.TriggerName(MainHand.IsRight) }, "Drag: pan the map"));
+        into.Add(new(new[] { "quest_button_a" }, "Map menu here"));
+        into.Add(new(new[] { "quest_stick_r_vertical" }, "Zoom"));
     }
 
     public bool TryTakePress(GameObject? hitGo, in RTPointerSample sample)
