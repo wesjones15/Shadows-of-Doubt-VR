@@ -47,15 +47,17 @@ internal static class QuestGlyphs
         {
             InteractionKey.primary => MainHand.IsRight ? "quest_trigger_right" : "quest_trigger_left",
             InteractionKey.secondary => MainHand.IsRight ? "quest_grip_right" : "quest_grip_left",
-            InteractionKey.alternative => "quest_button_y",
+            // F; a Y hold opens the notebook from the radial menu.
+            InteractionKey.alternative or InteractionKey.caseBoard or InteractionKey.notebook => "quest_button_y",
             InteractionKey.jump => "quest_button_a",
             InteractionKey.crouch => "quest_button_x",
             InteractionKey.sprint => "quest_stick_l_press",
             InteractionKey.flashlight => "quest_stick_r_press",
-            InteractionKey.notebook or InteractionKey.map => "quest_button_b",
+            // Tab; the board's middle click; X, which B sends from behind the shoulder.
+            InteractionKey.map or InteractionKey.CreateString or InteractionKey.WeaponSelect => "quest_button_b",
             InteractionKey.moveHorizontal or InteractionKey.moveVertical => "quest_stick_l",
             InteractionKey.lookHorizontal or InteractionKey.lookVertical => "quest_stick_r",
-            InteractionKey.Menu => "quest_button_menu",
+            InteractionKey.Menu or InteractionKey.Back => "quest_button_menu",
             _ => null,
         };
         if (sprite == null || !EnsureBuilt()) return null;
