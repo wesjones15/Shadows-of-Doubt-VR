@@ -28,7 +28,9 @@ internal static class QuestGlyphs
     private const string AssetName = "SODVR_QUEST";
     private const string SheetResource = "QuestGlyphs.meta-quest_sheet_double.png";
     private const string AtlasResource = "QuestGlyphs.meta-quest_sheet_double.xml";
-    private const float BaselineFraction = 0.85f;   // of a glyph's height above the baseline
+    // A glyph is sized to the font's ascender; smaller and lower, it stays inside its own line.
+    private const float GlyphScale = 0.9f;
+    private const float BaselineFraction = 0.75f;   // of a glyph's height above the baseline
     // Without it, UpdateLookupTables runs TMP's upgrade of an old-format asset, which has no data.
     private const string SpriteAssetVersion = "1.1.0";
     private const HideFlags KeepAcrossLoads = HideFlags.DontUnloadUnusedAsset;
@@ -115,7 +117,7 @@ internal static class QuestGlyphs
                 int w = int.Parse(m.Groups[4].Value), h = int.Parse(m.Groups[5].Value);
                 var metrics = new GlyphMetrics(w, h, 0f, h * BaselineFraction, w);
                 // The atlas counts rows from the top, a texture from the bottom.
-                var glyph = new TMP_SpriteGlyph(index, metrics, new GlyphRect(x, texture.height - y - h, w, h), 1f, 0);
+                var glyph = new TMP_SpriteGlyph(index, metrics, new GlyphRect(x, texture.height - y - h, w, h), GlyphScale, 0);
                 asset.m_SpriteGlyphTable.Add(glyph);
                 // 0xFFFE: found by name only, as TMP's own importer leaves sprites.
                 asset.m_SpriteCharacterTable.Add(new TMP_SpriteCharacter(0xFFFE, asset, glyph) { name = m.Groups[1].Value });
