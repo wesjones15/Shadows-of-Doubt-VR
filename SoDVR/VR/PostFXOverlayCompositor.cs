@@ -47,7 +47,9 @@ internal sealed class PostFXOverlayCompositor
     // one destroyed mesh makes DrawMesh throw away the whole overlay — every panel — each frame it's drawn.
     private const HideFlags KeepAcrossLoads = HideFlags.DontUnloadUnusedAsset;
 
-    private readonly List<OverlayDraw>[] _layers = { new(), new(), new() };
+    private readonly List<OverlayDraw>[] _bands = { new(), new(), new() };
+    private readonly List<OverlayDraw> _panels = new();
+    private bool _ordered;
     private readonly List<Matrix4x4> _lasers = new();
     private readonly List<(Matrix4x4 transform, Material material)> _dots = new();
     private readonly Dictionary<Color, Material> _dotMaterials = new();
@@ -55,22 +57,27 @@ internal sealed class PostFXOverlayCompositor
     private CommandBuffer? _cb;
     private Mesh? _laserMesh;
     private Material? _laserMaterial;
-    private Vector3 _sortEyePos;
+    private Vector3 _head;
     private Mesh? _screenMesh;
     private Material? _clearAlphaMaterial, _dimMaterial;
     private MaterialPropertyBlock? _openingProps;
     private bool _openingFailed;
     private static readonly int MainTexId = Shader.PropertyToID("_MainTex");
 
-    public void BeginFrame()
+    /// <param name="head">Where panels are ordered from, farthest first, for the whole frame: both
+    /// eyes and the panel layers must agree on it.</param>
+    public void BeginFrame(Vector3 head)
     {
-        foreach (var layer in _layers) layer.Clear();
+        foreach (var band in _bands) band.Clear();
+        _panels.Clear();
+        _ordered = false;
+        _head = head;
         _lasers.Clear();
         _dots.Clear();
     }
 
     public void AddPanel(Mesh mesh, Matrix4x4 localToWorld, Material material, PanelLayer layer) =>
-        _layers[(int)layer].Add(new OverlayDraw(mesh, localToWorld, material));
+        _bands[(int)layer].Add(new OverlayDraw(mesh, localToWorld, material));
 
     public void AddLaser(Vector3 origin, Vector3 end)
     {
@@ -91,27 +98,42 @@ internal sealed class PostFXOverlayCompositor
         _dots.Add((Matrix4x4.TRS(position, Quaternion.LookRotation(facing), Vector3.one * diameter), material));
     }
 
-    /// <param name="panelsAboveUnderneath">The menu and top bands go to quad layers under the eyes
-    /// (<see cref="MainLayers"/>): the bands beneath them are drawn, then the eye image is made
-    /// see-through where those panels cover it, so the lasers drawn after still sit on top.</param>
-    public void Composite(Camera eye, RenderTexture target, bool panelsAboveUnderneath = false)
+    /// <summary>This frame's panels in stacking order, bottom first: the bands in order, each
+    /// farthest first.</summary>
+    public IReadOnlyList<OverlayDraw> Panels
     {
-        int bands = panelsAboveUnderneath ? (int)PanelLayer.Menu : _layers.Length;
-        int panels = 0;
-        for (int i = 0; i < bands; i++) panels += _layers[i].Count;
-        if (panels == 0 && _lasers.Count == 0 && _dots.Count == 0 && !panelsAboveUnderneath) return;
+        get
+        {
+            if (_ordered) return _panels;
+            foreach (var band in _bands)
+            {
+                band.Sort(FarthestFirst);
+                _panels.AddRange(band);
+            }
+            _ordered = true;
+            return _panels;
+        }
+    }
+
+    /// <param name="layered">Which of <see cref="Panels"/> went to quad layers under the eyes
+    /// (<see cref="MainLayers"/>): the rest are drawn, then the eye image is made see-through where
+    /// the layered ones cover it, so the lasers drawn after still sit on top.</param>
+    public void Composite(Camera eye, RenderTexture target, IReadOnlyList<bool>? layered = null)
+    {
+        var panels = Panels;
+        if (panels.Count == 0 && _lasers.Count == 0 && _dots.Count == 0) return;
 
         BeginDraw(eye, target);
         // Dots mark world surfaces, so any panel in front of one covers it.
         foreach (var (transform, material) in _dots)
             _cb!.DrawMesh(_dotMesh, transform, material, 0, 0);
-        for (int i = 0; i < bands; i++)
+        for (int i = 0; i < panels.Count; i++)
         {
-            _layers[i].Sort(FarthestFirst);
-            foreach (var draw in _layers[i])
-                _cb!.DrawMesh(draw.Mesh, draw.LocalToWorld, draw.Material, 0, 0);
+            if (layered != null && layered[i]) continue;
+            var draw = panels[i];
+            _cb!.DrawMesh(draw.Mesh, draw.LocalToWorld, draw.Material, 0, 0);
         }
-        if (panelsAboveUnderneath) OpenOverPanelsAbove(eye);
+        if (layered != null) OpenOverLayered(eye, layered);
         DrawLasers();
         Graphics.ExecuteCommandBuffer(_cb);
     }
@@ -121,23 +143,23 @@ internal sealed class PostFXOverlayCompositor
 
     /// <summary>
     /// The eye layer is blended over the panel layers as premultiplied colour: alpha 0 everywhere
-    /// lets them through, and the world is dimmed by each panel's coverage so what shows is the
-    /// panel over the world. Whatever is drawn after with alpha (the lasers) covers the panels.
+    /// lets them through, and what's under each layered panel is dimmed by its coverage so what shows
+    /// is the panel over it. Whatever is drawn after with alpha (the lasers) covers the panels.
     /// </summary>
-    private void OpenOverPanelsAbove(Camera eye)
+    private void OpenOverLayered(Camera eye, IReadOnlyList<bool> layered)
     {
         if (!EnsureOpeningResources()) return;
         _cb!.SetViewProjectionMatrices(Matrix4x4.identity, Matrix4x4.identity);
         _cb.DrawMesh(_screenMesh, Matrix4x4.identity, _clearAlphaMaterial, 0, 0);
         _cb.SetViewProjectionMatrices(eye.worldToCameraMatrix, FlipY * eye.projectionMatrix);
         _openingProps ??= new MaterialPropertyBlock();
-        foreach (var band in AboveBands)
-            foreach (var draw in _layers[(int)band])
-            {
-                if (draw.Material.mainTexture is not { } texture) continue;
-                _openingProps.SetTexture(MainTexId, texture);
-                _cb.DrawMesh(draw.Mesh, draw.LocalToWorld, _dimMaterial, 0, 0, _openingProps);
-            }
+        for (int i = 0; i < _panels.Count; i++)
+        {
+            if (!layered[i]) continue;
+            var draw = _panels[i];
+            _openingProps.SetTexture(MainTexId, draw.Material.mainTexture);
+            _cb.DrawMesh(draw.Mesh, draw.LocalToWorld, _dimMaterial, 0, 0, _openingProps);
+        }
     }
 
     private bool EnsureOpeningResources()
@@ -173,42 +195,6 @@ internal sealed class PostFXOverlayCompositor
         return true;
     }
 
-    public bool HasPanelsAbove => _layers[(int)PanelLayer.Menu].Count + _layers[(int)PanelLayer.Top].Count > 0;
-
-    /// <summary>The menu band, then the top band farthest first: the order their layers go in.
-    /// Null if one of them isn't showing an RT panel texture.</summary>
-    public List<PanelImage>? PanelsAbove(Vector3 head)
-    {
-        _sortEyePos = head;
-        var images = new List<PanelImage>();
-        foreach (var band in AboveBands)
-        {
-            var draws = _layers[(int)band];
-            draws.Sort(FarthestFirst);
-            foreach (var draw in draws)
-            {
-                if (draw.Material.mainTexture is not RenderTexture texture) return null;
-                images.Add(new PanelImage(texture, draw.LocalToWorld, PixelRect(draw.Mesh, texture)));
-            }
-        }
-        return images;
-    }
-
-    private static readonly PanelLayer[] AboveBands = { PanelLayer.Menu, PanelLayer.Top };
-
-    /// <summary>The part of the texture a quad's UVs cover: all of it for the built-in Quad the
-    /// menu uses, which may not be readable.</summary>
-    private static Rect PixelRect(Mesh mesh, RenderTexture texture)
-    {
-        var all = new Rect(0f, 0f, texture.width, texture.height);
-        if (!mesh.isReadable) return all;
-        Vector2[] uv = mesh.uv;
-        if (uv.Length == 0) return all;
-        Vector2 min = uv[0], max = uv[0];
-        foreach (var p in uv) { min = Vector2.Min(min, p); max = Vector2.Max(max, p); }
-        return Rect.MinMaxRect(min.x * texture.width, min.y * texture.height, max.x * texture.width, max.y * texture.height);
-    }
-
     private void BeginDraw(Camera eye, RenderTexture target)
     {
         _cb ??= new CommandBuffer { name = "SoDVR_PostFXOverlay" };
@@ -216,7 +202,6 @@ internal sealed class PostFXOverlayCompositor
         _cb.SetRenderTarget(target);
         _cb.ClearRenderTarget(true, false, Color.clear);
         _cb.SetViewProjectionMatrices(eye.worldToCameraMatrix, FlipY * eye.projectionMatrix);
-        _sortEyePos = eye.transform.position;
     }
 
     private void DrawLasers()
@@ -298,5 +283,5 @@ internal sealed class PostFXOverlayCompositor
         SqrDistance(b).CompareTo(SqrDistance(a));
 
     private float SqrDistance(OverlayDraw d) =>
-        ((Vector3)d.LocalToWorld.GetColumn(3) - _sortEyePos).sqrMagnitude;
+        ((Vector3)d.LocalToWorld.GetColumn(3) - _head).sqrMagnitude;
 }

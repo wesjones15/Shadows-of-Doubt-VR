@@ -796,7 +796,7 @@ public class VRCamera : MonoBehaviour
 
                 try
                 {
-                    _overlay.BeginFrame();
+                    _overlay.BeginFrame(_leftCam.transform.position);
                     _hudRT.AppendOverlay(_overlay);
                     _clueRT.AppendOverlay(_overlay);
                     _controlsRT.AppendOverlay(_overlay);
@@ -813,19 +813,18 @@ public class VRCamera : MonoBehaviour
                     _keyboard.AppendOverlay(_overlay);
                     _handPointer.AppendOverlay(_overlay, _leftCam);
                     _rtPanelInput.AppendOverlay(_overlay);
-                    // Crisp menus: the menu and top bands as quad layers under the eyes, which are
-                    // see-through where those panels are; everything else stays in the eye image.
+                    // Crisp panels: quad layers under the eyes, which are see-through where they are.
                     _panelCopy.BeginFrame(_leftCam.transform.position, _leftEye);
-                    var above = VRSettings.PanelLayers && _overlay.HasPanelsAbove && _overlay.CanOpenOverPanels
-                        ? _mainLayers.PanelLayers(_cameraOffset, _overlay.PanelsAbove(_leftCam.transform.position), _panelCopy)
-                        : null;
-                    bool panelLayers = above != null;
-                    if (panelLayers && VRSettings.MonitorMirror) mirrorImage = _mainLayers.MirrorWorld(_leftRT);
+                    int layers = VRSettings.PanelLayers && _overlay.Panels.Count > 0 && _overlay.CanOpenOverPanels
+                        ? _mainLayers.Build(_cameraOffset, _overlay.Panels, _panelCopy)
+                        : 0;
+                    var layered = layers > 0 ? _mainLayers.Layered : null;
+                    if (layered != null && VRSettings.MonitorMirror) mirrorImage = _mainLayers.MirrorWorld(_leftRT);
 
-                    _overlay.Composite(_rightCam, _rightRT, panelLayers);
-                    _overlay.Composite(_leftCam, _leftRT, panelLayers);
+                    _overlay.Composite(_rightCam, _rightRT, layered);
+                    _overlay.Composite(_leftCam, _leftRT, layered);
                     if (mirrorImage != _leftRT) _overlay.Composite(_leftCam, mirrorImage);
-                    if (panelLayers) underLayers = _mainLayers.Build(above!);
+                    underLayers = layers;
                 }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] PostFXOverlay: {ex.Message}"); }
             }

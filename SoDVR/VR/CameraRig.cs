@@ -372,7 +372,7 @@ internal static class CameraRig
     // Panel textures come out of the UI render with colour already weighted by coverage
     // (premultiplied), so they composite as they are: UI/Default would weight them again — darkening
     // soft edges — and can't show additive glows, which add colour without coverage.
-    private const string PremultipliedShaderName = "Legacy Shaders/Particles/Alpha Blended Premultiply";
+    internal const string PremultipliedShaderName = "Legacy Shaders/Particles/Alpha Blended Premultiply";
     private static Shader? s_panelShader;
 
     private static Shader? PanelShader()
