@@ -163,6 +163,37 @@ internal sealed class HudRTPanels
         return true;
     }
 
+    /// <summary>
+    /// Poses <paramref name="view"/> as if its content were drawn at <paramref name="hudRect"/> of the
+    /// HUD texture — which may run past the screen's edge, e.g. just under the key hints at its
+    /// bottom — so it moves with the HUD elements there. False when the HUD isn't showing.
+    /// </summary>
+    public bool PlaceAt(RTPanelView view, Rect hudRect)
+    {
+        if (_panel.Texture == null) return false;
+        switch (_placement)
+        {
+            case Placement.Sheet:
+                return PlaceOnSheet(view, hudRect.center);
+            case Placement.CaseBoard:
+            case Placement.Computer:
+                var side = SideOf(hudRect);
+                if (!_frameShifts.TryGetValue(side, out var shift)) shift = ShiftClearOfFrame(side, hudRect);
+                PlaceInFrame(view, hudRect, side, shift);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>Where the visible graphics under <paramref name="content"/> are drawn on the HUD
+    /// texture (RT pixels); <paramref name="graphicCount"/> is 0 when none show.</summary>
+    public Rect ContentPixelRect(Transform content, out int graphicCount) =>
+        _panel.ContentPixelRect(content, 0f, out graphicCount);
+
+    /// <summary>A HUD RectTransform's rect on the HUD texture (RT pixels), unclamped.</summary>
+    public Rect PixelRectOf(RectTransform rt) => _panel.UnclampedPixelRectOf(rt);
+
     /// <summary>The walking sheet's centre, facing and world size while it shows; null otherwise.</summary>
     public (Vector3 position, Quaternion rotation, Vector2 size)? SheetPose =>
         _placement == Placement.Sheet && _sheet != null ? (_sheet.Transform.position, _sheet.Transform.rotation, _sheet.WorldSize) : null;

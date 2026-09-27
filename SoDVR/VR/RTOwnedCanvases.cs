@@ -26,6 +26,7 @@ internal static class RTOwnedCanvases
         VRKeyboardPanel.CanvasName,
         VRSettingsPanel.CanvasName,
         ClueMessagePanel.CanvasName,
+        VRControlsPanel.CanvasName,
         WorldMarksPanel.CanvasName,
         InteractLabelPanel.CanvasName,
         RadialMenuPanel.CanvasName,

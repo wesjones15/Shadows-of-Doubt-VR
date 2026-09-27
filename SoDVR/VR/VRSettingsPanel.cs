@@ -352,6 +352,7 @@ public static class VRSettingsPanel
         ConfigFloat(t, "HUD Distance", VRSettings.HudDistanceEntry, DistanceOptions, v => $"{v:F1} m");
         ConfigFloat(t, "HUD Size", VRSettings.HudSizeEntry, HudSizeOptions, v => $"{v:0.##}×");
         ConfigFloat(t, "HUD Height", VRSettings.HudVerticalOffsetEntry, HudHeightOptions, v => $"{v:+0.00;-0.00;0} m");
+        ConfigToggle(t, "Controls in World", VRSettings.ControlsInWorldEntry);
 
         SectionHeader(t, "─── RENDERING ───");
         ConfigToggle(t, "Monitor Mirror", VRSettings.MonitorMirrorEntry);

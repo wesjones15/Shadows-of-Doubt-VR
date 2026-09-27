@@ -49,8 +49,8 @@ internal static class QuestGlyphs
     {
         string? sprite = key switch
         {
-            InteractionKey.primary => MainHand.IsRight ? "quest_trigger_right" : "quest_trigger_left",
-            InteractionKey.secondary => MainHand.IsRight ? "quest_grip_right" : "quest_grip_left",
+            InteractionKey.primary => TriggerName(MainHand.IsRight),
+            InteractionKey.secondary => GripName(MainHand.IsRight),
             // F; a Y hold opens the notebook from the radial menu.
             InteractionKey.alternative or InteractionKey.caseBoard or InteractionKey.notebook => "quest_button_y",
             InteractionKey.jump => "quest_button_a",
@@ -65,9 +65,14 @@ internal static class QuestGlyphs
             InteractionKey.Menu or InteractionKey.Back => "quest_button_menu",
             _ => null,
         };
-        if (sprite == null || !EnsureBuilt()) return null;
-        return $"<sprite=\"{AssetName}\" name=\"{sprite}\">";
+        return sprite != null ? Sprite(sprite) : null;
     }
+
+    /// <summary>The tag for one of the sheet's glyphs by name; null until the sheet is built.</summary>
+    public static string? Sprite(string name) => EnsureBuilt() ? $"<sprite=\"{AssetName}\" name=\"{name}\">" : null;
+
+    public static string TriggerName(bool right) => right ? "quest_trigger_right" : "quest_trigger_left";
+    public static string GripName(bool right) => right ? "quest_grip_right" : "quest_grip_left";
 
     /// <summary>Redraws the key hints shown now, after the main hand changes.</summary>
     public static void Refresh()

@@ -71,6 +71,7 @@ public class VRCamera : MonoBehaviour
     private VRKeyboardPanel _keyboard = null!;
     private HudRTPanels _hudRT = null!;
     private ClueMessagePanel _clueRT = null!;
+    private VRControlsPanel _controlsRT = null!;
     private WorldMarksPanel _worldMarks = null!;
     private InteractLabelPanel _interactLabel = null!;
     private VRSettingsRTPanel _vrSettingsRT = null!;
@@ -171,6 +172,7 @@ public class VRCamera : MonoBehaviour
         _keyboard = new VRKeyboardPanel(UILayer, _rtPanelInput, _rtPanelGrip);
         _hudRT = new HudRTPanels(UILayer, _rtPanelInput);
         _clueRT = new ClueMessagePanel(UILayer, _rtPanelInput);
+        _controlsRT = new VRControlsPanel(UILayer, _rtPanelInput);
         _worldMarks = new WorldMarksPanel(UILayer, _rtPanelInput);
         _interactLabel = new InteractLabelPanel(UILayer, _rtPanelInput);
         _vrSettingsRT = new VRSettingsRTPanel(UILayer, _rtPanelInput, _rtPanelGrip);
@@ -300,6 +302,8 @@ public class VRCamera : MonoBehaviour
 
         try { _clueRT.Tick(_hudRT, _dialogueRT.OpenView); }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] ClueMessagePanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
+        try { _controlsRT.Tick(_hudRT, _caseBoardRT.ShowsBoard); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] VRControlsPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
         try { _worldMarks.Tick(_hudRT); }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] WorldMarksPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
@@ -752,6 +756,8 @@ public class VRCamera : MonoBehaviour
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] HudRTPanels.Render: {ex.Message}"); }
                 try { _clueRT.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] ClueMessagePanel.Render: {ex.Message}"); }
+                try { _controlsRT.Render(); }
+                catch (Exception ex) { Log.LogWarning($"[VRCamera] VRControlsPanel.Render: {ex.Message}"); }
                 try { _worldMarks.Render(); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] WorldMarksPanel.Render: {ex.Message}"); }
                 try { _interactLabel.Render(); }
@@ -785,6 +791,7 @@ public class VRCamera : MonoBehaviour
                     _overlay.BeginFrame();
                     _hudRT.AppendOverlay(_overlay);
                     _clueRT.AppendOverlay(_overlay);
+                    _controlsRT.AppendOverlay(_overlay);
                     _worldMarks.AppendOverlay(_overlay);
                     _interactLabel.AppendOverlay(_overlay);
                     _menuRTPanel.AppendOverlay(_overlay);

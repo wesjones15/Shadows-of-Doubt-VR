@@ -116,6 +116,7 @@ classDiagram
 | `DialogueRTPanel.cs` | DialogCanvas (conversations, phone calls). |
 | `ConversationSpeechPanel.cs` | Subtitles: above the dialogue window in a conversation, on the HUD otherwise. |
 | `ClueMessagePanel.cs` | The centre messages (clue notices), beside the dialogue window or on the HUD. |
+| `VRControlsPanel.cs` | The mod's own controls, under the game's key hints: Menus and World pages on the case board, the World page in the world if switched on. |
 | `MinimapRTPanel.cs` / `MapPointerExtension.cs` | The map window, body-locked or on the board; its drag, zoom and node picking. |
 | `HudRTPanels.cs` | GameCanvas as one transparent sheet following the head's heading, laid out around the case board or a computer screen when one is up. |
 | `WorldMarksPanel.cs` / `WorldMarksHeadView.cs` | Objective pointers, NPC reaction indicators and speech bubbles at their targets in the world, judged on-screen from the head. |
