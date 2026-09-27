@@ -157,6 +157,10 @@ internal sealed class MenuRTPanel
         _pointer.Enabled = IsInteractable;
     }
 
+    /// <summary>The VR origin jumped (it moves to the game camera when one is found): a menu placed
+    /// before the jump would be left behind in the world, so it is placed again on the next Tick.</summary>
+    public void PlaceAgain() => _quadPlaced = false;
+
     /// <summary>Called from VRCamera's LateUpdate, before the real eye cameras render, so the
     /// panel texture is current before anything samples it this frame.</summary>
     public void Render()

@@ -143,6 +143,9 @@ public class VRCamera : MonoBehaviour
     // Where the laser is on an RT panel — TooltipRTPanel places menus and tooltips there.
     private Vector3? _uiPointerPoint;
 
+    // Farther than the player can walk in one frame, even sprinting through a long frame.
+    private const float OriginJumpDistance = 5f;
+
     // ── New controller button state (edge detection) ──────────────────────────
     private bool _jumpBtnPrev;
     private bool _crouchBtnPrev;
@@ -368,8 +371,16 @@ public class VRCamera : MonoBehaviour
 
         // Follow the game character's camera position each frame.
         // Retry finding a game camera every 60 frames in case it wasn't available at rig build time.
+        Vector3 originBefore = transform.position;
         if (_gameCam == null && (_frameCount % 60) == 0) TryFindGameCamera();
         if (_gameCam != null) transform.position = _gameCam.position + ComputerUse.ViewPullback(_gameCam.position);
+        // Menu discovery and camera discovery run on separate timers, so the menu can be placed
+        // before the origin jumps to a newly found camera, hundreds of metres away.
+        if ((transform.position - originBefore).sqrMagnitude > OriginJumpDistance * OriginJumpDistance)
+        {
+            _menuRTPanel.PlaceAgain();
+            Log.LogInfo($"[VRCamera] VR origin jumped {(transform.position - originBefore).magnitude:F0} m — menu placed again.");
+        }
 
         // Sync game camera rotation to VR head so that WorldToScreenPoint/ScreenPointToRay
         // through Camera.main matches the VR view.  The game's case board cursor system
