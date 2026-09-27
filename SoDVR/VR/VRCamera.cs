@@ -505,6 +505,7 @@ public class VRCamera : MonoBehaviour
                 _locomotion.UpdateLocomotion(_leftCam, _voidRoom.InVoidMode, isPausedForLocomotion, _sceneLoadGrace);
                 _locomotion.UpdateMenuButton();
                 _locomotion.UpdateJump(caseBoardOpenForInput, pointerOnUI, _movementDiscoveryDone, _sceneLoadGrace);
+                _locomotion.ApplyMove();
                 _locomotion.UpdateInteract(pointerOnUI || isPausedForLocomotion || _voidRoom.OnPressAnyKeyScreen);
                 _locomotion.UpdateCrouch();
                 try { _radialMenu.Update(_leftControllerGO, _leftCam, _soloScreens, _caseBoardRT.IsOpen); }
@@ -1086,7 +1087,17 @@ public class VRCamera : MonoBehaviour
         }
         catch (Exception ex) { Log.LogWarning($"[Movement] Player lookup: {ex.Message}"); }
 
-        _locomotion.Discover(cc, rb, playerComponent);
+        // Unity Standard Assets' default, which the game's controller is built on.
+        float stickToGround = 10f;
+        try
+        {
+            var fpc = cc?.GetComponent<UnityStandardAssets.Characters.FirstPerson.FirstPersonController>();
+            if (fpc != null) stickToGround = fpc.m_StickToGroundForce;
+            else Log.LogWarning("[Movement] FirstPersonController not found; stick-to-ground force stays at the default.");
+        }
+        catch (Exception ex) { Log.LogWarning($"[Movement] FirstPersonController lookup: {ex.Message}"); }
+
+        _locomotion.Discover(cc, rb, playerComponent, stickToGround);
 
         // 6. Camera.main diagnostic — confirm it's non-null so SaveStateController won't crash
     }

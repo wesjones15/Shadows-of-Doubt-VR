@@ -43,6 +43,11 @@ internal sealed class LocomotionController
     private float _menuBtnCooldownUntil;
     private bool  _menuBtnNeedsRelease;
 
+    private float _stickToGround;
+    private Vector3 _horizontalMove;           // this frame's walk, applied by ApplyMove
+    private bool  _verticalReady;              // UpdateJump set this frame's vertical velocity
+    private float _verticalDt;
+
     private float _jumpVerticalVelocity;
     private bool  _hasBeenGrounded;            // true once isGrounded was true in current scene
     private float _jumpCooldownUntil;
@@ -68,11 +73,17 @@ internal sealed class LocomotionController
 
     /// <summary>Called once from DiscoverMovementSystem with whatever it found — the searching
     /// (walking the hierarchy, GetComponent calls) stays there, this just stores the results.</summary>
-    public void Discover(CharacterController? cc, Rigidbody? rb, Player? player)
+    /// <param name="stickToGround">The game's FirstPersonController.m_StickToGroundForce: how hard it
+    /// presses the player down while grounded.</param>
+    public void Discover(CharacterController? cc, Rigidbody? rb, Player? player, float stickToGround)
     {
         _playerCC = cc;
         _playerRb = rb;
         _playerRef = player;
+        _stickToGround = stickToGround;
+        if (cc != null)
+            Log.LogInfo($"[Locomotion] Grounding: stickToGround={stickToGround} minMoveDistance={cc.minMoveDistance:F4} " +
+                        $"skinWidth={cc.skinWidth:F3} stepOffset={cc.stepOffset:F3}");
     }
 
     private void ResetCommon()
@@ -180,9 +191,9 @@ internal sealed class LocomotionController
     }
 
     /// <summary>
-    /// Drives the player character via left thumbstick. Head-relative: forward/back follows
-    /// HMD yaw, strafe follows HMD right. Preserves Rigidbody Y velocity (gravity/jumping).
-    /// Skipped when VR settings panel is open.
+    /// This frame's walk from the left thumbstick, applied by ApplyMove. Head-relative: forward/back
+    /// follows HMD yaw, strafe follows HMD right. Skipped when VR settings panel is open. Ducts move
+    /// here directly, with no gravity.
     /// </summary>
     public void UpdateLocomotion(Camera? leftCam, bool inVoidMode, bool isPaused, int sceneLoadGrace)
     {
@@ -219,7 +230,7 @@ internal sealed class LocomotionController
         if (RTPanelGrip.HoldsStick(false)) return;
         if (!OpenXRManager.GetThumbstickState(false, out float lx, out float ly)) return;
         if (Mathf.Abs(lx) <= MoveDeadZone && Mathf.Abs(ly) <= MoveDeadZone)
-            return; // idle — gravity is handled by UpdateJump's idle Move()
+            return;
 
         // Apply dead-zone scaling so motion starts smoothly at the threshold
         float dx = Mathf.Abs(lx) > MoveDeadZone ? lx : 0f;
@@ -266,11 +277,23 @@ internal sealed class LocomotionController
         float baseSpeed  = alwaysRun ? ms * sm : ms;
         float altSpeed   = alwaysRun ? ms : ms * sm;
         float speed = _sprintActive ? altSpeed : baseSpeed;
-        Vector3 hMove = (fwd * dy + right * dx) * speed;
+        _horizontalMove = (fwd * dy + right * dx) * speed * Time.deltaTime;
+    }
 
-        // Call CharacterController.Move() to drive player locomotion.
-        // Guard: verify CC is still alive before touching it (destroyed objects aren't null
-        // in IL2CPP — the managed wrapper lingers after the native object is gone).
+    /// <summary>
+    /// The frame's single CharacterController.Move, walk and vertical together, after
+    /// UpdateLocomotion and UpdateJump. isGrounded only reflects the most recent Move, so a second,
+    /// vertical-only Move per frame left it unreliable, and standing still could not jump.
+    /// </summary>
+    public void ApplyMove()
+    {
+        Vector3 move = _horizontalMove;
+        if (_verticalReady) move.y += _jumpVerticalVelocity * _verticalDt;
+        _horizontalMove = Vector3.zero;
+        _verticalReady = false;
+        if (_playerCC == null || move == Vector3.zero) return;
+
+        // Destroyed objects aren't null in IL2CPP: the managed wrapper outlives the native object.
         try
         {
             if (_playerCC.gameObject == null || !_playerCC.gameObject.activeInHierarchy)
@@ -279,37 +302,27 @@ internal sealed class LocomotionController
                 _playerCC = null;
                 return;
             }
-            // Combine horizontal (scaled time) + vertical jump/gravity (unscaled time) into
-            // one Move() call.  Splitting them into two calls was causing isGrounded to be
-            // false when UpdateJump ran, because Unity updates isGrounded after each Move()
-            // and the horizontal-only first call gave no downward component.
-            float vDt = Time.unscaledDeltaTime;
-            if (vDt > 0.2f) vDt = 0.2f;
-            Vector3 fullMove = hMove * Time.deltaTime
-                             + new Vector3(0f, _jumpVerticalVelocity * vDt, 0f);
-            _playerCC.Move(fullMove);
-
-            // Clamp position to PauseMoveRadius during pause mode
-            if (_pauseMovementActive)
-            {
-                Vector3 pos = _playerCC.transform.position;
-                Vector3 delta = pos - _pauseOriginPos;
-                delta.y = 0f; // only clamp horizontal distance
-                if (delta.sqrMagnitude > PauseMoveRadius * PauseMoveRadius)
-                {
-                    Vector3 clamped = _pauseOriginPos + delta.normalized * PauseMoveRadius;
-                    clamped.y = pos.y; // preserve vertical
-                    _playerCC.enabled = false;
-                    _playerCC.transform.position = clamped;
-                    _playerCC.enabled = true;
-                }
-            }
+            _playerCC.Move(move);
+            if (_pauseMovementActive) ClampToPauseRadius();
         }
         catch (Exception ex)
         {
             Log.LogWarning($"[Locomotion] CC.Move failed: {ex.Message} — invalidating CC");
             _playerCC = null;
         }
+    }
+
+    private void ClampToPauseRadius()
+    {
+        Vector3 pos = _playerCC!.transform.position;
+        Vector3 delta = pos - _pauseOriginPos;
+        delta.y = 0f;
+        if (delta.sqrMagnitude <= PauseMoveRadius * PauseMoveRadius) return;
+        Vector3 clamped = _pauseOriginPos + delta.normalized * PauseMoveRadius;
+        clamped.y = pos.y;
+        _playerCC.enabled = false;
+        _playerCC.transform.position = clamped;
+        _playerCC.enabled = true;
     }
 
     /// <summary>
@@ -357,7 +370,7 @@ internal sealed class LocomotionController
 
     /// <summary>
     /// Right A → Jump.
-    /// Drives CharacterController.Move() with upward velocity directly, since we've disabled
+    /// Sets this frame's vertical velocity (gravity, or a jump) for ApplyMove, since we've disabled
     /// FirstPersonController (which would normally process Space key jump).
     /// </summary>
     public void UpdateJump(bool caseBoardOpen, bool cursorHasTarget, bool movementDiscoveryDone, int sceneLoadGrace)
@@ -384,11 +397,11 @@ internal sealed class LocomotionController
         }
         catch { _playerCC = null; return; }
 
-        // Track whether player has ever been grounded in this scene.
-        // Problem: isGrounded only updates after Move(), but we gate Move() on _hasBeenGrounded.
-        // Fix: use a raycast to detect ground below. At main menu there's no ground geometry,
-        // so the raycast fails and _hasBeenGrounded stays false → no gravity → no falling through void.
-        if (_playerCC.isGrounded) _hasBeenGrounded = true;
+        // Last frame's single Move, read before this frame's, as the game's own controller does.
+        bool grounded = _playerCC.isGrounded;
+        // isGrounded only updates inside Move(), and vertical Moves wait for _hasBeenGrounded, so a
+        // raycast breaks the loop. The main menu has no ground geometry, so it never passes there.
+        if (grounded) _hasBeenGrounded = true;
         if (!_hasBeenGrounded)
         {
             try
@@ -400,26 +413,21 @@ internal sealed class LocomotionController
             catch { }
         }
 
-        // Apply gravity every frame (only once we've confirmed ground exists)
+        // Even a 1 mm probe before then sank the viewer indefinitely on the main menu.
         if (!_hasBeenGrounded)
         {
             _jumpVerticalVelocity = 0f;
+            return;
         }
-        else if (_playerCC.isGrounded)
-            _jumpVerticalVelocity = -0.5f; // small downward to keep grounded
+        // As hard as the game presses down: a gentler push makes too short a Move to reliably
+        // register the floor.
+        if (grounded)
+            _jumpVerticalVelocity = -_stickToGround;
         else
             _jumpVerticalVelocity += Gravity * dt;
         if (_jumpVerticalVelocity < -20f) _jumpVerticalVelocity = -20f;
-
-        // When thumbstick is idle, UpdateLocomotion doesn't call Move().
-        // Apply a gravity-only Move() here so isGrounded stays updated for jump.
-        // Always call Move() once _hasBeenGrounded is true — this pushes the CC
-        // to the ground and keeps isGrounded updated.
-        if (_hasBeenGrounded)
-        {
-            try { _playerCC.Move(new Vector3(0f, _jumpVerticalVelocity * dt, 0f)); }
-            catch { }
-        }
+        _verticalReady = true;
+        _verticalDt = dt;
 
         // ── 3-phase button debounce (same proven pattern as menu button) ──
         // Only read jump button when VR settings panel AND case board are NOT open.
@@ -439,7 +447,7 @@ internal sealed class LocomotionController
 
         // Phase 3: fire on press, only when grounded
         if (!aStateNow) return;
-        if (_playerCC.isGrounded)
+        if (grounded)
         {
             _jumpVerticalVelocity = JumpForce;
             _jumpBtnNeedsRelease = true;
