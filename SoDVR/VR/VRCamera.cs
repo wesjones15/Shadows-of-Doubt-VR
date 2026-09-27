@@ -184,6 +184,7 @@ public class VRCamera : MonoBehaviour
     private void Update()
     {
         // Always drain the event queue so VDXR can advance the session state machine.
+        HangWatch.Mark("xrPollEvent");
         OpenXRManager.PollEventsPublic();
 
         PostProcessingOverride.Tick();
@@ -326,6 +327,7 @@ public class VRCamera : MonoBehaviour
             // Submit empty frames so VDXR / Virtual Desktop see activity and advance the state.
             _waitFrameCount++;
 
+            HangWatch.Mark("xrWaitFrame (pre-stereo)");
             long t = OpenXRManager.FrameWaitPublic(out int wrc);
             if (wrc >= 0)
             {
@@ -347,6 +349,7 @@ public class VRCamera : MonoBehaviour
             else
                 Log.LogInfo($"[VRCamera] Session state {OpenXRManager.HighestSessionState} ≥ 3 — creating swapchains.");
 
+            HangWatch.Mark("stereo setup");
             if (!OpenXRManager.SetupStereo())
             {
                 Log.LogError("[VRCamera] SetupStereo failed — disabling.");
@@ -402,6 +405,7 @@ public class VRCamera : MonoBehaviour
         }
 
         LoadStallLog.BeforeFrameWait();
+        HangWatch.Mark("xrWaitFrame");
         _displayTime = OpenXRManager.FrameWaitPublic(out int waitRc);
         if (waitRc < 0)
         {
@@ -413,6 +417,7 @@ public class VRCamera : MonoBehaviour
         }
         if (_displayTime == 0) _displayTime = 1;
 
+        HangWatch.Mark("xrBeginFrame");
         int beginRc = OpenXRManager.FrameBeginPublic();
         if (beginRc < 0)
         {
@@ -428,6 +433,7 @@ public class VRCamera : MonoBehaviour
             Log.LogWarning($"[VRCamera] xrBeginFrame rc={beginRc} (non-fatal)");
         _frameOpen = true;
         LoadStallLog.FrameOpened();
+        HangWatch.Mark("frame open: poses, input, then the game's Update");
 
         if (OpenXRManager.LocateViews(_displayTime, out _leftEye, out _rightEye))
         {
@@ -688,6 +694,7 @@ public class VRCamera : MonoBehaviour
         if (!_stereoReady || !_frameOpen) return;
         _frameOpen = false;
         LoadStallLog.FrameClosing();
+        HangWatch.Mark("LateUpdate: void room and panel renders");
 
         try
         {
@@ -759,6 +766,7 @@ public class VRCamera : MonoBehaviour
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] RadialMenuPanel.Render: {ex.Message}"); }
 
                 // No GL.invertCulling — HDRP flipYMode handles both Y-flip and culling.
+                HangWatch.Mark("eye render");
                 _rightCam.Render();
                 _leftCam.Render();
 
@@ -786,6 +794,7 @@ public class VRCamera : MonoBehaviour
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] PostFXOverlay: {ex.Message}"); }
             }
 
+            HangWatch.Mark("swapchain copy");
             bool leftOk = CameraRig.CopyEye("L", OpenXRManager.LeftSwapchain, OpenXRManager.LeftSwapchainImages, _leftRT, _frameCount, out uint leftIdx);
             bool rightOk = CameraRig.CopyEye("R", OpenXRManager.RightSwapchain, OpenXRManager.RightSwapchainImages, _rightRT, _frameCount, out uint rightIdx);
 
@@ -796,6 +805,7 @@ public class VRCamera : MonoBehaviour
                 return;
             }
 
+            HangWatch.Mark("xrEndFrame");
             OpenXRManager.FrameEndStereo(_displayTime, _leftEye, _rightEye, leftIdx, rightIdx);
 
             // Set Camera.main rotation to controller AFTER all HDRP rendering is done.
@@ -808,6 +818,7 @@ public class VRCamera : MonoBehaviour
             AimGameCamera();
 
             _frameCount++;
+            HangWatch.Mark("frame submitted; Unity between frames");
             if (_frameCount <= 10)
                 Log.LogInfo($"[VRCamera] Stereo frame #{_frameCount}");
         }
