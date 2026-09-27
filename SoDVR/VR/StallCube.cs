@@ -7,7 +7,7 @@ namespace SoDVR.VR;
 
 /// <summary>
 /// The room <see cref="StallFrames"/> shows during a freeze: six images of what the eyes' cameras
-/// see (the void room, without panels, which <see cref="StallPanel"/> places at their own depth)
+/// see (the void room, without panels, which <see cref="StallFrames.SetPanel"/> places at their own depth)
 /// captured around the head, each copied into its own swapchain and set as a quad layer on a cube
 /// <see cref="Distance"/> out. The room is plain and follows the head, so an occasional refresh
 /// keeps it right.
@@ -64,7 +64,7 @@ internal sealed class StallCube
                     var face = FaceRotations[i];
                     var orientation = CameraRig.XrQuadOrientation(face * Vector3.right, face * Vector3.up, face * Vector3.back);
                     var position = leftPose.Position + CameraRig.RigToXr(face * Vector3.forward) * Distance;
-                    StallFrames.SetLayer(i, _swapchains[i], new RectInt(0, 0, FaceSize, FaceSize), orientation, position, FaceWorldSize);
+                    StallFrames.SetLayer(i, new QuadLayerDesc(_swapchains[i], new RectInt(0, 0, FaceSize, FaceSize), orientation, position, FaceWorldSize));
                 }
             }
             if (!HasCapture) Log.LogInfo("[StallCube] First capture of the void room.");

@@ -27,6 +27,7 @@ internal static class VRSettings
     private static ConfigEntry<float>? s_renderScale;
     private static ConfigEntry<bool>? s_monitorMirror;
     private static ConfigEntry<bool>? s_stallFrames;
+    private static ConfigEntry<bool>? s_panelLayers;
 
     public static void Bind(ConfigFile config)
     {
@@ -74,6 +75,8 @@ internal static class VRSettings
             "Show the headset's view (the left eye) on the monitor.");
         s_stallFrames = config.Bind("Rendering", "StallFrames", true,
             "Keep the headset smooth through the loading screens' freezes: a captured view of the loading screen stays fixed in the room while the game can't draw.");
+        s_panelLayers = config.Bind("Rendering", "PanelLayers", true,
+            "Hand menus, popups and tooltips to the headset as layers of their own: crisper text than drawn into the eye image.");
     }
 
     public static bool SmoothTurn => s_smoothTurn!.Value;
@@ -94,6 +97,7 @@ internal static class VRSettings
     public static float RenderScale => s_renderScale!.Value;
     public static bool MonitorMirror => s_monitorMirror!.Value;
     public static bool StallFrames => s_stallFrames!.Value;
+    public static bool PanelLayers => s_panelLayers!.Value;
 
     // The entries themselves, for the VR tab: it edits pending values and resets to their defaults.
     public static ConfigEntry<bool> SmoothTurnEntry => s_smoothTurn!;
@@ -114,4 +118,5 @@ internal static class VRSettings
     public static ConfigEntry<float> RenderScaleEntry => s_renderScale!;
     public static ConfigEntry<bool> MonitorMirrorEntry => s_monitorMirror!;
     public static ConfigEntry<bool> StallFramesEntry => s_stallFrames!;
+    public static ConfigEntry<bool> PanelLayersEntry => s_panelLayers!;
 }

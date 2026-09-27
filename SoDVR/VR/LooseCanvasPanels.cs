@@ -192,7 +192,7 @@ internal sealed class LooseCanvasPanels
         }
 
         public PanelImage? Image =>
-            _view != null && _view.Visible && _panel.Texture != null ? new PanelImage(_panel.Texture, _view.Transform, _view.PixelRect) : null;
+            _view != null && _view.Visible && _panel.Texture != null ? new PanelImage(_panel.Texture, _view.Transform.localToWorldMatrix, _view.PixelRect) : null;
 
         public void Render() => _panel.Render();
         public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay);

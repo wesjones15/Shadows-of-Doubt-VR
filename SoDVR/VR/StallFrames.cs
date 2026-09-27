@@ -12,7 +12,7 @@ namespace SoDVR.VR;
 /// seconds). Nothing in Unity can draw during such a freeze, so a background thread submits frames
 /// of its own: quad layers, which the compositor keeps world-fixed at display rate: a cube of the
 /// void room captured around the head (<see cref="StallCube"/>), and the loading screen where its
-/// panel is (<see cref="StallPanel"/>).
+/// panel is (<see cref="PanelLayerCopy"/>).
 ///
 /// Every frame call goes through <see cref="Gate"/>. The main thread's frame is begun in Update
 /// and ended in LateUpdate, and a loading step usually freezes it in between, so taking over means
@@ -26,9 +26,7 @@ internal static class StallFrames
 
     private const double TakeoverMs = 45;
     public const int MaxLayers = 7;    // the cube's six faces, then the loading panel on top
-
-    private const int XR_TYPE_COMPOSITION_LAYER_QUAD = 36;
-    private const int QuadSize = 112;
+    private const int ScreenLayer = MaxLayers - 1;
 
     internal static readonly object Gate = new();
 
@@ -92,30 +90,24 @@ internal static class StallFrames
         }
     }
 
-    /// <summary>One quad layer, in the OpenXR reference space; layers draw in index order. Main thread, under Gate.</summary>
-    public static void SetLayer(int index, ulong swapchain, RectInt imageRect, Quaternion xrOrientation, Vector3 xrPosition, Vector2 size)
+    /// <summary>One quad layer; layers draw in index order. Main thread, under Gate.</summary>
+    public static void SetLayer(int index, in QuadLayerDesc desc, ulong layerFlags = 0)
     {
         EnsureBuffers();
-        IntPtr q = _quads + index * QuadSize;
-        Zero(q, QuadSize);
-        Marshal.WriteInt32(q, 0, XR_TYPE_COMPOSITION_LAYER_QUAD);
-        Marshal.WriteInt64(q, 24, (long)OpenXRManager.ReferenceSpace);
-        Marshal.WriteInt64(q, 40, (long)swapchain);
-        Marshal.WriteInt32(q, 48, imageRect.x);
-        Marshal.WriteInt32(q, 52, imageRect.y);
-        Marshal.WriteInt32(q, 56, imageRect.width);
-        Marshal.WriteInt32(q, 60, imageRect.height);
-        WriteFloat(q, 72, xrOrientation.x);
-        WriteFloat(q, 76, xrOrientation.y);
-        WriteFloat(q, 80, xrOrientation.z);
-        WriteFloat(q, 84, xrOrientation.w);
-        WriteFloat(q, 88, xrPosition.x);
-        WriteFloat(q, 92, xrPosition.y);
-        WriteFloat(q, 96, xrPosition.z);
-        WriteFloat(q, 100, size.x);
-        WriteFloat(q, 104, size.y);
+        XrQuadLayer.Write(_quads + index * XrQuadLayer.Size, desc, layerFlags);
         _layerReady[index] = true;
         RebuildLayerList();
+    }
+
+    /// <summary>The screen shown over the room during a freeze (the loading or press-any-key
+    /// panel), or none. Main thread.</summary>
+    public static void SetPanel(QuadLayerDesc? panel)
+    {
+        lock (Gate)
+        {
+            if (panel is { } desc) SetLayer(ScreenLayer, desc, XrQuadLayer.BlendTextureSourceAlpha);
+            else HideLayer(ScreenLayer);
+        }
     }
 
     /// <summary>Main thread, under Gate.</summary>
@@ -130,7 +122,7 @@ internal static class StallFrames
     {
         _layerCount = 0;
         for (int i = 0; i < MaxLayers; i++)
-            if (_layerReady[i]) Marshal.WriteIntPtr(_layerPtrs, _layerCount++ * IntPtr.Size, _quads + i * QuadSize);
+            if (_layerReady[i]) Marshal.WriteIntPtr(_layerPtrs, _layerCount++ * IntPtr.Size, _quads + i * XrQuadLayer.Size);
     }
 
     private static void MarkActive() => Interlocked.Exchange(ref _mainActiveAt, Stopwatch.GetTimestamp());
@@ -208,7 +200,7 @@ internal static class StallFrames
     private static void EnsureBuffers()
     {
         if (_quads != IntPtr.Zero) return;
-        _quads = Alloc(QuadSize * MaxLayers);
+        _quads = Alloc(XrQuadLayer.Size * MaxLayers);
         _layerPtrs = Alloc(IntPtr.Size * MaxLayers);
         _waitInfo = Alloc(16);
         _frameState = Alloc(40);
@@ -233,9 +225,6 @@ internal static class StallFrames
     {
         for (int i = 0; i < size; i++) Marshal.WriteByte(p, i, 0);
     }
-
-    private static void WriteFloat(IntPtr p, int offset, float value) =>
-        Marshal.WriteInt32(p, offset, BitConverter.SingleToInt32Bits(value));
 
     // ── D3D11 ────────────────────────────────────────────────────────────────
 

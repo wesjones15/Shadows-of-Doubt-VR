@@ -103,7 +103,9 @@ public static class OpenXRManager
     private static IntPtr _bFrameEndInfo;     // XrFrameEndInfo (40 b)
     private static IntPtr _bProjViews;        // XrCompositionLayerProjectionView × 2 (192 b)
     private static IntPtr _bProjLayer;        // XrCompositionLayerProjection (48 b)
-    private static IntPtr _bLayerPtr;         // IntPtr pointing to _bProjLayer (ptr-size)
+    private static IntPtr _bLayerPtr;         // the frame's layer pointers; [0] is _bProjLayer
+    // The eyes' projection layer plus panel and laser layers; OpenXR guarantees at least 16.
+    internal const int MaxFrameLayers = 16;
     private static IntPtr _bViewLocateInfo;   // XrViewLocateInfo (40 b)
     private static IntPtr _bViewState;        // XrViewState (24 b) — output
     private static IntPtr _bViewBuffer;       // XrView × 2 (128 b) — output
@@ -1091,11 +1093,15 @@ public static class OpenXRManager
     ///   type(4) pad(4) next(8) layerFlags(8) space(8) viewCount(4) pad(4) views*(8)
     /// </summary>
     public static void FrameEndStereo(long displayTime,
-        EyePose leftEye, EyePose rightEye, uint leftIdx, uint rightIdx)
+        EyePose leftEye, EyePose rightEye, uint leftIdx, uint rightIdx, IntPtr extraLayers = default, int extraCount = 0)
     {
         if (_dEndFrame == null || _session == 0) return;
         try
         {
+            extraCount = Math.Min(extraCount, MaxFrameLayers - 1);
+            for (int i = 0; i < extraCount; i++)
+                Marshal.WriteIntPtr(_bLayerPtr, (1 + i) * IntPtr.Size, Marshal.ReadIntPtr(extraLayers, i * IntPtr.Size));
+            Marshal.WriteInt32(_bFrameEndInfo, 28, 1 + extraCount); // layerCount: the eyes, then the extras on top
             const int projViewSz = 96;
             // Write eye poses + swapchain indices into pre-allocated projection-view buffers.
             WriteProjectionView(_bProjViews,              leftEye,  LeftSwapchain,  leftIdx);
@@ -1125,6 +1131,21 @@ public static class OpenXRManager
                 Log.LogWarning($"  xrEndFrame(stereo)#{_stereoCallCount} rc={rc}  space=0x{ReferenceSpace:X} L-sc=0x{LeftSwapchain:X} R-sc=0x{RightSwapchain:X} lidx={leftIdx} ridx={rightIdx}");
         }
         catch (Exception ex) { Log.LogWarning($"  FrameEndStereo: {ex.Message}"); }
+    }
+
+    /// <summary>A second projection layer over the eyes' (the lasers): same poses and fields of
+    /// view, its own swapchains of the eyes' size.</summary>
+    internal static void WriteProjectionLayer(IntPtr layer, IntPtr views, EyePose leftEye, EyePose rightEye,
+        ulong leftSwapchain, ulong rightSwapchain, ulong layerFlags)
+    {
+        const int projViewSz = 96;
+        WriteProjectionView(views,              leftEye,  leftSwapchain,  0);
+        WriteProjectionView(views + projViewSz, rightEye, rightSwapchain, 0);
+        Marshal.WriteInt32(layer, 0, 35);                        // XR_TYPE_COMPOSITION_LAYER_PROJECTION
+        Marshal.WriteInt64(layer, 16, (long)layerFlags);
+        Marshal.WriteInt64(layer, 24, (long)ReferenceSpace);
+        Marshal.WriteInt32(layer, 32, 2);                        // viewCount
+        Marshal.WriteIntPtr(layer, 40, views);
     }
 
     private static void WriteProjectionView(IntPtr p, EyePose eye, ulong sc, uint imgIdx)
@@ -1803,7 +1824,7 @@ public static class OpenXRManager
         _bFrameEndInfo   = Marshal.AllocHGlobal(40);  Zero(_bFrameEndInfo,   40);
         _bProjViews      = Marshal.AllocHGlobal(192); Zero(_bProjViews,      192);
         _bProjLayer      = Marshal.AllocHGlobal(48);  Zero(_bProjLayer,      48);
-        _bLayerPtr       = Marshal.AllocHGlobal(IntPtr.Size);
+        _bLayerPtr       = Marshal.AllocHGlobal(IntPtr.Size * MaxFrameLayers);
         _bViewLocateInfo = Marshal.AllocHGlobal(40);  Zero(_bViewLocateInfo, 40);
         _bViewState      = Marshal.AllocHGlobal(24);  Zero(_bViewState,      24);
         _bViewBuffer     = Marshal.AllocHGlobal(128); Zero(_bViewBuffer,     128);

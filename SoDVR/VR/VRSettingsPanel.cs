@@ -357,6 +357,7 @@ public static class VRSettingsPanel
         SectionHeader(t, "─── RENDERING ───");
         ConfigToggle(t, "Monitor Mirror", VRSettings.MonitorMirrorEntry);
         ConfigToggle(t, "Smooth Loading", VRSettings.StallFramesEntry);
+        ConfigToggle(t, "Crisp Panels", VRSettings.PanelLayersEntry);
         ConfigFloat(t, "Scale (restart)", VRSettings.RenderScaleEntry, RenderScaleOptions, v => $"{v:0.0}×");
     }
 

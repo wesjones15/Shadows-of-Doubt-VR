@@ -83,7 +83,8 @@ public class VRCamera : MonoBehaviour
     private readonly PostFXOverlayCompositor _overlay = new();
     private readonly MonitorMirror _mirror = new();
     private readonly StallCube _stallCube = new();
-    private readonly StallPanel _stallPanel = new();
+    private readonly PanelLayerCopy _panelCopy = new();
+    private readonly MainLayers _mainLayers = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
     // The swapchain copy still runs every frame, so head tracking stays smooth via ATW.
@@ -602,6 +603,11 @@ public class VRCamera : MonoBehaviour
         catch { }
     }
 
+    /// <summary>The screen shown over the void room during a freeze: the menu panel (the loading
+    /// screen), else the press-any-key screen.</summary>
+    private QuadLayerDesc? StallScreen() =>
+        (_menuRTPanel.Image ?? _looseCanvases.ShowingImage) is { } image ? _panelCopy.Layer(_cameraOffset, image) : null;
+
     private void BuildCameraRig()
     {
         int w = OpenXRManager.SwapchainWidth;
@@ -731,6 +737,8 @@ public class VRCamera : MonoBehaviour
                 return;
             }
 
+            RenderTexture mirrorImage = _leftRT;
+            int extraLayers = 0;
             if ((_frameCount % RenderEveryNFrames) == 0)
             {
                 if ((_frameCount % (RenderEveryNFrames * 4)) == 0)
@@ -805,17 +813,35 @@ public class VRCamera : MonoBehaviour
                     _keyboard.AppendOverlay(_overlay);
                     _handPointer.AppendOverlay(_overlay, _leftCam);
                     _rtPanelInput.AppendOverlay(_overlay);
-                    _overlay.Composite(_rightCam, _rightRT);
-                    _overlay.Composite(_leftCam, _leftRT);
+                    // Crisp menus: the menu and top bands as quad layers over the eyes, the lasers
+                    // in a layer above them; everything else stays in the eye image.
+                    _panelCopy.BeginFrame();
+                    var above = VRSettings.PanelLayers && _overlay.HasPanelsAbove
+                        ? _mainLayers.PanelLayers(_cameraOffset, _overlay.PanelsAbove(_leftCam.transform.position), _panelCopy)
+                        : null;
+                    bool panelLayers = above != null;
+                    var laserTargets = panelLayers && _overlay.HasLasers ? _mainLayers.LaserTargets(_leftRT.width, _leftRT.height) : null;
+                    bool laserLayer = laserTargets != null;
+                    if (panelLayers && VRSettings.MonitorMirror) mirrorImage = _mainLayers.MirrorWorld(_leftRT);
+
+                    _overlay.Composite(_rightCam, _rightRT, panelLayers, laserLayer);
+                    _overlay.Composite(_leftCam, _leftRT, panelLayers, laserLayer);
+                    if (mirrorImage != _leftRT) _overlay.Composite(_leftCam, mirrorImage);
+                    if (laserTargets is { } lasers)
+                    {
+                        _overlay.CompositeLasers(_rightCam, lasers.right);
+                        _overlay.CompositeLasers(_leftCam, lasers.left);
+                    }
+                    if (panelLayers) extraLayers = _mainLayers.Build(above!, laserLayer, _leftEye, _rightEye);
                 }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] PostFXOverlay: {ex.Message}"); }
             }
 
-            _mirror.Tick(_leftRT, _leftEye);
+            _mirror.Tick(mirrorImage, _leftEye);
             if (voidMode)
             {
                 _stallCube.Refresh(_cameraOffset, _leftCam, _leftEye);
-                _stallPanel.Refresh(_cameraOffset, _menuRTPanel.Image ?? _looseCanvases.ShowingImage);
+                StallFrames.SetPanel(StallScreen());
             }
 
             HangWatch.Mark("swapchain copy");
@@ -830,7 +856,7 @@ public class VRCamera : MonoBehaviour
             }
 
             HangWatch.Mark("xrEndFrame");
-            OpenXRManager.FrameEndStereo(_displayTime, _leftEye, _rightEye, leftIdx, rightIdx);
+            OpenXRManager.FrameEndStereo(_displayTime, _leftEye, _rightEye, leftIdx, rightIdx, _mainLayers.Layers, extraLayers);
 
             // Set Camera.main rotation to controller AFTER all HDRP rendering is done.
             // HDRP reads Camera.main.rotation during Update/Render to compute shadows,

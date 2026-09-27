@@ -86,32 +86,92 @@ internal sealed class PostFXOverlayCompositor
         _dots.Add((Matrix4x4.TRS(position, Quaternion.LookRotation(facing), Vector3.one * diameter), material));
     }
 
-    public void Composite(Camera eye, RenderTexture target)
+    /// <param name="panelsAboveAsLayers">The menu and top bands go to quad layers over the eyes
+    /// (<see cref="MainLayers"/>): draw only the bands beneath them.</param>
+    /// <param name="lasersAsLayer">The lasers go to their own layer on top.</param>
+    public void Composite(Camera eye, RenderTexture target, bool panelsAboveAsLayers = false, bool lasersAsLayer = false)
     {
-        if (_layers[0].Count + _layers[1].Count + _layers[2].Count == 0 && _lasers.Count == 0 && _dots.Count == 0) return;
+        int bands = panelsAboveAsLayers ? (int)PanelLayer.Menu : _layers.Length;
+        bool lasers = !lasersAsLayer && _lasers.Count > 0;
+        int panels = 0;
+        for (int i = 0; i < bands; i++) panels += _layers[i].Count;
+        if (panels == 0 && !lasers && _dots.Count == 0) return;
 
+        BeginDraw(eye, target, clearColour: false);
+        // Dots mark world surfaces, so any panel in front of one covers it.
+        foreach (var (transform, material) in _dots)
+            _cb!.DrawMesh(_dotMesh, transform, material, 0, 0);
+        for (int i = 0; i < bands; i++)
+        {
+            _layers[i].Sort(FarthestFirst);
+            foreach (var draw in _layers[i])
+                _cb!.DrawMesh(draw.Mesh, draw.LocalToWorld, draw.Material, 0, 0);
+        }
+        if (lasers) DrawLasers();
+        Graphics.ExecuteCommandBuffer(_cb);
+    }
+
+    /// <summary>The lasers alone, over transparent black: the top layer, above the panel layers.</summary>
+    public void CompositeLasers(Camera eye, RenderTexture target)
+    {
+        BeginDraw(eye, target, clearColour: true);
+        DrawLasers();
+        Graphics.ExecuteCommandBuffer(_cb);
+    }
+
+    public bool HasLasers => _lasers.Count > 0;
+
+    public bool HasPanelsAbove => _layers[(int)PanelLayer.Menu].Count + _layers[(int)PanelLayer.Top].Count > 0;
+
+    /// <summary>The menu band, then the top band farthest first: the order their layers go in.
+    /// Null if one of them isn't showing an RT panel texture.</summary>
+    public List<PanelImage>? PanelsAbove(Vector3 head)
+    {
+        _sortEyePos = head;
+        var images = new List<PanelImage>();
+        foreach (var band in AboveBands)
+        {
+            var draws = _layers[(int)band];
+            draws.Sort(FarthestFirst);
+            foreach (var draw in draws)
+            {
+                if (draw.Material.mainTexture is not RenderTexture texture) return null;
+                images.Add(new PanelImage(texture, draw.LocalToWorld, PixelRect(draw.Mesh, texture)));
+            }
+        }
+        return images;
+    }
+
+    private static readonly PanelLayer[] AboveBands = { PanelLayer.Menu, PanelLayer.Top };
+
+    /// <summary>The part of the texture a quad's UVs cover: all of it for the built-in Quad the
+    /// menu uses, which may not be readable.</summary>
+    private static Rect PixelRect(Mesh mesh, RenderTexture texture)
+    {
+        var all = new Rect(0f, 0f, texture.width, texture.height);
+        if (!mesh.isReadable) return all;
+        Vector2[] uv = mesh.uv;
+        if (uv.Length == 0) return all;
+        Vector2 min = uv[0], max = uv[0];
+        foreach (var p in uv) { min = Vector2.Min(min, p); max = Vector2.Max(max, p); }
+        return Rect.MinMaxRect(min.x * texture.width, min.y * texture.height, max.x * texture.width, max.y * texture.height);
+    }
+
+    private void BeginDraw(Camera eye, RenderTexture target, bool clearColour)
+    {
         _cb ??= new CommandBuffer { name = "SoDVR_PostFXOverlay" };
         _cb.Clear();
         _cb.SetRenderTarget(target);
-        _cb.ClearRenderTarget(true, false, Color.clear);
+        _cb.ClearRenderTarget(true, clearColour, Color.clear);
         _cb.SetViewProjectionMatrices(eye.worldToCameraMatrix, FlipY * eye.projectionMatrix);
-
         _sortEyePos = eye.transform.position;
-        // Dots mark world surfaces, so any panel in front of one covers it.
-        foreach (var (transform, material) in _dots)
-            _cb.DrawMesh(_dotMesh, transform, material, 0, 0);
-        foreach (var layer in _layers)
-        {
-            layer.Sort(FarthestFirst);
-            foreach (var draw in layer)
-                _cb.DrawMesh(draw.Mesh, draw.LocalToWorld, draw.Material, 0, 0);
-        }
+    }
 
-        if (_lasers.Count > 0 && EnsureLaserResources())
-            foreach (var laser in _lasers)
-                _cb.DrawMesh(_laserMesh, laser, _laserMaterial, 0, 0);
-
-        Graphics.ExecuteCommandBuffer(_cb);
+    private void DrawLasers()
+    {
+        if (_lasers.Count == 0 || !EnsureLaserResources()) return;
+        foreach (var laser in _lasers)
+            _cb!.DrawMesh(_laserMesh, laser, _laserMaterial, 0, 0);
     }
 
     /// <summary>A unit-length beam along +Z (scaled to length per draw), built as two crossed
