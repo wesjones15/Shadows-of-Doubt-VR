@@ -302,10 +302,75 @@ Use `RTCanvasPanel`, which does the projector, texture, quads and pointer regist
   geometry by the eye cameras (here: the VR Settings panel and the other not-yet-migrated canvases)
   still gets DoF, TAA and the rest.
 - **Text resolution is bounded by the eye buffer.** The panel is resampled into the eye RT (rendered
-  at 0.7× the headset's recommended resolution here), then again by the compositor's lens
-  distortion. For sharper text, a panel could be submitted as an OpenXR `XrCompositionLayerQuad`
-  through the same hand-built `xrEndFrame`. The laser would still need this overlay pass to draw
-  over it.
+  at 0.7× the headset's recommended resolution by default here), then again by the compositor's
+  lens distortion. The fix is to hand the panel to the headset compositor as a quad layer: see
+  "Sharper panels: OpenXR quad layers" below.
+
+## Sharper panels: OpenXR quad layers
+
+A panel drawn by the overlay pass is resampled twice: into the eye RT, at the eye buffer's
+resolution, and again when the compositor warps the eye image. Submitted instead as an
+`XrCompositionLayerQuad`, the panel's own full-resolution texture is sampled once, by the
+compositor, at display resolution. Text becomes clearly crisper. This is also post-FX-immune by
+construction, since HDRP never touches a layer.
+
+**Verified in the headset on 2026-09-27** (Quest 3 over Virtual Desktop) with the loading screen,
+which the stall frames (`StallFrames`) submit as a quad layer during main-thread freezes. The user
+saw the loading text turn crisp exactly when the stall frames took over. The layer's orientation,
+placement, size and depth matched the overlay-drawn panel, and the panel layer covered both the menu
+panel and the press-any-key screen's cropped view.
+
+```
+per frame, per panel shown as a layer:
+  Blit(panelRT -> flippedRT, scale (1,-1), offset (0,1))  // Unity row order -> OpenXR row order
+  acquire/wait swapchain image, CopyResource(flippedRT -> image), release
+  write XrCompositionLayerQuad { swapchain, imageRect, pose, size, flags }
+  add it to xrEndFrame's layers, after the eyes' projection layer
+```
+
+### Details that matter
+
+- **Flip the texture on the way.** The panel RTs are rendered by ordinary projector cameras, so
+  they hold Unity's row order; OpenXR reads images top row first. Blit with a vertical flip into a
+  same-size RT, then copy that into the swapchain. (The eye RTs don't need this: their cameras use
+  `ForceFlipY`.) The blit also drops the panel RT's mip chain, which `CopyResource` requires to
+  match the swapchain's single mip.
+- **One swapchain per panel texture shown in a frame.** Several views of one canvas (the case
+  board, tooltips) can share one copy: each quad points at a different `imageRect` of the same
+  swapchain. The image rect counts rows from the top of the flipped copy:
+  `y = textureHeight - pixelRect.yMax`.
+- **Pose: rig-local, Z flipped.** `CameraRig.RigToXr` maps a rig-local point or direction into the
+  OpenXR reference space (the inverse of `ApplyCameraPose`). A quad layer's +X/+Y are the image's
+  right/up and its +Z faces the viewer; a Unity quad is seen from its -Z side. Build the rotation
+  from rig-local right, up and `-forward` with `CameraRig.XrQuadOrientation`. Right-up-toward-viewer
+  is left-handed in Unity, and the Z flip turns it into a proper right-handed rotation. The layer's
+  size is the quad's world scale.
+- **Alpha.** Set `XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT` (0x2) and leave the
+  unpremultiplied bit off: the panel textures are already premultiplied.
+- **Keep the mod's copies alive across loads.** The flipped RTs are referenced by nothing in a scene,
+  so a load's unused-asset unload destroys them unless they have
+  `hideFlags = HideFlags.DontUnloadUnusedAsset` (see v1_findings.md §1).
+- **Swapchain access and the stall thread.** The stall frames' thread submits the same swapchains
+  during freezes, so acquire/copy/release happens under `StallFrames.Gate`.
+
+### Layers draw over the eyes: ordering is the catch
+
+Layers composite in submission order, on top of the eyes' projection layer, with no depth test
+between them. Anything that must appear in front of a layered panel has to be a layer too, submitted
+after it:
+
+- **Panels:** the panel bands already define the order (`Normal`, then `Menu`, then `Top`). A panel
+  that stays in the eye image is always under every layered one. Layering the menu means layering
+  every `Top` panel above it too: popups, tooltips, the keyboard and VR Settings.
+- **The lasers** are drawn into the eye image, so they'd go under a layered panel. They need a
+  transparent projection layer of their own on top: the overlay pass drawing only lasers into cleared
+  (0,0,0,0) RTs, with the blend bit set.
+- **World dots** stay in the eye image, under every panel, as they are now.
+- **The monitor mirror** shows the left eye RT, which no longer contains layered panels. It needs
+  its own copy of the world image with the full overlay composited on it.
+
+The main-frame version (menu and `Top` panels as quad layers every frame, lasers in a top layer) is
+being built on this basis. Its ordering and the laser layer are not yet verified in the headset.
 
 ## Verifying it works
 
