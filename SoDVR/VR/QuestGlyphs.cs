@@ -33,9 +33,14 @@ internal static class QuestGlyphs
     private const int SamplingPointSize = 90;
     private const int AtlasPadding = 9;
     private const int AtlasSize = 1024;
-    // The font's glyphs stand on the baseline about half an em tall; at twice the text's size and
-    // dropped a little they sit centred on the words, about as big as the game's key caps.
-    private const string GlyphMarkup = "<voffset=-0.13em><size=200%>{0}</size></voffset><space=0.3em>";
+    // The font's glyphs stand on the baseline about half an em tall; drawn at twice the text's size
+    // and dropped a little they sit centred on the words, about as big as the game's key caps.
+    private const float GlyphScale = 2f;
+    private const string GlyphMarkup = "<voffset=-0.13em>{0}</voffset><space=0.3em>";
+    // Ascent and descent (in ems of the text, after the scale) that fit inside an ordinary line, so
+    // a glyph never makes its line taller: the game's hint rows hide a line that won't fit.
+    private const float LineAscentEm = 0.8f;
+    private const float LineDescentEm = -0.2f;
     private const HideFlags KeepAcrossLoads = HideFlags.DontUnloadUnusedAsset;
 
     private static readonly Dictionary<string, char> s_characters = new();
@@ -101,6 +106,27 @@ internal static class QuestGlyphs
         }
     }
 
+    // Evidence for the hint rows' text box with a glyph in it (once per key); removed once they show.
+    private static readonly HashSet<InteractionKey> s_loggedRows = new();
+
+    [HarmonyPatch(typeof(ControlDisplayController), nameof(ControlDisplayController.SetControlText))]
+    private static class RowText
+    {
+        private static void Postfix(ControlDisplayController __instance, InteractionKey key)
+        {
+            try
+            {
+                var t = __instance.controlText;
+                if (t == null || !s_loggedRows.Add(key)) return;
+                t.ForceMeshUpdate(true, false);
+                Log.LogInfo($"[QuestGlyphs] Row {key}: overflow {t.overflowMode} wrap {t.enableWordWrapping} rect {t.rectTransform.rect.size} " +
+                            $"preferred ({t.preferredWidth:F0},{t.preferredHeight:F0}) lines {t.textInfo?.lineCount} chars {t.textInfo?.characterCount} " +
+                            $"truncated {t.isTextTruncated} text '{t.text}'");
+            }
+            catch (Exception ex) { Log.LogWarning($"[QuestGlyphs] Row log: {ex.Message}"); }
+        }
+    }
+
     private static bool EnsureBuilt()
     {
         if (s_built) return true;
@@ -121,6 +147,12 @@ internal static class QuestGlyphs
                 ?? throw new InvalidOperationException($"TMP could not make a font asset from {path}");
             asset.name = FontName;
             asset.hideFlags = KeepAcrossLoads;
+            var face = asset.faceInfo;
+            face.scale = GlyphScale;
+            face.ascentLine = LineAscentEm / GlyphScale * face.pointSize;
+            face.descentLine = LineDescentEm / GlyphScale * face.pointSize;
+            face.lineHeight = face.ascentLine - face.descentLine;
+            asset.faceInfo = face;
             asset.TryAddCharacters(new string(new List<char>(s_characters.Values).ToArray()), out string missing, false);
             if (asset.material != null) asset.material.hideFlags |= KeepAcrossLoads;
             foreach (var texture in asset.atlasTextures)
