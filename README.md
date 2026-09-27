@@ -104,3 +104,4 @@ Right stick controls scrolling while the VR Settings panel is open.
 
 MIT — see [LICENSE](LICENSE).
 `RuntimeDeps/Native/openxr_loader.dll` is the Khronos OpenXR Loader (Apache 2.0).
+The Quest button glyphs (`SoDVR/Assets/QuestGlyphs`) are from Kenney's Input Prompts (www.kenney.nl, CC0).

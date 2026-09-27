@@ -138,6 +138,7 @@ classDiagram
 | `HudController.cs` | instance | The route arrow; the popup desktop-mode guard. |
 | `ComputerUse.cs` | static | In-game computers: detection, view pullback, the game camera's aim at the screen. |
 | `InputModeGuard.cs` | static | Keeps the game in mouse-and-keyboard mode. |
+| `QuestGlyphs.cs` | static | Quest controller glyphs in place of the game's key glyphs (one postfix on `GetControlIcon`); trigger and grip follow the main hand. |
 | `VRSettings.cs` / `GameSettingsBridge.cs` | static | The mod's config entries; the game's own settings. |
 | `PostProcessingOverride.cs` | static | Forces DoF off (config switch). |
 | `CanvasDump.cs` | static | F9 debug dump of every canvas. |

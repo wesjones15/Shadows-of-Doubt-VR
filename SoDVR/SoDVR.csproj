@@ -89,10 +89,23 @@
       <HintPath>$(InteropDir)\Unity.TextMeshPro.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.TextCoreFontEngineModule">
+      <HintPath>$(InteropDir)\UnityEngine.TextCoreFontEngineModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(InteropDir)\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="FMODUnity">
       <HintPath>$(InteropDir)\FMODUnity.dll</HintPath>
       <Private>false</Private>
     </Reference>
+  </ItemGroup>
+
+  <!-- Kenney's Input Prompts, Meta Quest set (CC0), for QuestGlyphs. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Assets\QuestGlyphs\*" LogicalName="QuestGlyphs.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <!-- No external Unity XR management packages needed.

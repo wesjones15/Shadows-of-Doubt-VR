@@ -37,5 +37,6 @@ internal static class MainHand
         if (!SwappedThisFrame) return;
         VRSettings.MainHandRightEntry.Value = !IsRight;
         Log.LogInfo($"[MainHand] Swapped to the {(IsRight ? "right" : "left")} hand.");
+        QuestGlyphs.Refresh();
     }
 }
