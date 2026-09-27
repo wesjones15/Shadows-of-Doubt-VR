@@ -215,6 +215,42 @@ internal static class CameraRig
                                           eye.Orientation.w);
     }
 
+    /// <summary>A rig-local point or direction in the OpenXR reference space: the inverse of
+    /// <see cref="ApplyCameraPose"/>'s position mapping.</summary>
+    public static Vector3 RigToXr(Vector3 v) => new(v.x, v.y, -v.z);
+
+    /// <summary>
+    /// An OpenXR quad layer's orientation from the rig-local directions of its image's right and up
+    /// and of the side it's seen from. A quad's +X and +Y are the image's right and up and its +Z
+    /// faces the viewer; right-up-toward-viewer is left-handed in Unity, and the Z flip into OpenXR
+    /// turns it into a proper rotation.
+    /// </summary>
+    public static Quaternion XrQuadOrientation(Vector3 rigRight, Vector3 rigUp, Vector3 rigTowardViewer) =>
+        FromBasis(RigToXr(rigRight), RigToXr(rigUp), RigToXr(rigTowardViewer));
+
+    /// <summary>The quaternion of the rotation whose columns are x, y, z.</summary>
+    private static Quaternion FromBasis(Vector3 x, Vector3 y, Vector3 z)
+    {
+        float trace = x.x + y.y + z.z;
+        if (trace > 0f)
+        {
+            float s = Mathf.Sqrt(trace + 1f) * 2f;
+            return new Quaternion((y.z - z.y) / s, (z.x - x.z) / s, (x.y - y.x) / s, 0.25f * s);
+        }
+        if (x.x > y.y && x.x > z.z)
+        {
+            float s = Mathf.Sqrt(1f + x.x - y.y - z.z) * 2f;
+            return new Quaternion(0.25f * s, (y.x + x.y) / s, (z.x + x.z) / s, (y.z - z.y) / s);
+        }
+        if (y.y > z.z)
+        {
+            float s = Mathf.Sqrt(1f + y.y - x.x - z.z) * 2f;
+            return new Quaternion((y.x + x.y) / s, 0.25f * s, (z.y + y.z) / s, (z.x - x.z) / s);
+        }
+        float t = Mathf.Sqrt(1f + z.z - x.x - y.y) * 2f;
+        return new Quaternion((z.x + x.z) / t, (z.y + y.z) / t, 0.25f * t, (x.y - y.x) / t);
+    }
+
     // Off-centre perspective from OpenXR tangent-angle FOV.
     // angleLeft ≤ 0, angleRight ≥ 0, angleUp ≥ 0, angleDown ≤ 0.
     // Row 1 (Y) is negated to compensate for Unity D3D11 storing RenderTextures Y-flipped.

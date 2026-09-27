@@ -10,8 +10,9 @@ namespace SoDVR.VR;
 /// <summary>
 /// Keeps the headset fed while the game's main thread is frozen (loading steps of up to several
 /// seconds). Nothing in Unity can draw during such a freeze, so a background thread submits frames
-/// of its own: quad layers forming a cube of captured images around the head (<see cref="StallCube"/>),
-/// which the compositor keeps world-fixed at display rate.
+/// of its own: quad layers, which the compositor keeps world-fixed at display rate: a cube of the
+/// void room captured around the head (<see cref="StallCube"/>), and the loading screen where its
+/// panel is (<see cref="StallPanel"/>).
 ///
 /// Every frame call goes through <see cref="Gate"/>. The main thread's frame is begun in Update
 /// and ended in LateUpdate, and a loading step usually freezes it in between, so taking over means
@@ -24,7 +25,7 @@ internal static class StallFrames
     private static ManualLogSource Log => Plugin.Log;
 
     private const double TakeoverMs = 45;
-    public const int MaxLayers = 6;
+    public const int MaxLayers = 7;    // the cube's six faces, then the loading panel on top
 
     private const int XR_TYPE_COMPOSITION_LAYER_QUAD = 36;
     private const int QuadSize = 112;
@@ -42,7 +43,7 @@ internal static class StallFrames
 
     // Unmanaged structs the thread submits; written under Gate.
     private static IntPtr _quads, _layerPtrs, _endInfo, _waitInfo, _frameState, _beginInfo;
-    private static readonly bool[] _faceReady = new bool[MaxLayers];
+    private static readonly bool[] _layerReady = new bool[MaxLayers];
     private static int _layerCount;
 
     /// <summary>Set by the main thread each frame: may the thread take over if it freezes?</summary>
@@ -91,8 +92,8 @@ internal static class StallFrames
         }
     }
 
-    /// <summary>One cube face's quad layer, in the OpenXR reference space. Main thread, under Gate.</summary>
-    public static void SetFace(int index, ulong swapchain, int width, int height, Quaternion xrOrientation, Vector3 xrPosition, float size)
+    /// <summary>One quad layer, in the OpenXR reference space; layers draw in index order. Main thread, under Gate.</summary>
+    public static void SetLayer(int index, ulong swapchain, int width, int height, Quaternion xrOrientation, Vector3 xrPosition, Vector2 size)
     {
         EnsureBuffers();
         IntPtr q = _quads + index * QuadSize;
@@ -109,13 +110,25 @@ internal static class StallFrames
         WriteFloat(q, 88, xrPosition.x);
         WriteFloat(q, 92, xrPosition.y);
         WriteFloat(q, 96, xrPosition.z);
-        WriteFloat(q, 100, size);
-        WriteFloat(q, 104, size);
-        _faceReady[index] = true;
+        WriteFloat(q, 100, size.x);
+        WriteFloat(q, 104, size.y);
+        _layerReady[index] = true;
+        RebuildLayerList();
+    }
 
+    /// <summary>Main thread, under Gate.</summary>
+    public static void HideLayer(int index)
+    {
+        if (!_layerReady[index]) return;
+        _layerReady[index] = false;
+        RebuildLayerList();
+    }
+
+    private static void RebuildLayerList()
+    {
         _layerCount = 0;
         for (int i = 0; i < MaxLayers; i++)
-            if (_faceReady[i]) Marshal.WriteIntPtr(_layerPtrs, _layerCount++ * IntPtr.Size, _quads + i * QuadSize);
+            if (_layerReady[i]) Marshal.WriteIntPtr(_layerPtrs, _layerCount++ * IntPtr.Size, _quads + i * QuadSize);
     }
 
     private static void MarkActive() => Interlocked.Exchange(ref _mainActiveAt, Stopwatch.GetTimestamp());
