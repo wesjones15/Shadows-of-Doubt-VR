@@ -15,9 +15,11 @@ internal sealed class InteractLabelPanel
     private static ManualLogSource Log => Plugin.Log;
 
     public const string CanvasName = "SoDVR_InteractLabelCanvas";
-    // Twice the HUD's size, so the button glyphs read at a glance; drawn at that size, not stretched.
-    private const float LabelScale = 2f;
-    private static readonly Vector2Int SheetSize = new(2048, 1024);
+    // Bigger than the HUD, so the button glyphs read at a glance; drawn at that size, not stretched.
+    private const float LabelScale = 2.5f;
+    private static readonly Vector2Int SheetSize = new(2560, 1280);
+    // Metres per sheet pixel are set by this width, not the sheet's: a bigger sheet only makes room.
+    private const float ReferenceSheetWidth = 1024f;
     private const int DiscoveryRetryFrames = 90;
     private const float MarginPixels = 8f;
     // Between the hit point and the label's bottom edge.
@@ -91,7 +93,7 @@ internal sealed class InteractLabelPanel
             if (box == null) { UnityEngine.Object.Destroy(root); return; }
             box.Root.transform.localScale = Vector3.one * LabelScale;
 
-            _panel.AttachSheet(canvas, HudRTPanels.ScreenWorldWidth / SheetSize.x, SheetSize, transparent: true);
+            _panel.AttachSheet(canvas, HudRTPanels.ScreenWorldWidth / ReferenceSheetWidth, SheetSize, transparent: true);
             _view = _panel.CreateView("Label", interactive: false);
             _view.Visible = false;
             _box = box;
