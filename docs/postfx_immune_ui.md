@@ -322,19 +322,27 @@ panel and the press-any-key screen's cropped view.
 
 ```
 per frame, per panel shown as a layer:
-  Blit(panelRT -> flippedRT, scale (1,-1), offset (0,1))  // Unity row order -> OpenXR row order
+  pick a level: halve until the shown part is near one texel per display pixel
+  Blit(panelRT -> flippedRT at that size, scale (1,-1), offset (0,1))  // Unity row order -> OpenXR row order
   acquire/wait swapchain image, CopyResource(flippedRT -> image), release
   write XrCompositionLayerQuad { swapchain, imageRect, pose, size, flags }
-  add it to xrEndFrame's layers, after the eyes' projection layer
+  add it to xrEndFrame's layers, before the eyes' projection layer
 ```
 
 ### Details that matter
 
 - **Flip the texture on the way.** The panel RTs are rendered by ordinary projector cameras, so
   they hold Unity's row order; OpenXR reads images top row first. Blit with a vertical flip into a
-  same-size RT, then copy that into the swapchain. (The eye RTs don't need this: their cameras use
-  `ForceFlipY`.) The blit also drops the panel RT's mip chain, which `CopyResource` requires to
-  match the swapchain's single mip.
+  RT, then copy that into the swapchain. (The eye RTs don't need this: their cameras use
+  `ForceFlipY`.) The copy has a single mip, as `CopyResource` requires to match the swapchain.
+- **Copy near the display's density, from the panel's mips.** The layer swapchains have no mips, so
+  a 2560-wide panel shown ~1000 display pixels wide skips texels, and its thin borders alias while
+  the text still looks crisp. `PanelLayerCopy` halves the copy (1/2, 1/4, ...) until the shown part
+  is at most ~1.3 texels per display pixel. Display pixels per unit of view-plane distance come from
+  the runtime's recommended eye width (before render scale) over the eye's `tan(right) - tan(left)`.
+  The blit into the smaller RT samples the panel's own trilinear mips, so it's a clean box filter.
+  The level is sticky per texture (hysteresis), so a swapchain doesn't flip size at a boundary, and
+  each change is logged: `[PanelLayer] '<rt>' shown at N texels per pixel — copied at 1/k.`
 - **One swapchain per panel texture shown in a frame.** Several views of one canvas (the case
   board, tooltips) can share one copy: each quad points at a different `imageRect` of the same
   swapchain. The image rect counts rows from the top of the flipped copy:
@@ -353,24 +361,38 @@ per frame, per panel shown as a layer:
 - **Swapchain access and the stall thread.** The stall frames' thread submits the same swapchains
   during freezes, so acquire/copy/release happens under `StallFrames.Gate`.
 
-### Layers draw over the eyes: ordering is the catch
+### Panel layers go under the eyes, and the eye image is opened over them
 
-Layers composite in submission order, on top of the eyes' projection layer, with no depth test
-between them. Anything that must appear in front of a layered panel has to be a layer too, submitted
-after it:
+Layers composite in submission order, with no depth test between them. Whatever is in the eye image
+therefore sits either entirely above or entirely below a layered panel. The lasers must be above the
+panels and are in the eye image, so the panel layers go *first* and the eye layer on top of them,
+with `BLEND_TEXTURE_SOURCE_ALPHA` set on the eye layer. The overlay pass then does this:
+
+1. Draws the world dots and the `Normal` band as usual.
+2. Clears the eye image's alpha to 0 everywhere. This is a full-screen `Hidden/Internal-Colored`
+   draw with `Blend Zero SrcColor` and colour (1,1,1,0), so colour is multiplied by 1 and alpha by 0.
+3. Dims the world by each layered panel's coverage. It draws each panel's mesh with `UI/Default` in
+   black and `_ColorMask` RGB: `world × (1 − panelAlpha)`, with alpha left at 0.
+4. Draws the lasers as always, with `UI/Default`, which writes alpha 1.
+
+The eye image is premultiplied colour over the layers: `eye + layers × (1 − eyeAlpha)`. That gives
+`world × (1 − A) + panel` under the panels, the plain world elsewhere (the layers are transparent
+there), and the laser wherever it is drawn. No custom shader is needed; both shaders ship with every
+Unity player. If either is missing, `CanOpenOverPanels` is false and the panels stay in the eye image.
+
+A first version put the lasers in a second, transparent projection layer of their own on top. It
+worked, but in the headset the laser felt low-rate and stuttery, so it was replaced by this.
 
 - **Panels:** the panel bands already define the order (`Normal`, then `Menu`, then `Top`). A panel
   that stays in the eye image is always under every layered one. Layering the menu means layering
   every `Top` panel above it too: popups, tooltips, the keyboard and VR Settings.
-- **The lasers** are drawn into the eye image, so they'd go under a layered panel. They need a
-  transparent projection layer of their own on top: the overlay pass drawing only lasers into cleared
-  (0,0,0,0) RTs, with the blend bit set.
 - **World dots** stay in the eye image, under every panel, as they are now.
-- **The monitor mirror** shows the left eye RT, which no longer contains layered panels. It needs
-  its own copy of the world image with the full overlay composited on it.
+- **The monitor mirror** shows the left eye RT, which no longer contains layered panels. It gets its
+  own copy of the world image with the full overlay composited on it.
 
-The main-frame version (menu and `Top` panels as quad layers every frame, lasers in a top layer) is
-being built on this basis. Its ordering and the laser layer are not yet verified in the headset.
+The main-frame version was **checked in the headset on 2026-09-27**. The layered menu and popup text
+was crisp, but borders aliased and the separate laser layer stuttered. Both were fixed as described
+above. Those fixes are not yet verified in the headset.
 
 ## Verifying it works
 
