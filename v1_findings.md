@@ -76,6 +76,14 @@ behind most of the "what didn't work" entries in §4, not incidental to them.
 
 ## 1. Key learnings
 
+- **A load from in game reloads the whole Unity scene; a load from the main menu doesn't.**
+  Logged 2026-09-27: the pause-menu load changes the active scene handle and destroys the player,
+  `Main Camera` and every game canvas, then builds a fresh generic player; the main-menu load
+  keeps them all. Everything the mod parents under its own `DontDestroyOnLoad` objects survives
+  that reload, so a game object moved there is orphaned by it: the first-person arm rig
+  (`LagPivot`) left there stayed on as frozen pink arms whose scripts threw. Keep game objects
+  inside their own scene's hierarchy, and let every panel notice its canvas is gone at once.
+
 - **BepInEx config files are not git-tracked.** `BepInEx/config/com.sodvr.mod.cfg` lives outside
   the repo and BepInEx never resets an existing key to a new build's default — so a stale config
   value survives a `git reset --hard` to an earlier commit and can make an old build look like it
