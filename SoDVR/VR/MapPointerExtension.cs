@@ -20,8 +20,6 @@ internal sealed class MapPointerExtension : IRTPointerExtension
     // Same on-panel distance RTPanelPointer uses before a press becomes a drag.
     private const float DragThresholdMeters = 0.015f;
     private const float DoubleClickSeconds = 0.4f;
-    // Zoom factor per unit of stick scroll (RTPanelInput gives about 6 units a second at full tilt).
-    private const float ZoomPerScrollUnit = 0.25f;
 
     private RectTransform? _panContent;
     private RectTransform? _panViewport;
@@ -157,31 +155,16 @@ internal sealed class MapPointerExtension : IRTPointerExtension
         _lastClickTime = Time.unscaledTime;
     }
 
-    /// <summary>Zooms the game's map zoom by the stick, keeping the map point under the laser still.</summary>
     private void ZoomAbout(MapController map, float delta, in RTPointerSample sample)
     {
         var zoom = map.zoomController;
         var content = map.contentRect;
-        if (zoom == null || content == null) return;
-        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(content, sample.ScreenPosition, sample.EventCamera, out var before))
-            return;
-
-        float target = Mathf.Clamp(zoom.zoom * Mathf.Exp(delta * ZoomPerScrollUnit), zoom.zoomLimit.x, zoom.zoomLimit.y);
-        if (Mathf.Approximately(target, zoom.zoom)) return;
+        if (zoom == null || content == null || map.viewport == null) return;
         var scaleBefore = content.localScale;
-        // The desktop map eases zoom towards desiredZoom every frame; set both or it pulls back.
-        zoom.desiredZoom = target;
-        zoom.SetZoom(target);
-
-        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(content, sample.ScreenPosition, sample.EventCamera, out var after))
-            return;
-        // The same map point moved away from the laser; slide the content back under it.
-        var parent = content.parent;
-        var drift = parent.InverseTransformPoint(content.TransformPoint(after)) - parent.InverseTransformPoint(content.TransformPoint(before));
-        SetContentPosition(content.anchoredPosition + new Vector2(drift.x, drift.y));
+        if (!StickZoom.ZoomAbout(zoom, content, map.viewport, map.scrollRect, delta, sample)) return;
 
         if (_loggedZooms++ < 20)
-            Log.LogInfo($"[MapInput] f{Time.frameCount} Zoom → {target:F3}: zoom={zoom.zoom:F3} desired={zoom.desiredZoom:F3} scale {scaleBefore.x:F3}→{content.localScale.x:F3} " +
+            Log.LogInfo($"[MapInput] f{Time.frameCount} Zoom: zoom={zoom.zoom:F3} desired={zoom.desiredZoom:F3} scale {scaleBefore.x:F3}→{content.localScale.x:F3} " +
                         $"size={content.rect.size} anchored={content.anchoredPosition}");
     }
 
