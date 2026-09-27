@@ -335,8 +335,8 @@ public static class VRSettingsPanel
         ConfigFloat(t, "Sprint Multi", VRSettings.SprintMultiplierEntry, SprintOptions, v => $"{v}×");
 
         SectionHeader(t, "─── CONTROLS ───");
-        ConfigToggle(t, "Left Laser", VRSettings.LeftLaserEntry);
-        ConfigToggle(t, "Item Hand: Right", VRSettings.ItemHandRightEntry);
+        ConfigToggle(t, "Main Hand: Right", VRSettings.MainHandRightEntry);
+        ConfigToggle(t, "World Laser", VRSettings.WorldLaserEntry);
 
         SectionHeader(t, "─── WINDOWS ───");
         ConfigFloat(t, "Menu Distance", VRSettings.MenuDistanceEntry, DistanceOptions, v => $"{v:F1} m");

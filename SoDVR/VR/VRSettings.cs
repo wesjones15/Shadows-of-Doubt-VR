@@ -14,8 +14,8 @@ internal static class VRSettings
     private static ConfigEntry<float>? s_smoothTurnSpeed;
     private static ConfigEntry<float>? s_moveSpeed;
     private static ConfigEntry<float>? s_sprintMultiplier;
-    private static ConfigEntry<bool>? s_leftLaser;
-    private static ConfigEntry<bool>? s_itemHandRight;
+    private static ConfigEntry<bool>? s_worldLaser;
+    private static ConfigEntry<bool>? s_mainHandRight;
     private static ConfigEntry<float>? s_menuDistance;
     private static ConfigEntry<float>? s_hudDistance;
     private static ConfigEntry<float>? s_hudSize;
@@ -35,10 +35,10 @@ internal static class VRSettings
         s_sprintMultiplier = config.Bind("Movement", "SprintMultiplier", 1.8f,
             "How much faster sprinting (left stick click) is than walking.");
 
-        s_leftLaser = config.Bind("Controls", "LeftLaser", false,
-            "Draw a pointer line from the left controller.");
-        s_itemHandRight = config.Bind("Controls", "ItemHandRight", false,
-            "Hold items in the right hand instead of the left.");
+        s_worldLaser = config.Bind("Controls", "WorldLaser", false,
+            "Draw a pointer line from the main hand into the world.");
+        s_mainHandRight = config.Bind("Controls", "MainHandRight", true,
+            "The right hand points, interacts and holds items (false: the left). A trigger press on the other hand swaps.");
 
         s_menuDistance = config.Bind("Windows", "MenuDistance", 1.5f,
             "How far in front of the head menus and windows open, in metres.");
@@ -57,8 +57,8 @@ internal static class VRSettings
     public static float SmoothTurnSpeed => s_smoothTurnSpeed!.Value;
     public static float MoveSpeed => s_moveSpeed!.Value;
     public static float SprintMultiplier => s_sprintMultiplier!.Value;
-    public static bool LeftLaser => s_leftLaser!.Value;
-    public static bool ItemHandRight => s_itemHandRight!.Value;
+    public static bool WorldLaser => s_worldLaser!.Value;
+    public static bool MainHandRight => s_mainHandRight!.Value;
     public static float MenuDistance => s_menuDistance!.Value;
     public static float HudDistance => s_hudDistance!.Value;
     public static float HudSize => s_hudSize!.Value;
@@ -70,8 +70,8 @@ internal static class VRSettings
     public static ConfigEntry<float> SmoothTurnSpeedEntry => s_smoothTurnSpeed!;
     public static ConfigEntry<float> MoveSpeedEntry => s_moveSpeed!;
     public static ConfigEntry<float> SprintMultiplierEntry => s_sprintMultiplier!;
-    public static ConfigEntry<bool> LeftLaserEntry => s_leftLaser!;
-    public static ConfigEntry<bool> ItemHandRightEntry => s_itemHandRight!;
+    public static ConfigEntry<bool> WorldLaserEntry => s_worldLaser!;
+    public static ConfigEntry<bool> MainHandRightEntry => s_mainHandRight!;
     public static ConfigEntry<float> MenuDistanceEntry => s_menuDistance!;
     public static ConfigEntry<float> HudDistanceEntry => s_hudDistance!;
     public static ConfigEntry<float> HudSizeEntry => s_hudSize!;

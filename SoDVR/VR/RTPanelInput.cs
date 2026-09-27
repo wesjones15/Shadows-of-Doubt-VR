@@ -25,9 +25,6 @@ internal sealed class RTPanelInput
 
     private readonly List<RTPanelPointer> _pointers = new();
 
-    // Which hand drives RT panels. The first trigger press on the other hand only swaps over (so an
-    // imprecise aim mid-swap doesn't also click); later presses on the active hand click normally.
-    private bool _useRightHand = true;
     private bool _prevRightTrigger;
     private bool _prevLeftTrigger;
     private bool _prevA;
@@ -41,9 +38,6 @@ internal sealed class RTPanelInput
 
     public bool HasFocus => _focus != null;
 
-    /// <summary>Which hand currently carries the laser — the hand every RT panel interaction,
-    /// grip-drag included, belongs to.</summary>
-    public bool ActiveHandIsRight => _useRightHand;
     public bool IsCapturing => _captured != null;
     public Vector3 FocusPoint => _laserEnd;
     public float FocusDistance { get; private set; }
@@ -86,30 +80,23 @@ internal sealed class RTPanelInput
 
         if (!AnyPointerEnabled() && _captured == null) { DropFocus(); return; }
 
-        bool swapped = false;
-        if (_captured == null)
-        {
-            if (_useRightHand && leftEdge && leftControllerGO != null) { _useRightHand = false; swapped = true; }
-            else if (!_useRightHand && rightEdge && rightControllerGO != null) { _useRightHand = true; swapped = true; }
-            if (swapped) Log.LogInfo($"[RTPanelInput] Active controller swapped to {(_useRightHand ? "RIGHT" : "LEFT")}");
-        }
-
-        var hand = _useRightHand ? rightControllerGO : leftControllerGO;
+        bool useRightHand = MainHand.IsRight;
+        var hand = useRightHand ? rightControllerGO : leftControllerGO;
         if (hand == null) { DropFocus(); return; }
 
         var ray = new Ray(hand.transform.position, hand.transform.forward);
-        bool triggerHeld = _useRightHand ? rightTrigger : leftTrigger;
+        bool triggerHeld = useRightHand ? rightTrigger : leftTrigger;
         var input = new RTPointerInput(
             ray,
-            press: !swapped && (_useRightHand ? rightEdge : leftEdge),
+            press: !MainHand.SwappedThisFrame && (useRightHand ? rightEdge : leftEdge),
             held: triggerHeld,
-            release: _useRightHand ? rightRelease : leftRelease,
-            secondaryClick: _useRightHand && aEdge,
+            release: useRightHand ? rightRelease : leftRelease,
+            secondaryClick: useRightHand && aEdge,
             scroll: ReadScroll(),
-            rightHand: _useRightHand,
-            altPress: _useRightHand && bEdge,
-            altHeld: _useRightHand && bNow,
-            altRelease: _useRightHand && bRelease);
+            rightHand: useRightHand,
+            altPress: useRightHand && bEdge,
+            altHeld: useRightHand && bNow,
+            altRelease: useRightHand && bRelease);
 
         if (_captured != null)
         {

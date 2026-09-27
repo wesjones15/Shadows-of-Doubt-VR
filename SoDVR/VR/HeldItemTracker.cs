@@ -211,7 +211,7 @@ internal sealed class HeldItemTracker
             var co = interactionController.carryingObject;
             if (co == null) return;
 
-            var ctrlGO = VRSettings.ItemHandRight ? rightControllerGO : leftControllerGO;
+            var ctrlGO = MainHand.Pick(rightControllerGO, leftControllerGO);
             if (ctrlGO == null) return;
 
             var ctrlT = ctrlGO.transform;

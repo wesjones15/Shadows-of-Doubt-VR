@@ -33,7 +33,7 @@ classDiagram
     VRCamera *-- HudController : _hud
     VRCamera *-- LocomotionController : _locomotion
     VRCamera *-- ControllerPoses : _controllerPoses
-    VRCamera *-- LeftHandPointer : _leftPointer
+    VRCamera *-- HandPointer : _handPointer
     VRCamera *-- RTPanelInput : _rtPanelInput
     VRCamera *-- RTPanelGrip : _rtPanelGrip
     VRCamera *-- MenuRTPanel : _menuRTPanel
@@ -64,7 +64,7 @@ classDiagram
 `..>` = a call with no ownership — VRCamera just invokes a static method.
 
 Per frame, `Update` ticks the panels (outside the post-load grace period), then reads the controller
-poses → `RTPanelGrip` → `LeftHandPointer` → `RTPanelInput`, and the buttons (`LocomotionController`,
+poses → `MainHand` → `RTPanelGrip` → `HandPointer` → `RTPanelInput`, and the buttons (`LocomotionController`,
 `RadialMenuPanel` for Y). `LateUpdate` poses what follows the head or the world (world marks, the
 interact label, the compass), renders every panel's projector, renders the eyes, then composites
 the panels, the lasers and the pointer dot into each eye with `PostFXOverlayCompositor`.
@@ -117,7 +117,7 @@ classDiagram
 | `MinimapRTPanel.cs` / `MapPointerExtension.cs` | The map window, body-locked or on the board; its drag, zoom and node picking. |
 | `HudRTPanels.cs` | GameCanvas as one transparent sheet following the head's heading, laid out around the case board or a computer screen when one is up. |
 | `WorldMarksPanel.cs` / `WorldMarksHeadView.cs` | Objective pointers, NPC reaction indicators and speech bubbles at their targets in the world, judged on-screen from the head. |
-| `InteractLabelPanel.cs` / `GameFrameBox.cs` | The name and actions of what the left hand points at, in the game's tooltip style. |
+| `InteractLabelPanel.cs` / `GameFrameBox.cs` | The name and actions of what the main hand points at, in the game's tooltip style. |
 | `RadialMenuPanel.cs` / `SoloScreens.cs` | Y: tap opens the board; hold for a radial menu opening the inventory, upgrades, notebook or map on its own. |
 | `LooseCanvasPanels.cs` | Every other root screen canvas (splash, prototype builder, anything new) on a grip-draggable panel of its own. |
 | `VRKeyboardPanel.cs` | The on-screen keyboard for the game's text boxes. |
@@ -130,7 +130,8 @@ classDiagram
 |---|---|---|
 | `CameraRig.cs` | static | Stereo rig, RT panel textures/projectors/quads. |
 | `ControllerPoses.cs` | instance | Both controllers' poses from OpenXR. |
-| `LeftHandPointer.cs` | instance | The left hand's world ray: dot, optional beam, the label's text. |
+| `MainHand.cs` | static | Which hand points, interacts and holds items; a trigger press on the other hand swaps. Shared by the menu laser and the world. |
+| `HandPointer.cs` | instance | The main hand's world ray: dot, optional beam, the label's text. |
 | `CompassDisplay.cs` | instance | The 3D awareness compass (3DUI) at the player's feet. |
 | `HudController.cs` | instance | The route arrow; the popup desktop-mode guard. |
 | `ComputerUse.cs` | static | In-game computers: detection, view pullback, the game camera's aim at the screen. |

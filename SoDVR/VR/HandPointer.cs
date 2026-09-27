@@ -4,12 +4,12 @@ using UnityEngine;
 namespace SoDVR.VR;
 
 /// <summary>
-/// The left hand's world pointer: the game's own interaction ray (from the game camera, along the
+/// The main hand's world pointer: the game's own interaction ray (from the game camera, along the
 /// controller), a dot where it lands — green on an interactable in reach — an optional beam
-/// ("Left Laser"), and the name and actions of what it points at for the interact label. The dot
+/// ("World Laser"), and the name and actions of what it points at for the interact label. The dot
 /// and beam are drawn by the post-FX compositor, so depth of field and exposure never touch them.
 /// </summary>
-internal sealed class LeftHandPointer
+internal sealed class HandPointer
 {
     private const float RangeMeters = 12f;   // the game's interaction raycast distance
     private const float DotDiameter = 0.02f;
@@ -23,17 +23,15 @@ internal sealed class LeftHandPointer
     private Vector3? _beamOrigin;
     private Vector3 _beamEnd;
 
-    /// <summary>What the left hand last pointed at, as the interact log reports it.</summary>
+    /// <summary>What the main hand last pointed at, as the interact log reports it.</summary>
     public static string AimTarget { get; private set; } = "nothing";
 
     /// <summary>The name and actions of the interactable pointed at within reach, and where — what
     /// the interact label shows; null when there is none.</summary>
     public (string name, string actions, Vector3 point)? Label { get; private set; }
 
-    /// <param name="hidden">A menu or a computer is up: the game draws its own cursor there.</param>
-    /// <param name="rtLaserOnThisHand">The RT panel laser is drawn from this hand now.</param>
-    public void Update(GameObject? controller, Camera? gameCam, int interactionLayerMask, float baseReach,
-        bool hidden, bool rtLaserOnThisHand)
+    /// <param name="hidden">A menu or a computer is up, or the hand's laser is on a panel.</param>
+    public void Update(GameObject? controller, Camera? gameCam, int interactionLayerMask, float baseReach, bool hidden)
     {
         Label = null;
         _dot = null;
@@ -60,7 +58,7 @@ internal sealed class LeftHandPointer
             _dot = hit.point + hit.normal * DotLift;
             _dotOnInteractable = inReach;
         }
-        if (VRSettings.LeftLaser && !rtLaserOnThisHand)
+        if (VRSettings.WorldLaser)
         {
             _beamOrigin = hand.position;
             _beamEnd = didHit ? hit.point : hand.position + hand.forward * BeamMissLength;

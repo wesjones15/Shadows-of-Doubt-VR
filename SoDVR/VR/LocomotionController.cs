@@ -48,7 +48,6 @@ internal sealed class LocomotionController
     private float _jumpCooldownUntil;
     private bool  _jumpBtnNeedsRelease;
 
-    private bool _interactAiming;              // true while left trigger is held and camera is redirected
     private bool _interactBtnPrev;
 
     private float _crouchCooldownUntil;
@@ -62,7 +61,7 @@ internal sealed class LocomotionController
     private bool _ignoreBUntilReleased;
 
     private bool _flashlightBtnPrev;
-    private bool _inventoryBtnPrev;
+    private bool _secondaryBtnPrev;
 
     public bool HasPlayerController => _playerCC != null;
     public bool InAirVent => _inAirVent;
@@ -454,10 +453,8 @@ internal sealed class LocomotionController
     }
 
     /// <summary>
-    /// Left trigger → world interaction via left controller aiming.
-    /// On press edge: simulates left mouse button click.
-    /// Camera.main rotation toward the left controller is handled elsewhere
-    /// (VRCamera), keyed off this same trigger state.
+    /// Main-hand trigger → left mouse button: world interaction, aimed by Camera.main, which
+    /// VRCamera points along the main hand. The press that swaps hands does not interact.
     /// Suppressed while the pointer is on UI or a menu/case board is up: the simulated click lands
     /// on whatever flat-screen UI sits under the OS cursor (it opened the exit dialog from the
     /// pause menu).
@@ -465,14 +462,11 @@ internal sealed class LocomotionController
     public void UpdateInteract(bool suppress)
     {
         if (VRSettingsPanel.RootGO?.activeSelf == true) return;
-        OpenXRManager.GetTriggerState(false, out bool pressed);
-
-        if (pressed) _interactAiming = true;
-        else if (_interactAiming && !pressed) _interactAiming = false;
+        OpenXRManager.GetTriggerState(MainHand.IsRight, out bool pressed);
 
         bool edge = pressed && !_interactBtnPrev;
         _interactBtnPrev = pressed;
-        if (!edge || suppress) return;
+        if (!edge || suppress || MainHand.SwappedThisFrame) return;
         try
         {
             // Primary: left mouse button (game uses LMB for pick up, interact, attack)
@@ -480,7 +474,7 @@ internal sealed class LocomotionController
             const uint MOUSEEVENTF_LEFTUP   = 0x0004;
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, UIntPtr.Zero);
             mouse_event(MOUSEEVENTF_LEFTUP,   0, 0, 0, UIntPtr.Zero);
-            Log.LogInfo($"[Locomotion] Interact (LMB via left controller aim) at {LeftHandPointer.AimTarget}");
+            Log.LogInfo($"[Locomotion] Interact (LMB, main-hand aim) at {HandPointer.AimTarget}");
         }
         catch (Exception ex) { Log.LogWarning($"[Locomotion] UpdateInteract: {ex.Message}"); }
     }
@@ -678,12 +672,12 @@ internal sealed class LocomotionController
         catch (Exception ex) { Log.LogWarning($"[Locomotion] UpdateFlashlight: {ex.Message}"); }
     }
 
-    /// <summary>Left grip → right mouse button (secondary interact). Suppressed with UI up, for the
+    /// <summary>Main-hand grip → right mouse button (secondary interact). Suppressed with UI up, for the
     /// same reason as UpdateInteract: the click lands on flat-screen UI.</summary>
-    public void UpdateInventory(bool suppress)
+    public void UpdateSecondaryInteract(bool suppress)
     {
         if (VRSettingsPanel.RootGO?.activeSelf == true) return;
-        OpenXRManager.GetGripState(false, out bool pressed);
+        OpenXRManager.GetGripState(MainHand.IsRight, out bool pressed);
 
         // NOTE: camera-to-controller redirect was removed from here — it ran in Update() every
         // frame while grip was held, driving expensive HDRP shadow/volumetric recalculations
@@ -691,8 +685,8 @@ internal sealed class LocomotionController
         // controller direction in post-FrameEndStereo (LateUpdate), so raycasts from grip-RMB
         // will use that value on the following frame's game Update().
 
-        bool edge = pressed && !_inventoryBtnPrev;
-        _inventoryBtnPrev = pressed;
+        bool edge = pressed && !_secondaryBtnPrev;
+        _secondaryBtnPrev = pressed;
         if (!edge || suppress) return;
         try
         {
@@ -701,8 +695,8 @@ internal sealed class LocomotionController
             const uint MOUSEEVENTF_RIGHTUP   = 0x0010;
             mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, UIntPtr.Zero);
             mouse_event(MOUSEEVENTF_RIGHTUP,   0, 0, 0, UIntPtr.Zero);
-            Log.LogInfo("[Locomotion] World RMB (left grip + left controller aim)");
+            Log.LogInfo("[Locomotion] World RMB (main-hand grip and aim)");
         }
-        catch (Exception ex) { Log.LogWarning($"[Locomotion] UpdateInventory: {ex.Message}"); }
+        catch (Exception ex) { Log.LogWarning($"[Locomotion] UpdateSecondaryInteract: {ex.Message}"); }
     }
 }

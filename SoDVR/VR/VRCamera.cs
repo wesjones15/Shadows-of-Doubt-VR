@@ -76,7 +76,7 @@ public class VRCamera : MonoBehaviour
     private LooseCanvasPanels _looseCanvases = null!;
     private RadialMenuPanel _radialMenu = null!;
     private readonly SoloScreens _soloScreens = new();
-    private readonly LeftHandPointer _leftPointer = new();
+    private readonly HandPointer _handPointer = new();
     private readonly CompassDisplay _compass = new(UILayer);
     private readonly PostFXOverlayCompositor _overlay = new();
     // Render throttle: call Camera.Render() every N stereo frames.
@@ -516,7 +516,7 @@ public class VRCamera : MonoBehaviour
                     _rightControllerGO, _leftCam, pointerOnUI);
 
                 _locomotion.UpdateFlashlight(pointerOnUI || isPausedForLocomotion);
-                _locomotion.UpdateInventory(pointerOnUI || isPausedForLocomotion);
+                _locomotion.UpdateSecondaryInteract(pointerOnUI || isPausedForLocomotion || RTPanelGrip.DraggingHandIsRight != null);
                 UpdateHeldItemTracking();
             }
             catch (Exception ex)
@@ -569,12 +569,10 @@ public class VRCamera : MonoBehaviour
         }
     }
 
-    /// <summary>The hand Camera.main is aimed with: the laser hand while its laser is on a panel, since
-    /// game UI that reads the camera then belongs to that hand; otherwise the left hand, whose world
-    /// pointer the game's interaction follows.</summary>
+    /// <summary>Camera.main is aimed with the main hand: the game's interaction ray follows it.</summary>
     private Transform? GameCameraAimHand()
     {
-        var hand = _rtPanelInput.HasFocus && _rtPanelInput.ActiveHandIsRight ? _rightControllerGO : _leftControllerGO;
+        var hand = MainHand.Pick(_rightControllerGO, _leftControllerGO);
         return hand != null ? hand.transform : null;
     }
 
@@ -725,7 +723,7 @@ public class VRCamera : MonoBehaviour
 
                 try { _worldMarks.BeforeRender(_hudRT, _leftCam, _caseBoardRT.ShowsBoard); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] WorldMarksPanel.BeforeRender: {ex.Message}"); }
-                try { _interactLabel.BeforeRender(_leftPointer.Label, _leftCam); }
+                try { _interactLabel.BeforeRender(_handPointer.Label, _leftCam); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] InteractLabelPanel.BeforeRender: {ex.Message}"); }
 
                 try { _compass.BeforeRender(_hudRT, _leftCam); }
@@ -781,7 +779,7 @@ public class VRCamera : MonoBehaviour
                     _looseCanvases.AppendOverlay(_overlay);
                     _radialMenu.AppendOverlay(_overlay);
                     _keyboard.AppendOverlay(_overlay);
-                    _leftPointer.AppendOverlay(_overlay, _leftCam);
+                    _handPointer.AppendOverlay(_overlay, _leftCam);
                     _rtPanelInput.AppendOverlay(_overlay);
                     _overlay.Composite(_rightCam, _rightRT);
                     _overlay.Composite(_leftCam, _leftRT);
@@ -828,25 +826,27 @@ public class VRCamera : MonoBehaviour
 
 
     /// <summary>
-    /// Reads both controller poses and runs what they aim: RT panel grip-drag, the left-hand world
-    /// pointer, and the RT panel laser.
+    /// Reads both controller poses and runs what they aim: the main-hand swap, RT panel grip-drag, the
+    /// main hand's world pointer, and the RT panel laser.
     /// </summary>
     private void UpdateControllerPose(long displayTime)
     {
         if (_rightControllerGO == null) return;
         if (!_controllerPoses.UpdateRightPose(displayTime, transform, _rightControllerGO)) return;
 
-        try { _rtPanelGrip.Update(_rightControllerGO, _leftControllerGO, _rtPanelInput.ActiveHandIsRight); }
+        MainHand.Update(locked: _rtPanelInput.IsCapturing || RTPanelGrip.DraggingHandIsRight != null);
+
+        try { _rtPanelGrip.Update(_rightControllerGO, _leftControllerGO, MainHand.IsRight); }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] RTPanelGrip.Update: {ex.Message}"); }
 
         try
         {
             bool menuOpen = _menuRTPanel.Canvas != null && _menuRTPanel.Canvas.isActiveAndEnabled;
-            bool pointerHidden = menuOpen || ComputerUse.InUse || VRSettingsPanel.RootGO?.activeSelf == true;
-            bool rtLaserOnLeft = !_rtPanelInput.ActiveHandIsRight && (_rtPanelInput.HasFocus || _rtPanelInput.IsCapturing);
-            _leftPointer.Update(_leftControllerGO, _gameCamRef, _interactionLayerMask, _baseInteractionRange, pointerHidden, rtLaserOnLeft);
+            bool laserOnPanel = _rtPanelInput.HasFocus || _rtPanelInput.IsCapturing;
+            bool pointerHidden = menuOpen || ComputerUse.InUse || VRSettingsPanel.RootGO?.activeSelf == true || laserOnPanel;
+            _handPointer.Update(MainHand.Pick(_rightControllerGO, _leftControllerGO), _gameCamRef, _interactionLayerMask, _baseInteractionRange, pointerHidden);
         }
-        catch (Exception ex) { Log.LogWarning($"[VRCamera] LeftHandPointer.Update: {ex.Message}"); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] HandPointer.Update: {ex.Message}"); }
 
         try
         {
