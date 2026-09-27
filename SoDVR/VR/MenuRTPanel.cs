@@ -101,6 +101,7 @@ internal sealed class MenuRTPanel
     {
         if (_canvas == null)
         {
+            if (_quadGO != null) Detach();
             if (--_discoveryCooldown > 0) return;
             _discoveryCooldown = DiscoveryRetryFrames;
             TryDiscover();
@@ -226,6 +227,37 @@ internal sealed class MenuRTPanel
             Log.LogInfo("[MenuRTPanel] MenuCanvas discovered and converted to RT panel.");
             break;
         }
+    }
+
+    /// <summary>MenuCanvas went with its scene (a load from in game reloads it): drop the quad,
+    /// which would otherwise keep showing the old menu's last frame, and look for the new canvas
+    /// straight away — it carries the loading screen.</summary>
+    private void Detach()
+    {
+        _pointer.Clear();
+        _pointer.Enabled = false;
+        try { UnityEngine.Object.Destroy(_quadGO); } catch { }
+        try { UnityEngine.Object.Destroy(_quadMesh); } catch { }
+        try { UnityEngine.Object.Destroy(_quadMaterial); } catch { }
+        if (_projectorCam != null) { try { UnityEngine.Object.Destroy(_projectorCam.gameObject); } catch { } }
+        if (_rt != null)
+        {
+            try { _rt.Release(); } catch { }
+            try { UnityEngine.Object.Destroy(_rt); } catch { }
+        }
+        _quadGO = null;
+        _quadCollider = null;
+        _quadMesh = null;
+        _quadMaterial = null;
+        _projectorCam = null;
+        _rt = null;
+        _canvas = null;
+        _settingsBtnId = 0;
+        _quadPlaced = false;
+        _wasShowing = false;
+        _vrSettingsHidden = false;
+        _discoveryCooldown = 0;
+        Log.LogInfo("[MenuRTPanel] MenuCanvas gone (scene reload) — RT panel torn down, will rediscover.");
     }
 
     private void Setup(Canvas canvas)
