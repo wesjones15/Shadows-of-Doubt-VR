@@ -187,7 +187,7 @@ public class VRCamera : MonoBehaviour
         OpenXRManager.PollEventsPublic();
 
         PostProcessingOverride.Tick();
-        _voidRoom.UpdatePressAnyKeyClick(_gameCam == null);
+        _voidRoom.UpdatePressAnyKeyClick();
 
         // Detect scene changes and apply a grace period during which the panels don't tick.
         // This prevents us from touching canvas/camera
@@ -505,7 +505,7 @@ public class VRCamera : MonoBehaviour
                 _locomotion.UpdateLocomotion(_leftCam, _voidRoom.InVoidMode, isPausedForLocomotion, _sceneLoadGrace);
                 _locomotion.UpdateMenuButton();
                 _locomotion.UpdateJump(caseBoardOpenForInput, pointerOnUI, _movementDiscoveryDone, _sceneLoadGrace);
-                _locomotion.UpdateInteract(pointerOnUI || isPausedForLocomotion);
+                _locomotion.UpdateInteract(pointerOnUI || isPausedForLocomotion || _voidRoom.OnPressAnyKeyScreen);
                 _locomotion.UpdateCrouch();
                 try { _radialMenu.Update(_leftControllerGO, _leftCam, _soloScreens, _caseBoardRT.IsOpen); }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] RadialMenuPanel.Update: {ex.Message}"); }
@@ -515,7 +515,7 @@ public class VRCamera : MonoBehaviour
                     _rightControllerGO, _leftCam, pointerOnUI);
 
                 _locomotion.UpdateFlashlight(pointerOnUI || isPausedForLocomotion);
-                _locomotion.UpdateSecondaryInteract(pointerOnUI || isPausedForLocomotion || RTPanelGrip.DraggingHandIsRight != null);
+                _locomotion.UpdateSecondaryInteract(pointerOnUI || isPausedForLocomotion || _voidRoom.OnPressAnyKeyScreen || RTPanelGrip.DraggingHandIsRight != null);
                 UpdateHeldItemTracking();
             }
             catch (Exception ex)

@@ -4,6 +4,7 @@ using SoDVR;
 using System;
 using UnityEngine;
 using UnityEngine.Rendering.HighDefinition;
+using UnityEngine.SceneManagement;
 using static SoDVR.VR.NativeInput;
 
 namespace SoDVR.VR.Rooms;
@@ -151,21 +152,34 @@ internal sealed class VoidRoomController
 
     // ── VR-trigger click-through for the press-any-key screen ──────────────────────────────
 
+    private const string PressAnyKeySceneName = "ControllerDetect";
+
     private bool _clickBtnPrev;
 
+    /// <summary>True on the "press any key" screen, where <see cref="UpdatePressAnyKeyClick"/>
+    /// owns the controller buttons.</summary>
+    public bool OnPressAnyKeyScreen { get; private set; }
+
     /// <summary>
-    /// While there is no game camera yet (the actual "press any key" / loading screen — the
-    /// main menu that follows has a real camera and its own clickable UI), a right-trigger pull
-    /// simulates the mouse click that screen is waiting for. Input.GetKeyDown can't do this: it
-    /// needs the game window to hold OS keyboard focus, which it doesn't while the headset is in
+    /// On the "press any key" screen, a trigger or grip pull on either hand simulates the mouse
+    /// click that screen is waiting for, wherever the laser points: a laser click on its panel
+    /// only reaches the canvas, which the screen doesn't listen to. Input.GetKeyDown can't do this:
+    /// it needs the game window to hold OS keyboard focus, which it doesn't while the headset is in
     /// use. mouse_event injects a real OS-level input event instead — the same mechanism already
     /// used for world-interact clicks elsewhere in this mod.
     /// </summary>
-    public void UpdatePressAnyKeyClick(bool onPreGameScreen)
+    public void UpdatePressAnyKeyClick()
     {
-        if (!onPreGameScreen) { _clickBtnPrev = false; return; }
+        OnPressAnyKeyScreen = SceneManager.GetActiveScene().name == PressAnyKeySceneName;
+        if (!OnPressAnyKeyScreen) { _clickBtnPrev = false; return; }
 
-        OpenXRManager.GetTriggerState(true, out bool pressed);
+        bool pressed = false;
+        foreach (bool right in new[] { true, false })
+        {
+            OpenXRManager.GetTriggerState(right, out bool trigger);
+            OpenXRManager.GetGripState(right, out bool grip);
+            pressed |= trigger || grip;
+        }
         bool edge = pressed && !_clickBtnPrev;
         _clickBtnPrev = pressed;
         if (!edge) return;
