@@ -47,6 +47,7 @@ internal static class QuestGlyphs
     private static bool s_built;
     private static bool s_failed;
     private static readonly HashSet<InteractionKey> s_loggedKeys = new();
+    private static bool s_inMenus;
 
     /// <summary>The Quest glyph for the button the mod binds to this key; null for a key VR doesn't
     /// bind, which keeps the game's own glyph.</summary>
@@ -55,7 +56,8 @@ internal static class QuestGlyphs
         string? glyph = key switch
         {
             InteractionKey.primary => TriggerName(MainHand.IsRight),
-            InteractionKey.secondary => GripName(MainHand.IsRight),
+            // The right click: A on the laser's panels, the main grip in the world.
+            InteractionKey.secondary => s_inMenus ? "quest_button_a" : GripName(MainHand.IsRight),
             // F; a Y hold opens the notebook from the radial menu.
             InteractionKey.alternative or InteractionKey.caseBoard or InteractionKey.notebook => "quest_button_y",
             InteractionKey.jump => "quest_button_a",
@@ -80,7 +82,15 @@ internal static class QuestGlyphs
     public static string TriggerName(bool right) => right ? "quest_trigger_right" : "quest_trigger_left";
     public static string GripName(bool right) => right ? "quest_grip_right" : "quest_grip_left";
 
-    /// <summary>Redraws the key hints shown now, after the main hand changes.</summary>
+    /// <summary>Each frame: a menu or the case board is up, driven by the laser.</summary>
+    public static void SetInMenus(bool inMenus)
+    {
+        if (inMenus == s_inMenus) return;
+        s_inMenus = inMenus;
+        Refresh();
+    }
+
+    /// <summary>Redraws the key hints shown now, after the main hand or the context changes.</summary>
     public static void Refresh()
     {
         try

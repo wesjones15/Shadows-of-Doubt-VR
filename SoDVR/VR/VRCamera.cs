@@ -871,6 +871,7 @@ public class VRCamera : MonoBehaviour
 
         bool menuOpen = _menuRTPanel.Canvas != null && _menuRTPanel.Canvas.isActiveAndEnabled;
         bool inMenu = menuOpen || _caseBoardRT.IsOpen || VRSettingsPanel.RootGO?.activeSelf == true;
+        QuestGlyphs.SetInMenus(inMenu);
         try
         {
             bool laserOnPanel = _rtPanelInput.HasFocus || _rtPanelInput.IsCapturing;
