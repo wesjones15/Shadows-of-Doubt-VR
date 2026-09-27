@@ -246,11 +246,12 @@ compositor; it owns no renderer.
 - **TAA history isn't disturbed.** HDRP's TAA history lives in its own buffers, not the camera
   target, so drawing into the target after the fact doesn't feed UI into next frame's
   reprojection.
-- **Ordering.** Panels are sorted farthest-first from each eye (they're alpha-blended), then lasers
-  are drawn last. The sort uses each quad's centre, which misorders a small quad just in front of a
-  large one's edge (a tooltip over the navbar's edge is farther than the navbar's centre). So
-  panels added with `onTop` (TooltipCanvas's views, the flat game's topmost canvas) are drawn after
-  all the others.
+- **Ordering.** Panels are stacked by band (`PanelLayer`: `Normal`, `Menu`, `Top`), then sorted
+  farthest-first within a band (they're alpha-blended), then lasers are drawn last. The order is
+  fixed once per frame, from the left eye passed to `BeginFrame`, so both eyes and the panel layers
+  agree on it. The sort uses each quad's centre, which misorders a small quad just in front of a
+  large one's edge (a tooltip over the navbar's edge is farther than the navbar's centre), which is
+  why tooltips are in the `Top` band.
 - **Throttled rendering.** If you skip `Camera.Render()` on some frames and resubmit the last image,
   composite inside the same block as the render, so the resubmitted image already contains the UI.
 - **Colour.** The panel's pixels reach the headset exactly as the projector camera produced them, with
@@ -287,7 +288,8 @@ Use `RTCanvasPanel`, which does the projector, texture, quads and pointer regist
    quad, with its own `RTPanelPointer` registered with `RTPanelInput`. Set its pixel rect, pose and
    `Visible` each tick.
 4. Call the panel's `Render()` from the coordinator's `LateUpdate` before the eyes render, and its
-   `AppendOverlay` between `BeginFrame()` and the `Composite` calls.
+   `AppendOverlay` between `BeginFrame(head)` and the `Composite` calls. With Crisp Panels on, it
+   becomes a quad layer by itself (see below).
 
 `TooltipRTPanel.cs` (many small views of one canvas), `CaseBoardPanel.cs` (screen layout) and
 `CaseBoardWindows.cs` (sheet layout) are the reference implementations. `MenuRTPanel.cs` predates
@@ -368,31 +370,57 @@ therefore sits either entirely above or entirely below a layered panel. The lase
 panels and are in the eye image, so the panel layers go *first* and the eye layer on top of them,
 with `BLEND_TEXTURE_SOURCE_ALPHA` set on the eye layer. The overlay pass then does this:
 
-1. Draws the world dots and the `Normal` band as usual.
+1. Draws the world dots and every panel that isn't layered, in stacking order.
 2. Clears the eye image's alpha to 0 everywhere. This is a full-screen `Hidden/Internal-Colored`
    draw with `Blend Zero SrcColor` and colour (1,1,1,0), so colour is multiplied by 1 and alpha by 0.
-3. Dims the world by each layered panel's coverage. It draws each panel's mesh with `UI/Default` in
-   black and `_ColorMask` RGB: `world × (1 − panelAlpha)`, with alpha left at 0.
+3. Dims what's there by each layered panel's coverage. It draws each layered panel's mesh with
+   `UI/Default` in black and `_ColorMask` RGB: `image × (1 − panelAlpha)`, with alpha left at 0.
 4. Draws the lasers as always, with `UI/Default`, which writes alpha 1.
 
 The eye image is premultiplied colour over the layers: `eye + layers × (1 − eyeAlpha)`. That gives
-`world × (1 − A) + panel` under the panels, the plain world elsewhere (the layers are transparent
+`image × (1 − A) + panel` under the panels, the plain eye image elsewhere (the layers are transparent
 there), and the laser wherever it is drawn. No custom shader is needed; both shaders ship with every
 Unity player. If either is missing, `CanOpenOverPanels` is false and the panels stay in the eye image.
 
 A first version put the lasers in a second, transparent projection layer of their own on top. It
 worked, but in the headset the laser felt low-rate and stuttery, so it was replaced by this.
 
-- **Panels:** the panel bands already define the order (`Normal`, then `Menu`, then `Top`). A panel
-  that stays in the eye image is always under every layered one. Layering the menu means layering
-  every `Top` panel above it too: popups, tooltips, the keyboard and VR Settings.
+### Which panels are layered
+
+Every panel the overlay draws is a candidate: the HUD and its key hints, the controls panel, the
+interact label, world marks, the case board, dialogue, the minimap, the menu, popups, tooltips, the
+keyboard and VR Settings. `PostFXOverlayCompositor.Panels` is the frame's stacking order, bottom
+first. `MainLayers.Build` walks it from the top down and layers each panel it can, until
+`OpenXRManager.MaxFrameLayers - 1` are layered (the last slot is the eyes'). It then writes them
+bottom first, and `MainLayers.Layered` says which ones it took. That same set is what the eye image
+skips and what the dim step covers, so every panel is shown exactly once.
+
+- **Over budget,** the topmost panels are layered and the rest stay in the eye image, which puts them
+  under every layered one, as the order has them.
+- **Not layerable:** a draw whose material's texture isn't a `RenderTexture`, or whose shader isn't
+  the premultiplied panel shader (`CameraRig.PremultipliedShaderName`), stays in the eye image. A
+  layer is blended as premultiplied colour, so only such a panel looks the same as one; if the shader
+  is missing from the build, the panels fall back to `UI/Default` and none are layered. Each
+  exclusion is logged once: `[MainLayers] '<material>' stays in the eye image: <reason>.`
+- **A failed copy** (no swapchain of that size) leaves that panel in the eye image; the others are
+  still layered. `PanelLayerCopy` logs each unavailable size once.
+
+A panel that stays in the eye image is under every layered one. That's the stacking order whenever
+the eye panels are all at the bottom of it, which is always true of the budget. It's only wrong for
+a non-layerable panel, or one whose copy failed, that sits above a layered one: it's then drawn
+beneath it.
+
 - **World dots** stay in the eye image, under every panel, as they are now.
 - **The monitor mirror** shows the left eye RT, which no longer contains layered panels. It gets its
-  own copy of the world image with the full overlay composited on it.
+  own copy of the world image with every panel composited on it.
 
-The main-frame version was **checked in the headset on 2026-09-27**. The layered menu and popup text
-was crisp, but borders aliased and the separate laser layer stuttered. Both were fixed as described
-above. Those fixes are not yet verified in the headset.
+The main-frame version with the menu and top bands layered was **checked in the headset on
+2026-09-27**. The layered menu and popup text was crisp, but borders aliased and the separate laser
+layer stuttered. Both were fixed as described above. Those fixes, and layering every panel (HUD,
+hints, controls, labels and the rest), are **not yet tested in the headset**. Things to watch for:
+the GPU cost of copying every shown panel texture each frame, the runtime's own layer limit if it's
+below 16, and the interact label, whose layer pose and copy level change every frame as it follows
+the hit point.
 
 ## Verifying it works
 
