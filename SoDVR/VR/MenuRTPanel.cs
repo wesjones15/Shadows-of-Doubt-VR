@@ -94,8 +94,7 @@ internal sealed class MenuRTPanel
 
     /// <summary>
     /// Cheap per-Update work: retry discovery until MenuCanvas exists, then track the VR-settings-
-    /// open hide toggle and the open-transition recentre/re-patch. Skipped by the caller during the
-    /// post-scene-load grace period, matching every other canvas-touching pass in this mod.
+    /// open hide toggle and the open-transition recentre/re-patch.
     /// </summary>
     public void Tick(Camera? leftCam)
     {

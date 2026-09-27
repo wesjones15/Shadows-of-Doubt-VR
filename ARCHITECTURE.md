@@ -63,7 +63,7 @@ classDiagram
 `*--` = VRCamera creates and owns the instance for its whole lifetime.
 `..>` = a call with no ownership — VRCamera just invokes a static method.
 
-Per frame, `Update` ticks the panels (outside the post-load grace period), then reads the controller
+Per frame, `Update` ticks the panels (through a load too, so they drop dead canvases at once), then reads the controller
 poses → `MainHand` → `RTPanelGrip` → `HandPointer` → `RTPanelInput`, and the buttons (`LocomotionController`,
 `RadialMenuPanel` for Y). `LateUpdate` poses what follows the head or the world (world marks, the
 interact label, the compass), renders every panel's projector, renders the eyes, then composites

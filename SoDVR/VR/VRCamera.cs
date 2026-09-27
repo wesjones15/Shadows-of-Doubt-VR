@@ -115,10 +115,10 @@ public class VRCamera : MonoBehaviour
     private bool _tutorialsDisabled;
 
     // ── Scene-change guard ────────────────────────────────────────────────────
-    // When Unity loads a new scene (save load, new game) we stop calling
-    // ticking the panels for 120 frames.  This gives SaveStateController
-    // and other scene-init code a clean window before we start touching canvases
-    // and camera components — the source of the "Can't remove Rigidbody" crash.
+    // A load (scene change, lost game camera, or a load click) starts a frame-count grace during
+    // which locomotion stays off the player the game is rebuilding and the city isn't rendered.
+    // Panels keep ticking through it: a load from in game reloads the scene, and they have to drop
+    // their dead canvases and pick up the new ones — the new MenuCanvas carries the loading screen.
     private int  _lastSceneHandle;
     private int  _sceneLoadGrace;      // frames remaining in the grace period
     private bool _prevGameCamValid;    // was _gameCam non-null last frame? (same-scene reload detection)
@@ -202,7 +202,7 @@ public class VRCamera : MonoBehaviour
                 _locomotion.ResetForRealSceneChange();
                 _heldItem.ResetForSceneReload();
 
-                Log.LogInfo($"[VRCamera] Scene changed (handle {_lastSceneHandle}→{sh}) — canvas scan paused for 120 frames.");
+                Log.LogInfo($"[VRCamera] Scene changed (handle {_lastSceneHandle}→{sh}) — load grace 120 frames.");
             }
             _lastSceneHandle = sh;
         }
@@ -227,7 +227,7 @@ public class VRCamera : MonoBehaviour
                 _interactionController  = null;
                 _locomotion.ResetForSceneReload();
                 _heldItem.ResetForSceneReload();
-                Log.LogInfo("[VRCamera] Game camera lost — same-scene reload detected; canvas scan paused 120 frames, movement state reset.");
+                Log.LogInfo("[VRCamera] Game camera lost — same-scene reload detected; load grace 120 frames, movement state reset.");
             }
             _prevGameCamValid = gcValid;
         }
@@ -241,7 +241,7 @@ public class VRCamera : MonoBehaviour
         if (_sceneLoadGrace > 0) _sceneLoadGrace--;
         if (graceWasActive && _sceneLoadGrace == 0)
         {
-            Log.LogInfo($"[VRCamera] Grace expired at frame {_frameCount} — canvas scan will fire next tick.");
+            Log.LogInfo($"[VRCamera] Grace expired at frame {_frameCount}.");
             // Only schedule rediscovery if playerCC was lost (null).
             // When playerCC is still valid (same-scene reload, e.g. opening case board),
             // keep _movementDiscoveryDone=true so jump/locomotion continue working.
@@ -260,52 +260,48 @@ public class VRCamera : MonoBehaviour
             }
         }
 
-        // Panels never touch canvas/camera state mid-load.
-        if (_sceneLoadGrace == 0)
-        {
-            try { _menuRTPanel.Tick(_leftCam); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
+        try { _menuRTPanel.Tick(_leftCam); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] MenuRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
-            InputModeGuard.Tick();
-            ComputerUse.Tick();
+        InputModeGuard.Tick();
+        ComputerUse.Tick();
 
-            try { _tooltipRTPanel.Tick(_leftCam, _uiPointerPoint); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] TooltipRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
+        try { _tooltipRTPanel.Tick(_leftCam, _uiPointerPoint); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] TooltipRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
-            try { _soloScreens.Tick(_caseBoardRT.IsOpen); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] SoloScreens.Tick: {ex.Message}"); }
-            try { _radialMenu.Tick(); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] RadialMenuPanel.Tick: {ex.Message}"); }
-            try { _caseBoardRT.Tick(_leftCam, _soloScreens); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] CaseBoardRTController.Tick: {ex.GetType().Name}: {ex.Message}"); }
+        try { _soloScreens.Tick(_caseBoardRT.IsOpen); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] SoloScreens.Tick: {ex.Message}"); }
+        try { _radialMenu.Tick(); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] RadialMenuPanel.Tick: {ex.Message}"); }
+        try { _caseBoardRT.Tick(_leftCam, _soloScreens); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] CaseBoardRTController.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
-            try { _dialogueRT.Tick(_leftCam, _hudRT); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] DialogueRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
+        try { _dialogueRT.Tick(_leftCam, _hudRT); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] DialogueRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
-            try { _minimapRT.Tick(_leftCam, transform, _caseBoardRT.ShowsBoard, _caseBoardRT.Anchor); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] MinimapRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
+        try { _minimapRT.Tick(_leftCam, transform, _caseBoardRT.ShowsBoard, _caseBoardRT.Anchor); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] MinimapRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
-            try { _keyboard.Tick(_leftCam); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] VRKeyboardPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
+        try { _keyboard.Tick(_leftCam); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] VRKeyboardPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
-            try { _hudRT.Tick(_leftCam, _caseBoardRT.ShowsBoard, _caseBoardRT.Anchor, _caseBoardRT.BoardExtent); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] HudRTPanels.Tick: {ex.GetType().Name}: {ex.Message}"); }
-            try { _compass.Tick(); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] CompassDisplay.Tick: {ex.Message}"); }
+        try { _hudRT.Tick(_leftCam, _caseBoardRT.ShowsBoard, _caseBoardRT.Anchor, _caseBoardRT.BoardExtent); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] HudRTPanels.Tick: {ex.GetType().Name}: {ex.Message}"); }
+        try { _compass.Tick(); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] CompassDisplay.Tick: {ex.Message}"); }
 
-            try { _clueRT.Tick(_hudRT, _dialogueRT.OpenView); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] ClueMessagePanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
+        try { _clueRT.Tick(_hudRT, _dialogueRT.OpenView); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] ClueMessagePanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
-            try { _worldMarks.Tick(_hudRT); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] WorldMarksPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
-            try { _interactLabel.Tick(_hudRT); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] InteractLabelPanel.Tick: {ex.Message}"); }
+        try { _worldMarks.Tick(_hudRT); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] WorldMarksPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
+        try { _interactLabel.Tick(_hudRT); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] InteractLabelPanel.Tick: {ex.Message}"); }
 
-            try { _vrSettingsRT.Tick(_leftCam); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] VRSettingsRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
-            try { _looseCanvases.Tick(_leftCam); }
-            catch (Exception ex) { Log.LogWarning($"[VRCamera] LooseCanvasPanels.Tick: {ex.Message}"); }
-        }
+        try { _vrSettingsRT.Tick(_leftCam); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] VRSettingsRTPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
+        try { _looseCanvases.Tick(_leftCam); }
+        catch (Exception ex) { Log.LogWarning($"[VRCamera] LooseCanvasPanels.Tick: {ex.Message}"); }
 
         // F8: re-place the case board in front of the current head pose.
         if (Input.GetKeyDown(KeyCode.F8))
