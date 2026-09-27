@@ -218,10 +218,7 @@ This version is a rewrite of most of the mod, built on Blah64's OpenXR foundatio
 
 ## Known issues
 
-- Using Virtual Desktop's menu shortcut mid-game and coming back once left the headset black and
-  frozen (seen once, not reproduced). Restart the game if it happens.
-- Right after loading a save, there's a brief moment where you can see the world but can't move yet.
-- A faint grain is visible over the room shown on the pre-game screens and main menu.
+- blurry text in some menus.
 
 If something goes wrong, `BepInEx/LogOutput.log` (in the game folder) and
 `%USERPROFILE%\AppData\LocalLow\ColePowered Games\Shadows of Doubt\Player.log` are the logs to
@@ -245,7 +242,7 @@ attach to a bug report.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Original work © Blah64; changes in this version © Wes Jones.
+MIT, see [LICENSE](LICENSE). Original work © Blah64; changes in this version © Wesley.
 
 Third-party parts keep their own licenses (full texts in [licenses/](licenses/)):
 - `RuntimeDeps/Native/openxr_loader.dll`: the Khronos OpenXR Loader, Apache 2.0
