@@ -37,7 +37,7 @@ internal sealed class TooltipRTPanel
 
     // Dialogs (save/exit, tutorials) at the corkboard's scale fill much of the view in front of the
     // menu; crisp as layers, they read fine smaller.
-    private const float DialogScale = 0.6f;
+    private const float DialogScale = 0.5f;
 
     // Pulled toward the head off the surface the laser is on; tooltips furthest, so the menu they
     // describe never hides them.
