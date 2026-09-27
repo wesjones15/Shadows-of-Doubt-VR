@@ -64,7 +64,16 @@ Copy-Item "$Root\LICENSE" "$TmpDir\LICENSE"
 
 # ── 4. Zip ────────────────────────────────────────────────────────────────────
 if (Test-Path $ZipOut) { Remove-Item $ZipOut -Force }
-Compress-Archive -Path "$TmpDir\*" -DestinationPath $ZipOut
+# Not Compress-Archive: on PowerShell 5.1 it writes entry paths with backslashes, which other
+# extractors and mod managers take as part of the file name instead of folders.
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+$zip = [IO.Compression.ZipFile]::Open($ZipOut, [IO.Compression.ZipArchiveMode]::Create)
+try {
+    Get-ChildItem $TmpDir -Recurse -File | ForEach-Object {
+        $entry = $_.FullName.Substring($TmpDir.Length + 1).Replace('\', '/')
+        [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $_.FullName, $entry) | Out-Null
+    }
+} finally { $zip.Dispose() }
 
 Remove-Item $TmpDir -Recurse -Force
 
