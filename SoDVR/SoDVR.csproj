@@ -89,12 +89,12 @@
       <HintPath>$(InteropDir)\Unity.TextMeshPro.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="UnityEngine.TextCoreFontEngineModule">
-      <HintPath>$(InteropDir)\UnityEngine.TextCoreFontEngineModule.dll</HintPath>
+    <Reference Include="UnityEngine.TextRenderingModule">
+      <HintPath>$(InteropDir)\UnityEngine.TextRenderingModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="UnityEngine.ImageConversionModule">
-      <HintPath>$(InteropDir)\UnityEngine.ImageConversionModule.dll</HintPath>
+    <Reference Include="UnityEngine.TextCoreFontEngineModule">
+      <HintPath>$(InteropDir)\UnityEngine.TextCoreFontEngineModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="FMODUnity">
@@ -103,7 +103,7 @@
     </Reference>
   </ItemGroup>
 
-  <!-- Kenney's Input Prompts, Meta Quest set (CC0), for QuestGlyphs. -->
+  <!-- Kenney's Input Prompts, Meta Quest font and its character map (CC0), for QuestGlyphs. -->
   <ItemGroup>
     <EmbeddedResource Include="Assets\QuestGlyphs\*" LogicalName="QuestGlyphs.%(Filename)%(Extension)" />
   </ItemGroup>

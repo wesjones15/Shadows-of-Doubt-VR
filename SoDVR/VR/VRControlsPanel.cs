@@ -144,7 +144,7 @@ internal sealed class VRControlsPanel
 
     private void Rebuild(Page page, bool withButtons)
     {
-        bool glyphs = QuestGlyphs.Sprite("quest_button_a") != null;
+        bool glyphs = QuestGlyphs.Glyph("quest_button_a") != null;
         string key = $"{page}|{withButtons}|{MainHand.IsRight}|{VRSettings.ControlsInWorld}|{glyphs}";
         foreach (var hint in _live) key += $"|{string.Join("+", hint.Glyphs)} {hint.Text}";
         if (key == _built) return;
@@ -191,8 +191,8 @@ internal sealed class VRControlsPanel
     private RectTransform AddHintRow(ControlHint hint)
     {
         string tags = "";
-        foreach (var g in hint.Glyphs) tags += QuestGlyphs.Sprite(g) ?? "";
-        return AddRow(_box!, tags.Length > 0 ? $"{tags} {hint.Text}" : hint.Text);
+        foreach (var g in hint.Glyphs) tags += QuestGlyphs.Glyph(g) ?? "";
+        return AddRow(_box!, tags + hint.Text);
     }
 
     private void ToggleInWorld()
