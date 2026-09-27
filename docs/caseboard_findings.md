@@ -318,7 +318,7 @@ nested walk and the material patcher never touch it, even before the panel attac
 
 Each item: symptom → verified cause → fix. Commit hashes point at the change.
 
-**Clicks must arrive the way a mouse click does (`bd21454`).** The base mod's `InvokeButtonClick`
+**Clicks must arrive the way a mouse click does (`69061df`).** The base mod's `InvokeButtonClick`
 fires only a Button's persistent `onClick` listeners and, when there are any, sends no pointer
 click. The game's own `ButtonController.OnPointerClick` then never runs, and that is what calls
 `OnLeftClick` (overridden by `FactButtonController`, `ContextButtonController`, ...) and raises
@@ -330,30 +330,30 @@ module, with no `submit` (which ran `Button.Press` a second time) and no listene
 (the old code switched persistent listeners Off after invoking them). The game's `mouseInputMode`
 guard accepts these events. The legacy router still has the old behaviour (`pending_tasks.md` §7).
 
-**Projector precision (`3b292cf`).** Projectors parked at y=-10000 quantised canvas positions to
+**Projector precision (`86b05d3`).** Projectors parked at y=-10000 quantised canvas positions to
 about 2 px: the corkboard's vertical pan moved in steps, the 24 px note minus button failed its hit
 test, and open-note scroll content flipped a pixel every few frames. At -500 m it's gone. Note
-slots are also placed on whole units (`2f3a21b`), since a half-pixel window position flips too.
+slots are also placed on whole units (`cfdb734`), since a half-pixel window position flips too.
 
 **Cross-canvas position copies, and why projectors aren't shared.** In the flat game every canvas
 is one screen, and the game copies world positions between them: the pin quick-menu takes its
 pin's position (a CaseCanvas point), so on TooltipCanvas it landed about 93,000 units off the
-texture. Giving the screen-sized projectors one shared pose fixed that (`6fedc16`), but after a
+texture. Giving the screen-sized projectors one shared pose fixed that (`fc2b6a0`), but after a
 save load the pause menu and case board then took a long time to open (A/B confirmed by the user;
-mechanism never found), so it was reverted (`e821ed0`). Instead, an element drawn off the
+mechanism never found), so it was reverted (`10891db`). Instead, an element drawn off the
 TooltipCanvas texture is mapped through whichever RT projector sees it on its canvas plane to the
-same screen point on TooltipCanvas (`RTCanvasPanel.TryMapFromOtherScreen`, `4ee3141`). Context
+same screen point on TooltipCanvas (`RTCanvasPanel.TryMapFromOtherScreen`, `7ae2ea8`). Context
 menus opened by A are positioned for the OS cursor instead (logged at pixel x=-426, on no other
-panel's screen), so anything still off the texture is slid onto it (`4902946`). The views are
+panel's screen), so anything still off the texture is slid onto it (`1a55bc5`). The views are
 placed at the laser regardless; only the canvas position is corrected.
 
-**Zero z-scale breaks text under a perspective projector (`22990c7`).** The game scales the pin
+**Zero z-scale breaks text under a perspective projector (`159288a`).** The game scales the pin
 context menu `(1, 1, 0)`. On its overlay canvas that's inert, but our projectors are perspective
 cameras, and TextMeshPro's SDF shader then corrects each glyph by its surface normal, which a zero
 z-scale collapses: glyphs drew as solid blocks. Tooltip-canvas elements get z put back to 1 each
 frame.
 
-**Compositor order (`74c0f85`).** Panels are composited farthest-first by quad centre. A tooltip 5 cm
+**Compositor order (`ba83fd1`).** Panels are composited farthest-first by quad centre. A tooltip 5 cm
 in front of the navbar's edge can still be farther from the eye than the navbar's centre, so the
 navbar was drawn over it. TooltipCanvas views are now always drawn last, as the flat game's topmost
 canvas.
@@ -365,28 +365,28 @@ order, so anything the game layers underneath stays underneath. This explains di
 legacy when comparing the two.
 
 **Corkboard panning.** The board's `CustomScrollRect` doesn't move from drag events, so the trigger
-pan drives `ContentContainer.anchoredPosition` directly (`75131fc`) and keeps the cork covering the
-viewport, or centred when zoomed out (`a263adc`). The corkboard view shows the whole texture while
-the board is open (`ded64cb`): the usual "enough visible graphics" rule hid it when panned onto bare
+pan drives `ContentContainer.anchoredPosition` directly (`f95bb5f`) and keeps the cork covering the
+viewport, or centred when zoomed out (`b66df1a`). The corkboard view shows the whole texture while
+the board is open (`972512a`): the usual "enough visible graphics" rule hid it when panned onto bare
 cork, with no way back.
 
-**Visibility must count renderer alpha (`cea9827`).** The inventory fades out through each element's
+**Visibility must count renderer alpha (`5d8f344`).** The inventory fades out through each element's
 `CanvasRenderer.SetAlpha`, leaving colour and CanvasGroup alpha at 1, so its views showed black.
 
-**Custom links follow the laser (`8a2fbb4`).** The quick-menu's new link starts the game's
+**Custom links follow the laser (`c8e0608`).** The quick-menu's new link starts the game's
 `CasePanelController.CustomStringLink` coroutine, whose preview follows the OS mouse. The click is
 taken over and runs `CorkboardInput`'s own link instead, like the B-hold link.
 
 **Small targets.** A note's 24 px minus button gets a hit area as wide as the other buttons in its
-column (`raycastPadding`, `c1947cd`). Its hover corners match it through
+column (`raycastPadding`, `143c0ef`). Its hover corners match it through
 `ButtonController.additionalHighlightRectModifier`, which takes (left, bottom, right, top) with the
-same sign as `raycastPadding` (`31ea5ed`).
+same sign as `raycastPadding` (`e7704e8`).
 
 **Not causes.** Game-window OS focus had nothing to do with the post-load menu delay; the focus
-change was reverted (`51e69f3`).
+change was reverted (`9990167`).
 
 **Decided against: laying canvases out at 1920x1080.** The case-board canvases are laid out as a
 2560x1440 screen at scale 1, so edge-anchored parts spread wider than in a 1080p layout (the XP-bar
-gap). Separate inventory/XP views fixed that (`18c04ec`). A 1080 layout would only make the UI
+gap). Separate inventory/XP views fixed that (`b2e1964`). A 1080 layout would only make the UI
 1.33x bigger, not sharper — the texture already has about twice the pixels the headset shows at
 board distance. If text legibility ever matters, enlarge that panel's world size instead.

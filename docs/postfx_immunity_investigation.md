@@ -126,7 +126,7 @@ WorldSpace-canvas pipeline (RT panels didn't exist yet). **This is the direct an
 session's CustomPass investigation** — several root causes discovered here were independently
 re-discovered this session before this document's author found these commits.
 
-### 2a. First `CustomPassVolume` + `AfterPostProcess` attempt (`4862915`)
+### 2a. First `CustomPassVolume` + `AfterPostProcess` attempt (`bad0d53`)
 Global `CustomPassVolume` + `DrawRenderersCustomPass` at `CustomPassInjectionPoint.AfterPostProcess`,
 redrawing `UILayer`'s content after the post stack. Moved `UILayer` from 5 to 15 to avoid a collision
 with `VoidRoomController`'s takeover geometry. Confirmed via interop DLL reflection that the types
@@ -134,7 +134,7 @@ resolve before writing any code.
 
 **Result**: never actually tested in this commit — see 2b.
 
-### 2b. Second-camera-plus-blit (`a4d425a`)
+### 2b. Second-camera-plus-blit (`3b6a4f1`)
 In-headset test of 2a: **confirmed non-functional** — menus/hands still fully blurred with the DoF
 stopgap disabled. Deleted the CustomPass code outright rather than leave it alongside a replacement.
 Also reverted the layer-15 move: a full 0–31 layer audit showed layer 15 is `TextToImage`, a live
@@ -147,7 +147,7 @@ output via `Graphics.Blit` with the `UI/Default` shader, before the swapchain co
 
 **Result**: superseded by 2c the same day — see below.
 
-### 2c. Drop second camera, force `supportCustomPass` (`655f953`)
+### 2c. Drop second camera, force `supportCustomPass` (`837961e`)
 2b's blit didn't behave like a real alpha blend: PressAnyKey's translucent background came back
 fully opaque, other menus flickered, the game world stopped rendering. Root-caused (at the time) as
 `UI/Default`'s blend state depending on per-vertex color that `Graphics.Blit`'s implicit fullscreen
@@ -161,7 +161,7 @@ unmodified in its core shape — is still in the codebase today), now preceded b
 
 **Result**: still dead — see 2d, same day.
 
-### 2d. Second camera again, rendering directly into the shared eye RT (`58d2d2c`)
+### 2d. Second camera again, rendering directly into the shared eye RT (`e3b550a`)
 2c's `CustomPassVolume`, even with `supportCustomPass` forced, was confirmed dead via a magenta
 `overrideMaterial` diagnostic — **the exact same technique this session independently reinvented**
 before finding this commit. Tried a second camera again, but instead of a separate RT + blit,
@@ -175,14 +175,14 @@ This also retroactively explained the pre-project second-camera attempt's failur
 
 **Result**: introduced head-motion-linked ghosting — see 2e.
 
-### 2e. Ghosting → HDRP doesn't support camera stacking (`99010b1`)
+### 2e. Ghosting → HDRP doesn't support camera stacking (`bd01001`)
 Root-caused via diagnostic logging: pose/rotation/projection matrices were byte-identical between
 each eye's main and UI camera on every sampled frame, and the ghosting persisted regardless — **HDRP
 does not support camera stacking** (Unity's own documented pipeline limitation). "Two cameras
 contributing to one final image" is undefined behavior in this pipeline, not a settings bug reachable
 by configuration.
 
-Reverted to the exact pre-experiment state (`fdc72fa`) — one camera per eye, rendering everything
+Reverted to the exact pre-experiment state (`9d05012`) — one camera per eye, rendering everything
 directly, no UI camera, no CustomPass. **Pivoted to the RT-panel approach**: render UI to a texture
 via an independent, *non-stacked* camera, then display it on an ordinary quad the one real eye camera
 renders normally — this is Era 3.
@@ -204,7 +204,7 @@ unstable) — genuinely fixed, independent of the post-FX question, and reason e
 keep this architecture regardless of how the rest of this investigation resolves. Content-level
 immunity (crisp text, no stencil bleed) — also solid, same mechanism as Era 1.
 
-**The cursor was made genuinely immune** (commit `ad5d25c`) by drawing it as a UI `Image` on a second
+**The cursor was made genuinely immune** (commit `f209387`) by drawing it as a UI `Image` on a second
 `ScreenSpaceCamera` canvas sharing the panel's own projector camera — i.e., making it part of the
 panel's *pre-rendered pixels* rather than separate real-world geometry. This is the one piece of the
 interaction layer that achieved real display immunity, and it worked precisely because it never
@@ -252,8 +252,8 @@ without realizing it was the same code from Era 2.
    targeted the wrong type). `GetDefaultFrameSettings` is byref-returning — the same shape as
    `HDAdditionalCameraData.renderingPathCustomFrameSettings`, already proven earlier in this project
    to silently drop writes over the IL2CPP interop boundary. Fix: write through the backing-field
-   property (`m_RenderingPathDefaultCameraFrameSettings`) instead. (commit `3adda22`)
-2. **Expanded diagnostic** (commit `a3ada45`): confirmed the backing-field write *does* persist
+   property (`m_RenderingPathDefaultCameraFrameSettings`) instead. (commit `46dde55`)
+2. **Expanded diagnostic** (commit `939dda1`): confirmed the backing-field write *does* persist
    durably (`CustomPass` reads `True` via the backing field, both before and after, sticky across
    separate game sessions) — but `GetDefaultFrameSettings()` itself is an **unreliable read**: it
    flip-flopped on `Postprocess`, a bit known to be `True` (DoF visibly works), between two separate
@@ -261,17 +261,17 @@ without realizing it was the same code from Era 2.
 3. Confirmed `RenderPipelineSettings.supportCustomPass` is genuinely `True`, via both
    `currentPlatformRenderPipelineSettings` and the `m_RenderPipelineSettings` backing field,
    durable across sessions.
-4. **Magenta smoke test** (commit `86635cd`): pointed the existing dead pass's `overrideMaterial` at
+4. **Magenta smoke test** (commit `1b56042`): pointed the existing dead pass's `overrideMaterial` at
    an unmistakable magenta `Sprites/Default` material. Result: draws on PressAnyKey void-room
    content, but **not** on `MenuRTPanel`'s own quad, despite both being on the same shared `UILayer`.
    This proves `CustomPassVolume` *does* fire for these manually-rendered eye cameras (ruling out an
    earlier worry that `cam.enabled=false` + explicit `Camera.Render()` might skip injection points
    entirely) — the puzzle narrows to *why this one object* is excluded.
-5. **Periodic FrameSettings-bit tracker** (commit `94ed2fd`): tested a user hypothesis that something
+5. **Periodic FrameSettings-bit tracker** (commit `40c514f`): tested a user hypothesis that something
    resets the bits at the PressAnyKey→MainMenu scene transition. Logged the bits every frame via the
    reliable backing-field read; they never changed after the initial write at frame 0, across the
    whole session including a confirmed scene-handle change. **Ruled out.**
-6. **Shader-tag eligibility test** (commit `a0fc441`, reverted `1311e7b`): `DrawRenderersCustomPass`
+6. **Shader-tag eligibility test** (commit `9e17419`, reverted `387c48d`): `DrawRenderersCustomPass`
    has `forwardShaderTags`/`depthShaderTags`/`cachedShaderTagIDs` fields — it filters eligible
    renderers by matching the renderer's *own real* material's shader tags, separately from whatever
    `overrideMaterial` later draws with. `MenuRTPanel`'s quad uses `UI/Default`, a legacy pre-SRP
@@ -300,7 +300,7 @@ conflation — a genuine material-render-queue-based after-post-process path rea
 `HDRP/Unlit` eligibility for `DrawRenderersCustomPass` again, not the native queue mechanism. Caught
 and corrected mid-session.
 
-**Corrected test** (commit `bad627a`): kept the quad's existing, already-stable `UI/Default` material
+**Corrected test** (commit `876b3b9`): kept the quad's existing, already-stable `UI/Default` material
 entirely unchanged — only set its `renderQueue` to
 `HDRenderQueue.k_RenderQueue_AfterPostProcessTransparent.lowerBound` (resolved to `3600`, confirmed
 within the range `[3600, 3800]` — read via `RenderQueueRange.lowerBound`/`upperBound`, resolved
@@ -377,7 +377,7 @@ varied and what didn't:
 | 2a/2c/2d (Era 2) | `CustomPassVolume` @ `AfterPostProcess` | `UI/Default` (legacy WorldSpace canvas, pre-RT-panel) | `supportCustomPass` forced (2c), but the per-camera `CustomPass` FrameSettings bit was never found/fixed | Dead — never drew anything |
 | 4b.4 (magenta) | `CustomPassVolume` @ `AfterPostProcess` | `UI/Default` (MenuRTPanel quad) | Yes — both `supportCustomPass` and `CustomPass` bit confirmed | Fires (PressAnyKey content), but not this quad |
 | 4b.6 | `CustomPassVolume` @ `AfterPostProcess` | `HDRP/Unlit` (MenuRTPanel quad) | Yes | Crashed once; didn't work on the run that survived |
-| 4c (`bad627a`) | Native `HDRenderQueue.AfterPostProcess` | `UI/Default` (MenuRTPanel quad) | Yes — `AfterPostprocess` bit confirmed | renderQueue write confirmed; still blurry |
+| 4c (`876b3b9`) | Native `HDRenderQueue.AfterPostProcess` | `UI/Default` (MenuRTPanel quad) | Yes — `AfterPostprocess` bit confirmed | renderQueue write confirmed; still blurry |
 | 5 | Post-HDRP `CommandBuffer` draw into the eye RT (`PostFXOverlayCompositor`) | `UI/Default` | None needed — outside HDRP | Works — verified in headset |
 
 **Combinations never tried in Eras 2–4**: the native queue with `HDRP/Unlit`, a `BeforePostProcess`

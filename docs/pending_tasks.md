@@ -34,7 +34,7 @@ existing `EyeRenderState`/`TakeOverCameras` neutral-environment path in `VoidRoo
 
 Reported after the case-board RT migration (2026-09-24): the inventory's close X didn't show. The
 inventory has since become two views, `InventoryDisplayArea` and `SocialCreditArea`, placed side by
-side at the vanilla gap (`18c04ec`), and it closes instantly (`0f38248`); both confirmed in the
+side at the vanilla gap (`b2e1964`), and it closes instantly (`1ba6c32`); both confirmed in the
 headset. Whether the X now shows and works wasn't re-checked, and the X-specific diagnostics were
 removed in cleanup. If it's still missing, start from an F9 capture with the inventory open;
 content clipped at the texture edge is already ruled out.
