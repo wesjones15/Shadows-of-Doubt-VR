@@ -44,42 +44,53 @@ Any OpenXR runtime works — bindings are included for:
 
 ## Controls
 
-### Right controller
+### Main hand
+
+One hand points: its laser aims at menus and its dot at the world, its **trigger** interacts or
+clicks, its **grip** is the secondary interact (right mouse), and it holds your item. Pull the
+**other hand's trigger** to swap — that press only swaps, it doesn't click. The choice is saved
+(`Controls.MainHandRight`, or "Main Hand: Right" on the VR tab).
+
+### In the world
 
 | Input | Action |
 |-------|--------|
-| Trigger | UI click (point at a menu and pull) |
-| A button | Jump, or **right-click** when aiming at a canvas |
-| B button | **Hold** to show notebook / map (Tab held while B held) |
-| B button (controller behind shoulder) | Open inventory / backpack |
-| B button (drag while aiming at canvas) | Middle-click drag (pan map, scroll) |
-| Grip | Drag floating panels in 6DOF (notes, map, location details, bio) |
-| Thumbstick left/right | Snap turn (or smooth — configurable in VR Settings) |
-| Thumbstick up/down | Scroll (when VR Settings panel is open) |
-| Thumbstick click | Toggle flashlight |
+| Main trigger / main grip | Interact / secondary interact with what the dot is on |
+| Other hand's trigger | Swap main hand |
+| Left stick | Move (head-relative) |
+| Left stick click | Sprint toggle (stops when the stick returns to centre) |
+| Right stick left/right | Turn (snap or smooth — VR tab) |
+| Right stick click | Flashlight |
+| A | Jump |
+| X | Crouch |
+| B (hold) | Map, while held |
+| B with the right controller behind your right shoulder | Inventory |
+| Y (tap) | Case board |
+| Y (hold) | Radial menu — Inventory, Upgrades, Notebook, Map; aim with the left controller, release on one |
+| Menu button | Pause |
 
-### Left controller
+### Menus, case board and windows
 
 | Input | Action |
 |-------|--------|
-| Menu button | Pause menu (ESC) |
-| Y button | Alternate use / Use item (F) |
-| X button | Crouch toggle (C) |
-| Trigger | World interact — doors, objects, NPCs (aims from left controller) |
-| Grip | Right mouse button (pick up evidence, secondary interact) |
-| Thumbstick | Move player (head-relative direction) |
-| Thumbstick click | Sprint toggle (auto-stops when stick returns to centre) |
+| Main trigger | Click; drag to move pins, pan the board or map |
+| A | Context menu (pins, strings, the map) |
+| B (hold on a pin, release on another) | Link them with a string |
+| B | End a conversation |
+| Right stick up/down | Zoom the case board or map at the laser; scroll elsewhere |
+| Main grip (hold) | Move a window in 6DOF; the stick of that hand pushes / pulls it |
+| Main grip on the board's top bar | Move the case board |
+| Y (tap) | Close the case board |
 
-### Notes
+Windows remember where you put them ("Window Positions: Reset" on the VR tab).
 
-- **Sprint** holds Shift while active. Stops automatically when you release the left stick.
-- **B button map**: hold B to keep the map/notebook open; release B to close.
-  Right stick B-drag pans the map; trigger click opens evidence notes for locations.
-- **Backpack gesture**: with your right controller held behind your right shoulder
-  (like grabbing from a backpack), press B to open inventory.
-- **A button right-click** opens context menus on the case board and map.
-- **Right grip drag** repositions floating canvases in 6DOF. Positions are saved and
-  restored when the case board is reopened.
+### On-screen hints
+
+The game's key hints show Quest buttons instead of keys, and the trigger and grip glyphs follow
+the main hand. Under them, with the case board open, a **VR controls** list shows what the laser's
+target takes (a pin, a string, the map, a window to grab) and the mod's own controls, on a Menus
+and a World page. Its **Show in world** button (`HUD.ControlsInWorld`, or "Controls in World" on
+the VR tab) keeps the World page up while walking.
 
 ## VR Settings panel
 
