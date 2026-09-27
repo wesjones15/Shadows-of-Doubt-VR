@@ -18,7 +18,7 @@ This is a heavily reworked continuation of [Blah64's SoDVR](https://github.com/B
 - **Khronos Group** made the [OpenXR loader](https://github.com/KhronosGroup/OpenXR-SDK) that ships
   with the mod (Apache 2.0).
 - **ColePowered Games** made [Shadows of Doubt](https://store.steampowered.com/app/986130/Shadows_of_Doubt/).
-- This version by Wes Jones ([wesjones15](https://github.com/wesjones15)).
+- This version by Wesley ([wesjones15](https://github.com/wesjones15)).
 
 ## Tested on
 
