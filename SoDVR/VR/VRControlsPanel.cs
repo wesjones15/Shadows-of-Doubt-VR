@@ -10,11 +10,12 @@ namespace SoDVR.VR;
 /// <summary>
 /// The controls the mod adds, which the game's key hints can't show, listed under those hints in
 /// the same row style: with the case board open, a Menus page and a World page and a "Show in
-/// world" switch, and above them live rows for what the laser is on (a pin, a string, the map, a
-/// window to grab); in the world, when switched on, the World page alone. The rows are drawn on a
-/// canvas of our own and the view is posed as if they hung just under the key hints, so they move
-/// with them — folded beside the board, or on the walking sheet. With the board open it can be
-/// grip-dragged; the move is kept relative to that spot, so it holds in the world too.
+/// world" switch; in the world, when switched on, the World page alone. With the board open, live
+/// rows for what the laser is on (a pin, a string, the map, a window to grab) sit right under the
+/// key hints as a view of their own, and the panel below them. Both are drawn on a canvas of our
+/// own and posed as if they hung under the key hints, so they move with them — folded beside the
+/// board, or on the walking sheet. With the board open the panel (not the live rows) can be
+/// grip-dragged; the move is kept relative to its spot, so it holds in the world too.
 /// </summary>
 internal sealed class VRControlsPanel : IRTGripTarget
 {
@@ -31,6 +32,11 @@ internal sealed class VRControlsPanel : IRTGripTarget
     // Only if the game's row prefab has no height of its own (a layout sizes it).
     private const float RowHeightPerFontSize = 1.6f;
     private const float GripMargin = 1.1f;
+    // The live rows' own place on the canvas, clear of the panel's box (canvas units).
+    private const float LiveBoxX = 1200f;
+    // Room kept under the key hints for the live rows (at most three), so the panel's own spot
+    // doesn't move as they come and go.
+    private const int MaxLiveRows = 3;
 
     private enum Page { Menus, World }
 
@@ -39,6 +45,9 @@ internal sealed class VRControlsPanel : IRTGripTarget
     private RTPanelView? _view;
     private Canvas? _canvas;
     private RectTransform? _box;
+    private RTPanelView? _liveView;
+    private RectTransform? _liveBox;
+    private string? _liveBuilt;
     private Image? _rowBackground;
     private TextMeshProUGUI? _rowText;
     private float _rowHeight;
@@ -85,19 +94,18 @@ internal sealed class VRControlsPanel : IRTGripTarget
         bool settingsOpen = VRSettingsPanel.RootGO != null && VRSettingsPanel.RootGO.activeSelf;
         bool inWorld = !boardOpen && VRSettings.ControlsInWorld && hud.SheetPose != null;
         bool showing = hud.IsShowing && !settingsOpen && (boardOpen || inWorld);
-        if (!showing || HintsRect(hud) is not { } hints) { _view!.Visible = false; return; }
+        if (!showing || HintsRect(hud) is not { } hints) { _view!.Visible = false; _liveView!.Visible = false; return; }
 
-        // Kept while the laser is on this panel itself, so its tabs don't move out from under it.
-        if (!boardOpen || input.Focus != _view!.Pointer)
-        {
-            _live.Clear();
-            if (boardOpen) CollectLive(input);
-        }
+        _live.Clear();
+        if (boardOpen) CollectLive(input);
+        PlaceLive(hud, hints);
+
         Rebuild(boardOpen ? _page : Page.World, withButtons: boardOpen);
         var rect = _panel.ContentPixelRect(_box, 0f, out int count);
         if (count == 0) { _view!.Visible = false; return; }
         _view!.SetPixelRect(rect);
-        var under = new Rect(hints.xMax - rect.width, hints.yMin - GapPixels - rect.height, rect.width, rect.height);
+        float top = hints.yMin - GapPixels - LiveReservePixels;
+        var under = new Rect(hints.xMax - rect.width, top - rect.height, rect.width, rect.height);
         _view.Visible = hud.PlaceAt(_view, under);
         if (_view.Visible) ApplyLayout();
         // In the world it's only looked at: the laser and the world pointer pass through it.
@@ -107,6 +115,28 @@ internal sealed class VRControlsPanel : IRTGripTarget
         if (_loggedPlacement) return;
         _loggedPlacement = true;
         Log.LogInfo($"[VRControls] Under the key hints at {hints}: box {rect} posed as {under}.");
+    }
+
+    private float LiveReservePixels =>
+        (MaxLiveRows * (_rowHeight + RowGap) + SectionGap) * (_canvas != null ? _canvas.scaleFactor : 1f);
+
+    /// <summary>The live rows, right under the key hints like more of them; they don't move with
+    /// the panel.</summary>
+    private void PlaceLive(HudRTPanels hud, Rect hints)
+    {
+        var view = _liveView!;
+        string key = "";
+        foreach (var hint in _live) key += $"|{string.Join("+", hint.Glyphs)} {hint.Text}";
+        if (key != _liveBuilt)
+        {
+            _liveBuilt = key;
+            ClearChildren(_liveBox!);
+            StackRows(_liveBox!, _live.ConvertAll(hint => AddHintRow(_liveBox!, hint)));
+        }
+        var rect = _panel.ContentPixelRect(_liveBox, 0f, out int count);
+        if (count == 0) { view.Visible = false; return; }
+        view.SetPixelRect(rect);
+        view.Visible = hud.PlaceAt(view, new Rect(hints.xMax - rect.width, hints.yMin - GapPixels - rect.height, rect.width, rect.height));
     }
 
     /// <summary>Moves the panel from where the HUD put it to where it was dragged.</summary>
@@ -181,25 +211,16 @@ internal sealed class VRControlsPanel : IRTGripTarget
     {
         bool glyphs = QuestGlyphs.Glyph("quest_button_a") != null;
         string key = $"{page}|{withButtons}|{MainHand.IsRight}|{VRSettings.ControlsInWorld}|{glyphs}";
-        foreach (var hint in _live) key += $"|{string.Join("+", hint.Glyphs)} {hint.Text}";
         if (key == _built) return;
         _built = key;
 
-        // Unparented first: Destroy waits for the frame's end, and this frame's rect must not see them.
-        for (int i = _box!.childCount - 1; i >= 0; i--)
-        {
-            var old = _box.GetChild(i);
-            old.SetParent(null, false);
-            UnityEngine.Object.Destroy(old.gameObject);
-        }
+        ClearChildren(_box!);
         _clickMap.Clear();
 
         var rows = new List<RectTransform>();
-        foreach (var hint in _live) rows.Add(AddHintRow(hint));
-        int liveRows = rows.Count;
         if (withButtons)
         {
-            var bar = NewRect("Bar", _box);
+            var bar = NewRect("Bar", _box!);
             float x = 0f;
             x = AddButton(bar, "Menus", page == Page.Menus, x, () => _page = Page.Menus);
             x = AddButton(bar, "World", page == Page.World, x + RowGap, () => _page = Page.World);
@@ -208,26 +229,41 @@ internal sealed class VRControlsPanel : IRTGripTarget
             bar.sizeDelta = new Vector2(x, _rowHeight);
             rows.Add(bar);
         }
-        foreach (var hint in Hints(page)) rows.Add(AddHintRow(hint));
+        foreach (var hint in Hints(page)) rows.Add(AddHintRow(_box!, hint));
+        StackRows(_box!, rows);
+    }
 
-        // Right-aligned, top down, as the game stacks its hints; the live rows first, set apart.
+    /// <summary>Right-aligned, top down, as the game stacks its hints.</summary>
+    private static void StackRows(RectTransform box, List<RectTransform> rows)
+    {
         float width = 0f;
         foreach (var r in rows) width = Mathf.Max(width, r.sizeDelta.x);
         float y = 0f;
-        for (int i = 0; i < rows.Count; i++)
+        foreach (var r in rows)
         {
-            if (i == liveRows && i > 0) y += SectionGap;
-            rows[i].anchoredPosition = new Vector2(width - rows[i].sizeDelta.x, -y);
-            y += rows[i].sizeDelta.y + RowGap;
+            r.anchoredPosition = new Vector2(width - r.sizeDelta.x, -y);
+            y += r.sizeDelta.y + RowGap;
         }
-        _box.sizeDelta = new Vector2(width, y);
+        box.sizeDelta = new Vector2(width, y);
     }
 
-    private RectTransform AddHintRow(ControlHint hint)
+    /// <summary>Unparented first: Destroy waits for the frame's end, and this frame's rect must not
+    /// see the old rows.</summary>
+    private static void ClearChildren(Transform box)
+    {
+        for (int i = box.childCount - 1; i >= 0; i--)
+        {
+            var old = box.GetChild(i);
+            old.SetParent(null, false);
+            UnityEngine.Object.Destroy(old.gameObject);
+        }
+    }
+
+    private RectTransform AddHintRow(Transform box, ControlHint hint)
     {
         string tags = "";
         foreach (var g in hint.Glyphs) tags += QuestGlyphs.Glyph(g) ?? "";
-        return AddRow(_box!, tags + hint.Text);
+        return AddRow(box, tags + hint.Text);
     }
 
     private void ToggleInWorld()
@@ -325,7 +361,12 @@ internal sealed class VRControlsPanel : IRTGripTarget
             _box.anchoredPosition = new Vector2(GapPixels, -GapPixels);
             _view = _panel.CreateView("Controls", HandleClick);
             _view.Visible = false;
+            _liveBox = NewRect("Live", _canvas.transform);
+            _liveBox.anchoredPosition = new Vector2(LiveBoxX, -GapPixels);
+            _liveView = _panel.CreateView("Live", interactive: false);
+            _liveView.Visible = false;
             _built = null;
+            _liveBuilt = null;
             Log.LogInfo($"[VRControls] Built on its own RT panel: row '{prefab.name}' height {_rowHeight:F0}, " +
                         $"background '{_rowBackground.sprite?.name}' {_rowBackground.color}, font '{_rowText.font?.name}' {_rowText.fontSize:F0}.");
         }
@@ -371,6 +412,9 @@ internal sealed class VRControlsPanel : IRTGripTarget
         _canvas = null;
         _view = null;
         _box = null;
+        _liveView = null;
+        _liveBox = null;
+        _liveBuilt = null;
         _built = null;
         _lastHintsRect = null;
         Log.LogInfo("[VRControls] Torn down (scene reload?) — will rediscover.");
