@@ -61,6 +61,7 @@ Copy-Item $LoaderDll  "$TmpDir\BepInEx\patchers\SoDVR\RuntimeDeps\Native\openxr_
 Copy-Item $ConfigFile "$TmpDir\BepInEx\config\com.sodvr.mod.cfg"
 Copy-Item "$Root\README.md" "$TmpDir\README.md"
 Copy-Item "$Root\LICENSE" "$TmpDir\LICENSE"
+Copy-Item "$Root\licenses" "$TmpDir\licenses" -Recurse
 
 # ── 4. Zip ────────────────────────────────────────────────────────────────────
 if (Test-Path $ZipOut) { Remove-Item $ZipOut -Force }

@@ -23,6 +23,11 @@ SOFTWARE.
 
 ---
 
+Third-party components, each under its own license (full texts in licenses/):
+
 RuntimeDeps/Native/openxr_loader.dll is the Khronos OpenXR Loader,
-licensed under the Apache License 2.0.
+licensed under the Apache License 2.0 (licenses/OpenXR-Loader-Apache-2.0.txt).
 Source: https://github.com/KhronosGroup/OpenXR-SDK
+
+SoDVR/Assets/QuestGlyphs contains Kenney's Input Prompts (www.kenney.nl),
+released under CC0 1.0 (licenses/Kenney-Input-Prompts-CC0.txt).
