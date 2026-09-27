@@ -89,17 +89,18 @@ internal sealed class RTPanelInput
 
         var ray = new Ray(hand.transform.position, hand.transform.forward);
         bool triggerHeld = useRightHand ? rightTrigger : leftTrigger;
+        // A and B are the right controller's, but act on the laser's target whichever hand aims it.
         var input = new RTPointerInput(
             ray,
             press: !MainHand.SwappedThisFrame && (useRightHand ? rightEdge : leftEdge),
             held: triggerHeld,
             release: useRightHand ? rightRelease : leftRelease,
-            secondaryClick: useRightHand && aEdge,
+            secondaryClick: aEdge,
             scroll: ReadScroll(),
             rightHand: useRightHand,
-            altPress: useRightHand && bEdge,
-            altHeld: useRightHand && bNow,
-            altRelease: useRightHand && bRelease);
+            altPress: bEdge,
+            altHeld: bNow,
+            altRelease: bRelease);
 
         if (_captured != null)
         {
