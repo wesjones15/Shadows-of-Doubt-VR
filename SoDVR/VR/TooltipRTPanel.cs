@@ -35,6 +35,10 @@ internal sealed class TooltipRTPanel
     // size relative to the pins they belong to.
     private const float ScreenWorldWidth = 2.5f;
 
+    // Dialogs (save/exit, tutorials) at the corkboard's scale fill much of the view in front of the
+    // menu; crisp as layers, they read fine smaller.
+    private const float DialogScale = 0.6f;
+
     // Pulled toward the head off the surface the laser is on; tooltips furthest, so the menu they
     // describe never hides them.
     private const float MenuLift = 0.03f;
@@ -194,6 +198,7 @@ internal sealed class TooltipRTPanel
             _ => null,
         };
         var view = _panel.CreateView(name, onBeforeClick);
+        if (kind == Kind.Dialog) view.Scale = DialogScale;
         bool isContextMenu = kind == Kind.Menu && name.StartsWith(ContextMenuPrefix, StringComparison.Ordinal);
         bool draggable = kind == Kind.Dialog || isContextMenu;
         var e = new Element(kind, root, view, draggable) { IsContextMenu = isContextMenu };
