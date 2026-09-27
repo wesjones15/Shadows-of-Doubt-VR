@@ -15,10 +15,13 @@ internal sealed class InteractLabelPanel
     private static ManualLogSource Log => Plugin.Log;
 
     public const string CanvasName = "SoDVR_InteractLabelCanvas";
-    private static readonly Vector2Int SheetSize = new(1024, 512);
+    // Twice the HUD's size, so the button glyphs read at a glance; drawn at that size, not stretched.
+    private const float LabelScale = 2f;
+    private static readonly Vector2Int SheetSize = new(2048, 1024);
     private const int DiscoveryRetryFrames = 90;
     private const float MarginPixels = 8f;
-    private const float AboveHitMeters = 0.08f;
+    // Between the hit point and the label's bottom edge.
+    private const float AboveHitMeters = 0.04f;
     private const float NameFontSize = 42f;
     private const float ActionsFontSize = 26f;
     // Room for most names on one line; longer ones wrap.
@@ -61,12 +64,12 @@ internal sealed class InteractLabelPanel
         if (count == 0) { _view.Visible = false; return; }
         _view.SetPixelRect(rect);
 
-        var position = l.point + Vector3.up * AboveHitMeters;
         var headPos = head.transform.position;
         // A menu or the board in front of it covers it, as it covers the world behind.
-        if (RTCanvasPanel.IsBehindInteractivePanel(headPos, position)) { _view.Visible = false; return; }
-        float distance = Mathf.Max(0.3f, Vector3.Distance(headPos, position));
+        if (RTCanvasPanel.IsBehindInteractivePanel(headPos, l.point)) { _view.Visible = false; return; }
+        float distance = Mathf.Max(0.3f, Vector3.Distance(headPos, l.point));
         _view.Scale = HudRTPanels.SheetMetersPerPixelAt(distance, Screen.width) * _gameScaleFactor / _panel.MetersPerPixel;
+        var position = l.point + Vector3.up * (AboveHitMeters + 0.5f * _view.WorldSize.y);
         _view.SetPose(position, Quaternion.LookRotation(position - headPos));
         _view.Visible = true;
     }
@@ -86,6 +89,7 @@ internal sealed class InteractLabelPanel
             root.AddComponent<CanvasScaler>();
             var box = GameFrameBox.TryCreate(root.transform, _layer, NameFontSize, ActionsFontSize, MaxTextWidth);
             if (box == null) { UnityEngine.Object.Destroy(root); return; }
+            box.Root.transform.localScale = Vector3.one * LabelScale;
 
             _panel.AttachSheet(canvas, HudRTPanels.ScreenWorldWidth / SheetSize.x, SheetSize, transparent: true);
             _view = _panel.CreateView("Label", interactive: false);
