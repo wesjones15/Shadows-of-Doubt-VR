@@ -9,6 +9,9 @@ namespace SoDVR.VR;
 /// </summary>
 internal enum PanelLayer
 {
+    /// <summary>Marks tied to things in the world (objective pointers, speech bubbles, reaction
+    /// indicators): under all screen UI, as the flat game draws them.</summary>
+    World,
     Normal,
     /// <summary>The pause/main menu: over the case board and everything else in the scene.</summary>
     Menu,

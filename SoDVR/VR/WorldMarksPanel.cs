@@ -54,7 +54,7 @@ internal sealed class WorldMarksPanel
 
     public WorldMarksPanel(int quadLayer, RTPanelInput input)
     {
-        _panel = new RTCanvasPanel("WorldMarks", quadLayer, input);
+        _panel = new RTCanvasPanel("WorldMarks", quadLayer, input, PanelLayer.World);
     }
 
     public void Tick(HudRTPanels hud)

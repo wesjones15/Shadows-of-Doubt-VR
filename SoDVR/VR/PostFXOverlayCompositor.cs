@@ -47,7 +47,7 @@ internal sealed class PostFXOverlayCompositor
     // one destroyed mesh makes DrawMesh throw away the whole overlay — every panel — each frame it's drawn.
     private const HideFlags KeepAcrossLoads = HideFlags.DontUnloadUnusedAsset;
 
-    private readonly List<OverlayDraw>[] _bands = { new(), new(), new() };
+    private readonly List<OverlayDraw>[] _bands = { new(), new(), new(), new() };
     private readonly List<OverlayDraw> _panels = new();
     private bool _ordered;
     private readonly List<Matrix4x4> _lasers = new();
