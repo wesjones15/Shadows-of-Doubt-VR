@@ -854,22 +854,25 @@ public static class OpenXRManager
             Marshal.WriteInt32(vcvBuf + vcvSz,  0, 41);
             rc = Marshal.GetDelegateForFunctionPointer<XrEnumViewConfigViewsDelegate>
                 (_pfnEnumViewConfigViews)(_instance, _systemId, 2 /*PRIMARY_STEREO*/, 2, out uint vcvCount, vcvBuf);
-            int recW = 0, recH = 0;
+            int recW = 0, recH = 0, maxW = 0, maxH = 0;
             if (rc == 0 && vcvCount >= 1)
             {
                 recW = Marshal.ReadInt32(vcvBuf, 16); // recommendedImageRectWidth
+                maxW = Marshal.ReadInt32(vcvBuf, 20); // maxImageRectWidth
                 recH = Marshal.ReadInt32(vcvBuf, 24); // recommendedImageRectHeight
-                Log.LogInfo($"  Eye recommended: {recW}x{recH}");
+                maxH = Marshal.ReadInt32(vcvBuf, 28); // maxImageRectHeight
+                Log.LogInfo($"  Eye recommended: {recW}x{recH} (max {maxW}x{maxH})");
             }
             Marshal.FreeHGlobal(vcvBuf);
             if (recW == 0) { recW = 1832; recH = 1920; Log.LogWarning($"  Fallback eye res {recW}x{recH}"); }
 
-            // Scale down from native headset resolution to reduce GPU/VRAM load.
-            // The OpenXR compositor upscales to fill the display. 0.7 ≈ 50% of pixels.
-            const float RenderScale = 0.7f;
-            int scaledW = ((int)(recW * RenderScale) + 1) & ~1; // round to even
-            int scaledH = ((int)(recH * RenderScale) + 1) & ~1;
-            Log.LogInfo($"  Render scale {RenderScale}: {recW}x{recH} → {scaledW}x{scaledH}");
+            // The compositor scales the eye images to fill the display either way.
+            float renderScale = SoDVR.VR.VRSettings.RenderScale;
+            int scaledW = ((int)(recW * renderScale) + 1) & ~1; // round to even
+            int scaledH = ((int)(recH * renderScale) + 1) & ~1;
+            if (maxW > 0) scaledW = Math.Min(scaledW, maxW & ~1);
+            if (maxH > 0) scaledH = Math.Min(scaledH, maxH & ~1);
+            Log.LogInfo($"  Render scale {renderScale}: {recW}x{recH} → {scaledW}x{scaledH}");
             SwapchainWidth  = scaledW;
             SwapchainHeight = scaledH;
 

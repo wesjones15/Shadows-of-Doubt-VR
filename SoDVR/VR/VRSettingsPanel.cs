@@ -56,6 +56,7 @@ public static class VRSettingsPanel
     private static readonly float[] SprintOptions      = { 1.4f, 1.8f, 2.5f, 3f };
     private static readonly float[] HudSizeOptions     = { 0.6f, 0.75f, 0.9f, 1f, 1.1f, 1.25f, 1.5f };
     private static readonly float[] HudHeightOptions   = { -0.3f, -0.2f, -0.15f, -0.1f, 0f, 0.1f, 0.2f, 0.3f };
+    private static readonly float[] RenderScaleOptions = { 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1f, 1.2f, 1.4f };
 
     public static GameObject?    RootGO { get; private set; }
     /// <summary>The panel itself, centred on its screen-sized canvas.</summary>
@@ -346,6 +347,9 @@ public static class VRSettingsPanel
         ConfigFloat(t, "HUD Distance", VRSettings.HudDistanceEntry, DistanceOptions, v => $"{v:F1} m");
         ConfigFloat(t, "HUD Size", VRSettings.HudSizeEntry, HudSizeOptions, v => $"{v:0.##}×");
         ConfigFloat(t, "HUD Height", VRSettings.HudVerticalOffsetEntry, HudHeightOptions, v => $"{v:+0.00;-0.00;0} m");
+
+        SectionHeader(t, "─── RENDERING · NEXT LAUNCH ───");
+        ConfigFloat(t, "Render Scale", VRSettings.RenderScaleEntry, RenderScaleOptions, v => $"{v:0.0}×");
     }
 
     // ── Rows ──────────────────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ internal static class VRSettings
     private static ConfigEntry<float>? s_hudDistance;
     private static ConfigEntry<float>? s_hudSize;
     private static ConfigEntry<float>? s_hudVerticalOffset;
+    private static ConfigEntry<float>? s_renderScale;
 
     public static void Bind(ConfigFile config)
     {
@@ -50,6 +51,10 @@ internal static class VRSettings
             "HUD size: 1 spans about 60 degrees of view, 0.75 is smaller, 1.25 larger.");
         s_hudVerticalOffset = config.Bind("HUD", "VerticalOffset", -0.15f,
             "Height of the HUD's centre relative to the eyes, in metres (negative is lower).");
+
+        s_renderScale = config.Bind("Rendering", "RenderScale", 0.7f,
+            "Eye resolution as a fraction of what the headset asks for (1 = full; above 1 supersamples). " +
+            "Higher is sharper, panel edges included, and costs more GPU. Applies on the next launch.");
     }
 
     public static bool SmoothTurn => s_smoothTurn!.Value;
@@ -63,6 +68,7 @@ internal static class VRSettings
     public static float HudDistance => s_hudDistance!.Value;
     public static float HudSize => s_hudSize!.Value;
     public static float HudVerticalOffset => s_hudVerticalOffset!.Value;
+    public static float RenderScale => s_renderScale!.Value;
 
     // The entries themselves, for the VR tab: it edits pending values and resets to their defaults.
     public static ConfigEntry<bool> SmoothTurnEntry => s_smoothTurn!;
@@ -76,4 +82,5 @@ internal static class VRSettings
     public static ConfigEntry<float> HudDistanceEntry => s_hudDistance!;
     public static ConfigEntry<float> HudSizeEntry => s_hudSize!;
     public static ConfigEntry<float> HudVerticalOffsetEntry => s_hudVerticalOffset!;
+    public static ConfigEntry<float> RenderScaleEntry => s_renderScale!;
 }
