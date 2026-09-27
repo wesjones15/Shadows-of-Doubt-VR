@@ -43,6 +43,10 @@ internal sealed class PostFXOverlayCompositor
     private const float LaserEndWidth = 0.0008f;
     private static readonly Color LaserColor = new(0f, 1f, 1f, 1f);
 
+    // Nothing in the scene references these, so a save load's asset unload would destroy them, and
+    // one destroyed mesh makes DrawMesh throw away the whole overlay — every panel — each frame it's drawn.
+    private const HideFlags KeepAcrossLoads = HideFlags.DontUnloadUnusedAsset;
+
     private readonly List<OverlayDraw>[] _layers = { new(), new(), new() };
     private readonly List<Matrix4x4> _lasers = new();
     private readonly List<(Matrix4x4 transform, Material material)> _dots = new();
@@ -123,10 +127,10 @@ internal sealed class PostFXOverlayCompositor
             Log.LogWarning("[PostFXOverlay] UI/Default not found; laser disabled");
             return false;
         }
-        _laserMaterial = new Material(shader) { name = "SoDVR_OverlayLaserMat", color = LaserColor };
+        _laserMaterial = new Material(shader) { name = "SoDVR_OverlayLaserMat", color = LaserColor, hideFlags = KeepAcrossLoads };
 
         float s = LaserStartWidth * 0.5f, e = LaserEndWidth * 0.5f;
-        _laserMesh = new Mesh { name = "SoDVR_OverlayLaserMesh" };
+        _laserMesh = new Mesh { name = "SoDVR_OverlayLaserMesh", hideFlags = KeepAcrossLoads };
         _laserMesh.vertices = new[]
         {
             new Vector3(-s, 0f, 0f), new Vector3(s, 0f, 0f), new Vector3(e, 0f, 1f), new Vector3(-e, 0f, 1f),
@@ -148,7 +152,7 @@ internal sealed class PostFXOverlayCompositor
         var shader = Shader.Find("UI/Default");
         if (shader == null) return null;
         _dotMesh ??= BuildDisc();
-        material = new Material(shader) { name = "SoDVR_OverlayDotMat", color = colour };
+        material = new Material(shader) { name = "SoDVR_OverlayDotMat", color = colour, hideFlags = KeepAcrossLoads };
         _dotMaterials[colour] = material;
         return material;
     }
@@ -170,7 +174,7 @@ internal sealed class PostFXOverlayCompositor
             triangles[i * 3 + 1] = i + 1;
             triangles[i * 3 + 2] = (i + 1) % segments + 1;
         }
-        var mesh = new Mesh { name = "SoDVR_OverlayDotMesh" };
+        var mesh = new Mesh { name = "SoDVR_OverlayDotMesh", hideFlags = KeepAcrossLoads };
         mesh.vertices = vertices;
         mesh.uv = new Vector2[segments + 1];
         mesh.colors = colours;
