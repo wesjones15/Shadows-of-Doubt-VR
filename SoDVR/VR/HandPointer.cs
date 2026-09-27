@@ -83,8 +83,8 @@ internal sealed class HandPointer
         if (!inReach) return;
 
         string name = ObjectName(ic!);
-        string actions = CurrentActions();
-        AimTarget = actions.Length > 0 ? $"'{ic!.name}' labelled {name} | {actions}" : $"'{ic!.name}' labelled {name}";
+        var (actions, plain) = CurrentActions();
+        AimTarget = plain.Length > 0 ? $"'{ic!.name}' labelled {name} | {plain}" : $"'{ic!.name}' labelled {name}";
         Label = (name, actions, hit.point);
     }
 
@@ -136,24 +136,33 @@ internal sealed class HandPointer
     }
 
     /// <summary>The game's current interactions follow Camera.main, which is aimed with this hand —
-    /// so these are the actions for what the hand points at.</summary>
-    private static string CurrentActions()
+    /// so these are the actions for what the hand points at. Each is shown after its button's glyph,
+    /// the one the key hints show (<see cref="QuestGlyphs"/>); <c>plain</c> is for the log.</summary>
+    private static (string shown, string plain) CurrentActions()
     {
-        string actions = "";
+        string shown = "", plain = "";
         try
         {
             var interactions = InteractionController.Instance?.currentInteractions;
-            if (interactions == null) return "";
+            if (interactions == null) return ("", "");
+            var hints = ControlsDisplayController.Instance;
             foreach (var kvp in interactions)
             {
                 var setting = kvp.Value?.currentSetting;
                 if (setting == null || !setting.enabled || !setting.display) continue;
                 string text = kvp.Value!.actionText ?? "";
                 if (text.Length == 0) continue;
-                actions = actions.Length > 0 ? $"{actions} | {text}" : text;
+                string glyph = "";
+                if (hints != null)
+                {
+                    string icon = hints.GetControlIcon(kvp.Key, out _, out bool found);
+                    if (found && !string.IsNullOrEmpty(icon)) glyph = icon + " ";
+                }
+                shown = shown.Length > 0 ? $"{shown}   {glyph}{text}" : glyph + text;
+                plain = plain.Length > 0 ? $"{plain} | {text}" : text;
             }
         }
         catch (Exception) { }
-        return actions;
+        return (shown, plain);
     }
 }
