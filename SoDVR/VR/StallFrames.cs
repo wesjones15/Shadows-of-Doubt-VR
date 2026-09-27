@@ -93,7 +93,7 @@ internal static class StallFrames
     }
 
     /// <summary>One quad layer, in the OpenXR reference space; layers draw in index order. Main thread, under Gate.</summary>
-    public static void SetLayer(int index, ulong swapchain, int width, int height, Quaternion xrOrientation, Vector3 xrPosition, Vector2 size)
+    public static void SetLayer(int index, ulong swapchain, RectInt imageRect, Quaternion xrOrientation, Vector3 xrPosition, Vector2 size)
     {
         EnsureBuffers();
         IntPtr q = _quads + index * QuadSize;
@@ -101,8 +101,10 @@ internal static class StallFrames
         Marshal.WriteInt32(q, 0, XR_TYPE_COMPOSITION_LAYER_QUAD);
         Marshal.WriteInt64(q, 24, (long)OpenXRManager.ReferenceSpace);
         Marshal.WriteInt64(q, 40, (long)swapchain);
-        Marshal.WriteInt32(q, 56, width);
-        Marshal.WriteInt32(q, 60, height);
+        Marshal.WriteInt32(q, 48, imageRect.x);
+        Marshal.WriteInt32(q, 52, imageRect.y);
+        Marshal.WriteInt32(q, 56, imageRect.width);
+        Marshal.WriteInt32(q, 60, imageRect.height);
         WriteFloat(q, 72, xrOrientation.x);
         WriteFloat(q, 76, xrOrientation.y);
         WriteFloat(q, 80, xrOrientation.z);

@@ -64,7 +64,7 @@ internal sealed class StallCube
                     var face = FaceRotations[i];
                     var orientation = CameraRig.XrQuadOrientation(face * Vector3.right, face * Vector3.up, face * Vector3.back);
                     var position = leftPose.Position + CameraRig.RigToXr(face * Vector3.forward) * Distance;
-                    StallFrames.SetLayer(i, _swapchains[i], FaceSize, FaceSize, orientation, position, FaceWorldSize);
+                    StallFrames.SetLayer(i, _swapchains[i], new RectInt(0, 0, FaceSize, FaceSize), orientation, position, FaceWorldSize);
                 }
             }
             if (!HasCapture) Log.LogInfo("[StallCube] First capture of the void room.");

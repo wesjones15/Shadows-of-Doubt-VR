@@ -71,9 +71,9 @@ internal sealed class MenuRTPanel
     /// </summary>
     public bool IsInteractable => _quadGO != null && _quadGO.activeSelf;
 
-    /// <summary>The panel's texture and quad while it's up (the menus and the loading screen).</summary>
-    public (RenderTexture texture, Transform quad)? View =>
-        IsInteractable && _rt != null ? (_rt, _quadGO!.transform) : null;
+    /// <summary>The panel's image while it's up (the menus and the loading screen).</summary>
+    public PanelImage? Image =>
+        IsInteractable && _rt != null ? new PanelImage(_rt, _quadGO!.transform, new Rect(0f, 0f, _rt.width, _rt.height)) : null;
 
     /// <summary>
     /// True while MenuCanvas is actually showing the main menu or the pause menu, as opposed to

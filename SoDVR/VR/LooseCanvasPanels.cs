@@ -63,6 +63,17 @@ internal sealed class LooseCanvasPanels
         }
     }
 
+    /// <summary>The first loose panel that's showing (the press-any-key screen, before the menu).</summary>
+    public PanelImage? ShowingImage
+    {
+        get
+        {
+            foreach (var panel in _panels.Values)
+                if (panel.Image is { } image) return image;
+            return null;
+        }
+    }
+
     public void Tick(Camera? head)
     {
         if (--_discoveryCountdown <= 0)
@@ -179,6 +190,9 @@ internal sealed class LooseCanvasPanels
             _owner._grip.Register(this);
             Log.LogInfo($"[LooseCanvas] '{_name}' on its own RT panel.");
         }
+
+        public PanelImage? Image =>
+            _view != null && _view.Visible && _panel.Texture != null ? new PanelImage(_panel.Texture, _view.Transform, _view.PixelRect) : null;
 
         public void Render() => _panel.Render();
         public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay);

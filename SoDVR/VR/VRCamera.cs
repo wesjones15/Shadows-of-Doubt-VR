@@ -808,7 +808,7 @@ public class VRCamera : MonoBehaviour
             if (voidMode)
             {
                 _stallCube.Refresh(_cameraOffset, _leftCam, _leftEye);
-                _stallPanel.Refresh(_cameraOffset, _menuRTPanel.View);
+                _stallPanel.Refresh(_cameraOffset, _menuRTPanel.Image ?? _looseCanvases.ShowingImage);
             }
 
             HangWatch.Mark("swapchain copy");
