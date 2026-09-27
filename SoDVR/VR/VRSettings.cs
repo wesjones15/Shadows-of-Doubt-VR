@@ -16,6 +16,7 @@ internal static class VRSettings
     private static ConfigEntry<float>? s_sprintMultiplier;
     private static ConfigEntry<float>? s_jumpSpeed;
     private static ConfigEntry<float>? s_gravity;
+    private static ConfigEntry<bool>? s_fallKnockdown;
     private static ConfigEntry<bool>? s_worldLaser;
     private static ConfigEntry<bool>? s_mainHandRight;
     private static ConfigEntry<float>? s_menuDistance;
@@ -43,6 +44,9 @@ internal static class VRSettings
             "Upward speed of a jump in metres per second.");
         s_gravity = config.Bind("Movement", "Gravity", 15f,
             "Downward acceleration in metres per second squared.");
+        s_fallKnockdown = config.Bind("Movement", "FallKnockdown", true,
+            "A fall that hurts knocks you down as in the flat game: the view drops to the floor and " +
+            "gets back up. Off: the same damage without the view moving.");
 
         s_worldLaser = config.Bind("Controls", "WorldLaser", false,
             "Draw a pointer line from the main hand into the world.");
@@ -76,6 +80,7 @@ internal static class VRSettings
     public static float SprintMultiplier => s_sprintMultiplier!.Value;
     public static float JumpSpeed => s_jumpSpeed!.Value;
     public static float Gravity => s_gravity!.Value;
+    public static bool FallKnockdown => s_fallKnockdown!.Value;
     public static bool WorldLaser => s_worldLaser!.Value;
     public static bool MainHandRight => s_mainHandRight!.Value;
     public static float MenuDistance => s_menuDistance!.Value;
@@ -94,6 +99,7 @@ internal static class VRSettings
     public static ConfigEntry<float> SprintMultiplierEntry => s_sprintMultiplier!;
     public static ConfigEntry<float> JumpSpeedEntry => s_jumpSpeed!;
     public static ConfigEntry<float> GravityEntry => s_gravity!;
+    public static ConfigEntry<bool> FallKnockdownEntry => s_fallKnockdown!;
     public static ConfigEntry<bool> WorldLaserEntry => s_worldLaser!;
     public static ConfigEntry<bool> MainHandRightEntry => s_mainHandRight!;
     public static ConfigEntry<float> MenuDistanceEntry => s_menuDistance!;

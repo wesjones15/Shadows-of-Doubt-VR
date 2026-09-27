@@ -338,6 +338,7 @@ public static class VRSettingsPanel
         ConfigFloat(t, "Sprint Multi", VRSettings.SprintMultiplierEntry, SprintOptions, v => $"{v}×");
         ConfigFloat(t, "Jump Speed", VRSettings.JumpSpeedEntry, JumpSpeedOptions, v => $"{v} m/s");
         ConfigFloat(t, "Gravity", VRSettings.GravityEntry, GravityOptions, v => $"{v} m/s²");
+        ConfigToggle(t, "Fall Knockdown", VRSettings.FallKnockdownEntry);
 
         SectionHeader(t, "─── CONTROLS ───");
         ConfigToggle(t, "Main Hand: Right", VRSettings.MainHandRightEntry);

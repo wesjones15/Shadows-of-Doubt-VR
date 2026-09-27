@@ -105,14 +105,15 @@ internal sealed class FallDamage
         string trip = "none";
         if (damage > 0f)
         {
-            player.Trip(damage, true, false);
+            Trip(player, damage, true);
             trip = "fall";
         }
         else if (StatusController.Instance.tripChanceDrunk > Rand())
         {
-            player.Trip(Toolbox.Instance.Rand(DrunkTripMinDamage, DrunkTripMaxDamage, false), Rand() < 0.5f, false);
+            Trip(player, Toolbox.Instance.Rand(DrunkTripMinDamage, DrunkTripMaxDamage, false), Rand() < 0.5f);
             trip = "drunk";
         }
+        if (trip != "none" && !VRSettings.FallKnockdown) trip += " (no knockdown)";
 
         bool shafted = _fallCount >= (PathFinder.Instance.nodeSize.z * ShaftedFloors - 1f) * FallCountPerMetre
                        && AchievementsController.Instance != null
@@ -123,6 +124,23 @@ internal sealed class FallDamage
         if (_fallCount >= ImpactSoundFallCount || trip != "none")
             Log.LogInfo($"[FallDamage] Landed: fallCount={_fallCount:F2} damage={damage:F2} brokeLeg={brokeLeg} " +
                         $"trip={trip} shafted={shafted}");
+    }
+
+    /// <summary>Player.Trip, or with the comfort setting off, Trip's own steps without its knockdown
+    /// transition (the view dropping to the floor): the same guards, interaction cleared, health
+    /// taken.</summary>
+    private static void Trip(Player player, float damage, bool forwards)
+    {
+        if (VRSettings.FallKnockdown)
+        {
+            player.Trip(damage, forwards, false);
+            return;
+        }
+        if (player.transitionActive || player.isAsleep || player.inAirVent || player.spawnProtection > 0f
+            || player.isCrouched)
+            return;
+        player.SetInteracting(null);
+        player.AddHealth(-damage, false, true);
     }
 
     private static float Rand() => Toolbox.Instance.Rand(0f, 1f, false);
