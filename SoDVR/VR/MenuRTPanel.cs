@@ -56,6 +56,7 @@ internal sealed class MenuRTPanel
         _quadLayer = quadLayer;
         _onSaveLoadButtonClicked = onSaveLoadButtonClicked;
         _pointer = new RTPanelPointer("MenuRTPanel", OnBeforeClick);
+        _pointer.Layer = PanelLayer.Menu;
         input.Register(_pointer);
     }
 
@@ -172,7 +173,7 @@ internal sealed class MenuRTPanel
     public void AppendOverlay(PostFXOverlayCompositor overlay)
     {
         if (!IsInteractable || _quadMesh == null || _quadMaterial == null) return;
-        overlay.AddPanel(_quadMesh, _quadGO!.transform.localToWorldMatrix, _quadMaterial);
+        overlay.AddPanel(_quadMesh, _quadGO!.transform.localToWorldMatrix, _quadMaterial, PanelLayer.Menu);
     }
 
     /// <summary>The two MenuCanvas-specific click behaviors: the Settings button opens

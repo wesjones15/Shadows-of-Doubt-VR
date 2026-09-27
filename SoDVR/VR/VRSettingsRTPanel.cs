@@ -31,7 +31,7 @@ internal sealed class VRSettingsRTPanel : IRTGripTarget, IRTPointerExtension
     public VRSettingsRTPanel(int quadLayer, RTPanelInput input, RTPanelGrip grip)
     {
         _grip = grip;
-        _panel = new RTCanvasPanel("VRSettingsRTPanel", quadLayer, input);
+        _panel = new RTCanvasPanel("VRSettingsRTPanel", quadLayer, input, PanelLayer.Top);
     }
 
     public bool IsOpen => _view != null && _view.Visible;

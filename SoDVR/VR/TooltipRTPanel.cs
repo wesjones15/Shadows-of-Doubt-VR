@@ -64,7 +64,7 @@ internal sealed class TooltipRTPanel
     public TooltipRTPanel(int quadLayer, RTPanelInput input, RTPanelGrip grip, Action onSaveLoadButtonClicked,
         Action<PinnedItemController> onNewLink)
     {
-        _panel = new RTCanvasPanel("TooltipRTPanel", quadLayer, input);
+        _panel = new RTCanvasPanel("TooltipRTPanel", quadLayer, input, PanelLayer.Top);
         _grip = grip;
         _onSaveLoadButtonClicked = onSaveLoadButtonClicked;
         _onNewLink = onNewLink;
@@ -148,7 +148,7 @@ internal sealed class TooltipRTPanel
         _panel.MoveOntoTexture(e.Root);
     }
 
-    public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay, onTop: true);
+    public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay);
 
     private void TrackElements(Transform canvas)
     {

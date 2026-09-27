@@ -96,6 +96,8 @@ internal sealed class RTPanelPointer
     /// <summary>Set by the owning panel every tick: whether this panel can currently take focus.</summary>
     public bool Enabled { get; set; }
 
+    public PanelLayer Layer { get; set; }
+
     public string LogTag => _logTag;
 
     /// <summary>A press or alt-button gesture is in progress — RTPanelInput keeps this panel

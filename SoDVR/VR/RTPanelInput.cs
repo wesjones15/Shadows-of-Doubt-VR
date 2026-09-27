@@ -113,7 +113,9 @@ internal sealed class RTPanelInput
         foreach (var pointer in _pointers)
         {
             if (!pointer.TryRaycastQuad(ray, MaxRayDistance, out float d, out Vector3 p)) continue;
-            if (d < nearestDist) { nearest = pointer; nearestDist = d; nearestPoint = p; }
+            bool higher = nearest == null || pointer.Layer > nearest.Layer;
+            bool nearerInLayer = nearest != null && pointer.Layer == nearest.Layer && d < nearestDist;
+            if (higher || nearerInLayer) { nearest = pointer; nearestDist = d; nearestPoint = p; }
         }
 
         if (input.Press || input.SecondaryClick) Pressed?.Invoke(nearest);

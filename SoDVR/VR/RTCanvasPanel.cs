@@ -32,12 +32,15 @@ internal sealed class RTCanvasPanel
     private readonly RTPanelInput _input;
     private readonly List<RTPanelView> _views = new();
 
-    public RTCanvasPanel(string logTag, int quadLayer, RTPanelInput input)
+    public RTCanvasPanel(string logTag, int quadLayer, RTPanelInput input, PanelLayer layer = PanelLayer.Normal)
     {
         _logTag = logTag;
         _quadLayer = quadLayer;
         _input = input;
+        Layer = layer;
     }
+
+    public PanelLayer Layer { get; }
 
     private const int AdditiveSweepFrames = 3;
     private bool _transparent;
@@ -124,6 +127,7 @@ internal sealed class RTCanvasPanel
         if (Canvas == null || Texture == null) throw new InvalidOperationException($"[{_logTag}] CreateView before Attach");
         var view = new RTPanelView($"{_logTag}/{name}", _quadLayer, Canvas, Texture, MetersPerPixel, onBeforeClick, extension);
         view.Interactive = interactive;
+        view.Pointer.Layer = Layer;
         if (interactive) _input.Register(view.Pointer);
         _views.Add(view);
         return view;
@@ -165,10 +169,9 @@ internal sealed class RTCanvasPanel
         catch (Exception ex) { Log.LogWarning($"[{_logTag}] Render: {ex.Message}"); }
     }
 
-    /// <param name="onTop">See <see cref="PostFXOverlayCompositor.AddPanel"/>.</param>
-    public void AppendOverlay(PostFXOverlayCompositor overlay, bool onTop = false)
+    public void AppendOverlay(PostFXOverlayCompositor overlay)
     {
-        foreach (var view in _views) view.AppendOverlay(overlay, onTop);
+        foreach (var view in _views) view.AppendOverlay(overlay, Layer);
     }
 
     /// <summary>A RectTransform's on-screen rect within this panel's texture, in RT pixels
@@ -482,9 +485,9 @@ internal sealed class RTPanelView
         return Mathf.Abs(local.x) <= half && Mathf.Abs(local.y) <= half;
     }
 
-    public void AppendOverlay(PostFXOverlayCompositor overlay, bool onTop)
+    public void AppendOverlay(PostFXOverlayCompositor overlay, PanelLayer layer)
     {
-        if (Visible) overlay.AddPanel(_mesh, _quad.transform.localToWorldMatrix, _material, onTop);
+        if (Visible) overlay.AddPanel(_mesh, _quad.transform.localToWorldMatrix, _material, layer);
     }
 
     public void Destroy()

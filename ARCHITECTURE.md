@@ -103,10 +103,11 @@ classDiagram
 | `RTPanelPointer.cs` | Turns controller input into Unity pointer events for one view, as a mouse would send them: hover, press, drag, release, click, right-click (A), scroll. |
 | `IRTPointerExtension.cs` | Hook for input the game's own handlers can't take from pointer events (pins and the map read the OS mouse). |
 | `RTPanelGrip.cs` | Grip-drags any `IRTGripTarget` in 3D. |
+| `PanelLayer.cs` | Stacking: the pause menu over everything in the scene, popups, tooltips, the keyboard and VR Settings over it. A higher layer draws over and takes the laser before a lower one, whatever the distances. |
 | `RTOwnedCanvases.cs` | Names of the canvases dedicated panels own; the generic panels leave them alone. |
 | `ModCanvas.cs` | A canvas of the mod's laid out like a game canvas, for game UI moved onto its own panel. |
 | `MenuRTPanel.cs` | MenuCanvas (pause/main menu), incl. the Settings-button redirect and save-load click intercepts. |
-| `TooltipRTPanel.cs` | TooltipCanvas: each dialog, context menu, quick-menu and tooltip is its own view, placed at the laser (dialogs in front of the head); drawn above every other panel. |
+| `TooltipRTPanel.cs` | TooltipCanvas: each dialog, context menu, quick-menu and tooltip is its own view, placed at the laser (dialogs in front of the head); on the top layer. |
 | `CaseBoardRTController.cs` | The case board: open signal, board anchor, its panels and windows; hides the board behind a single screen (`SoloScreens`). |
 | `CaseBoardPanel.cs` | One screen-layout case-board canvas (navbar, corkboard, inventory regions, location details, upgrades). |
 | `CaseBoardWindows.cs` | WindowCanvas as a sheet: each open note in its own slot and view. |

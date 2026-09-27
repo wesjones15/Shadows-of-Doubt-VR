@@ -75,7 +75,7 @@ internal sealed class VRKeyboardPanel : IRTGripTarget, IRTPointerExtension
     {
         _layer = layer;
         _grip = grip;
-        _panel = new RTCanvasPanel("VRKeyboard", layer, input);
+        _panel = new RTCanvasPanel("VRKeyboard", layer, input, PanelLayer.Top);
         PanelLayouts.Reset += () => _headLocalLayout = (DefaultHeadOffset, Quaternion.LookRotation(DefaultHeadOffset));
     }
 
@@ -110,7 +110,7 @@ internal sealed class VRKeyboardPanel : IRTGripTarget, IRTPointerExtension
     }
 
     public void Render() => _panel.Render();
-    public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay, onTop: true);
+    public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay);
 
     private void Open(TMP_InputField field, Camera? head)
     {
