@@ -556,23 +556,30 @@ public class VRCamera : MonoBehaviour
             catch { }
         }
 
-        // Final camera rotation: point Camera.main along the aiming hand (GameCameraAimHand) so the
+        // Final camera rotation: aim Camera.main (AimGameCamera) so the
         // game's InteractionRaycastCheck (which runs in a later Update()) reads controller
         // aim direction for action text, interact raycasts, etc.
         // This runs AFTER UpdatePose sets head rotation for case board cursor — the last
         // writer wins, and the game's interaction system is the final consumer before render.
-        if (_gameCamRef != null && GameCameraAimHand() is { } aimHand)
-        {
-            try { _gameCamRef.transform.rotation = ComputerUse.AimFromSeat(_gameCamRef.transform.position, aimHand.rotation); }
-            catch { }
-        }
+        AimGameCamera();
     }
 
-    /// <summary>Camera.main is aimed with the main hand: the game's interaction ray follows it.</summary>
-    private Transform? GameCameraAimHand()
+    /// <summary>Aims Camera.main, whose ray the game's interaction follows: through the point the main
+    /// hand's ray lands on (the camera sits at the character's eye, not at the hand), at a computer
+    /// screen from the seat, or along the hand while a menu or panel has it.</summary>
+    private void AimGameCamera()
     {
         var hand = MainHand.Pick(_rightControllerGO, _leftControllerGO);
-        return hand != null ? hand.transform : null;
+        if (_gameCamRef == null || hand == null) return;
+        try
+        {
+            var cam = _gameCamRef.transform;
+            var aim = hand.transform.rotation;
+            if (!ComputerUse.InUse && _handPointer.AimPoint is { } point && (point - cam.position).sqrMagnitude > 1e-6f)
+                aim = Quaternion.LookRotation(point - cam.position, hand.transform.up);
+            cam.rotation = ComputerUse.AimFromSeat(cam.position, aim);
+        }
+        catch { }
     }
 
     private void BuildCameraRig()
@@ -797,11 +804,7 @@ public class VRCamera : MonoBehaviour
             // Setting it here (post-FrameEndStereo) means HDRP always uses head rotation
             // for rendering; Camera.main only sees controller rotation on the NEXT frame's
             // game Update() — which is when InteractionRaycastCheck reads it for action text.
-            if (_gameCamRef != null && GameCameraAimHand() is { } aimHand)
-            {
-                try { _gameCamRef.transform.rotation = ComputerUse.AimFromSeat(_gameCamRef.transform.position, aimHand.rotation); }
-                catch { }
-            }
+            AimGameCamera();
 
             _frameCount++;
             if (_frameCount <= 10)
@@ -836,7 +839,8 @@ public class VRCamera : MonoBehaviour
         {
             bool laserOnPanel = _rtPanelInput.HasFocus || _rtPanelInput.IsCapturing;
             bool pointerHidden = inMenu || ComputerUse.InUse || laserOnPanel;
-            _handPointer.Update(MainHand.Pick(_rightControllerGO, _leftControllerGO), _gameCamRef, _interactionLayerMask, _baseInteractionRange, pointerHidden);
+            _handPointer.Update(MainHand.Pick(_rightControllerGO, _leftControllerGO), _gameCamRef, _interactionLayerMask, _baseInteractionRange, pointerHidden,
+                _fpsControllerTransform, _interactionController?.carryingObject?.transform);
         }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] HandPointer.Update: {ex.Message}"); }
 

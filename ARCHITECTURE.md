@@ -132,7 +132,7 @@ classDiagram
 | `CameraRig.cs` | static | Stereo rig, RT panel textures/projectors/quads. |
 | `ControllerPoses.cs` | instance | Both controllers' poses from OpenXR. |
 | `MainHand.cs` | static | Which hand points, interacts and holds items; a trigger press on the other hand swaps. Shared by the menu laser and the world. |
-| `HandPointer.cs` | instance | The main hand's world ray: dot, optional beam, the label's text. |
+| `HandPointer.cs` | instance | The main hand's world ray: where it lands (the game camera is aimed through that point, so the game's interaction ray from the eye meets it), the dot, optional beam, the label's text. |
 | `CompassDisplay.cs` | instance | The 3D awareness compass (3DUI) at the player's feet. |
 | `HudController.cs` | instance | The route arrow; the popup desktop-mode guard. |
 | `ComputerUse.cs` | static | In-game computers: detection, view pullback, the game camera's aim at the screen. |
