@@ -382,8 +382,8 @@ public class VRCamera : MonoBehaviour
         // before the origin jumps to a newly found camera, hundreds of metres away.
         if ((transform.position - originBefore).sqrMagnitude > OriginJumpDistance * OriginJumpDistance)
         {
-            _menuRTPanel.PlaceAgain();
-            Log.LogInfo($"[VRCamera] VR origin jumped {(transform.position - originBefore).magnitude:F0} m — menu placed again.");
+            _menuRTPanel.MoveWithOrigin(transform.position - originBefore);
+            Log.LogInfo($"[VRCamera] VR origin jumped {(transform.position - originBefore).magnitude:F0} m — menu moved with it.");
         }
 
         // Sync game camera rotation to VR head so that WorldToScreenPoint/ScreenPointToRay
