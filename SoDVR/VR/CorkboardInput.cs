@@ -7,8 +7,8 @@ using UnityEngine.UI;
 namespace SoDVR.VR;
 
 /// <summary>
-/// The corkboard's pins, strings and panning, driven from the RT pointer. Everything else on
-/// CaseCanvas — its buttons, zoom — stays on RTPanelPointer's ordinary pointer-event path.
+/// The corkboard's pins, strings, panning and stick zoom, driven from the RT pointer. Everything else
+/// on CaseCanvas — its buttons — stays on RTPanelPointer's ordinary pointer-event path.
 ///
 /// Pins can't: the game's pin drag follows the OS mouse and its click is guarded against
 /// simulated input (what the legacy case-board code found), so a press on a pin is taken over
@@ -40,6 +40,9 @@ internal sealed class CorkboardInput : IRTPointerExtension
     private Vector2 _panStartLocal;
     private Vector2 _panContentStart;
     private GameObject? _panPressedGo;
+
+    private ZoomContent? _zoom;
+    private bool _loggedZoomLookup;
 
     private PinnedItemController? _stringSource;
     private RectTransform? _stringFrom;
@@ -237,7 +240,36 @@ internal sealed class CorkboardInput : IRTPointerExtension
         return true;
     }
 
-    public bool TryTakeScroll(float delta, GameObject? hitGo, in RTPointerSample sample) => false;
+    /// <summary>The stick zooms the board about the laser, as the wheel does in the flat game.</summary>
+    public bool TryTakeScroll(float delta, GameObject? hitGo, in RTPointerSample sample)
+    {
+        try
+        {
+            var content = CasePanelController.Instance?.corkBoard;
+            var viewport = content != null && content.parent != null ? content.parent.GetComponent<RectTransform>() : null;
+            if (content == null || viewport == null) return false;
+            if (!RectTransformUtility.RectangleContainsScreenPoint(viewport, sample.ScreenPosition, sample.EventCamera)) return false;
+            var zoom = BoardZoom(content);
+            if (zoom == null) return false;
+            StickZoom.ZoomAbout(zoom, content, viewport, ScrollRectAbove(content), delta, sample);
+        }
+        catch (Exception ex) { Log.LogWarning($"[Corkboard] Zoom: {ex.Message}"); }
+        return true;
+    }
+
+    private ZoomContent? BoardZoom(RectTransform content)
+    {
+        if (_zoom != null) return _zoom;
+        _zoom = content.GetComponent<ZoomContent>() ?? content.GetComponentInParent<ZoomContent>();
+        if (!_loggedZoomLookup)
+        {
+            _loggedZoomLookup = true;
+            Log.LogInfo(_zoom != null
+                ? $"[Corkboard] Board zoom: ZoomContent on '{_zoom.name}' (axis '{_zoom.zoomAxis}', limits {_zoom.zoomLimit}, zoom {_zoom.zoom:F2})"
+                : "[Corkboard] Board zoom: no ZoomContent on or above the board — the stick keeps scrolling it.");
+        }
+        return _zoom;
+    }
 
     public void OnPointer(GameObject? hitGo, in RTPointerSample sample) { }
 
