@@ -28,15 +28,19 @@ internal static class QuestGlyphs
     private const string AssetName = "SODVR_QUEST";
     private const string SheetResource = "QuestGlyphs.meta-quest_sheet_double.png";
     private const string AtlasResource = "QuestGlyphs.meta-quest_sheet_double.xml";
-    // A glyph is sized to the font's ascender; smaller and lower, it stays inside its own line.
-    private const float GlyphScale = 0.9f;
-    private const float BaselineFraction = 0.75f;   // of a glyph's height above the baseline
+    // The game's own key glyphs: the Quest ones take the size and placement of its key cap.
+    private const string GameAssetName = "desktop";
+    private const string GameKeySprite = "Keyboard Key";
+    // Kenney's glyphs leave a margin in their cells (94 of 128 px drawn); the key cap has none.
+    private const float CellFill = 94f / 128f;
+    private const float RetrySeconds = 1f;
     // Without it, UpdateLookupTables runs TMP's upgrade of an old-format asset, which has no data.
     private const string SpriteAssetVersion = "1.1.0";
     private const HideFlags KeepAcrossLoads = HideFlags.DontUnloadUnusedAsset;
 
     private static bool s_built;
     private static bool s_failed;
+    private static float s_nextTry;
     private static readonly HashSet<InteractionKey> s_loggedKeys = new();
 
     /// <summary>The Quest glyph tag for the button the mod binds to this key; null for a key VR
@@ -93,9 +97,14 @@ internal static class QuestGlyphs
     private static bool EnsureBuilt()
     {
         if (s_built) return true;
-        if (s_failed) return false;
+        if (s_failed || Time.realtimeSinceStartup < s_nextTry) return false;
         try
         {
+            // Until the game has loaded its own glyphs there is nothing to size ours by; its keyboard
+            // glyphs show meanwhile, and the key hints refresh once ours exist.
+            s_nextTry = Time.realtimeSinceStartup + RetrySeconds;
+            if (FindGameKey() is not { } key) return false;
+
             var texture = new Texture2D(2, 2, TextureFormat.RGBA32, true)
             {
                 name = AssetName,
@@ -108,6 +117,7 @@ internal static class QuestGlyphs
             asset.name = AssetName;
             asset.hideFlags = KeepAcrossLoads;
             asset.spriteSheet = texture;
+            asset.m_FaceInfo = key.face;
             asset.m_SpriteGlyphTable ??= new Il2CppSystem.Collections.Generic.List<TMP_SpriteGlyph>();
             asset.m_SpriteCharacterTable ??= new Il2CppSystem.Collections.Generic.List<TMP_SpriteCharacter>();
 
@@ -117,12 +127,18 @@ internal static class QuestGlyphs
             {
                 int x = int.Parse(m.Groups[2].Value), y = int.Parse(m.Groups[3].Value);
                 int w = int.Parse(m.Groups[4].Value), h = int.Parse(m.Groups[5].Value);
-                var metrics = new GlyphMetrics(w, h, 0f, h * BaselineFraction, w);
+                // The drawn part of the cell covers the key cap: same centre, same height.
+                var k = key.metrics;
+                float height = k.height / CellFill, width = height * w / h;
+                var metrics = new GlyphMetrics(width, height,
+                    k.horizontalBearingX + 0.5f * (k.width - width),
+                    k.horizontalBearingY + 0.5f * (height - k.height),
+                    k.horizontalAdvance);
                 // The atlas counts rows from the top, a texture from the bottom.
-                var glyph = new TMP_SpriteGlyph(index, metrics, new GlyphRect(x, texture.height - y - h, w, h), GlyphScale, 0);
+                var glyph = new TMP_SpriteGlyph(index, metrics, new GlyphRect(x, texture.height - y - h, w, h), key.glyphScale, 0);
                 asset.m_SpriteGlyphTable.Add(glyph);
                 // 0xFFFE: found by name only, as TMP's own importer leaves sprites.
-                asset.m_SpriteCharacterTable.Add(new TMP_SpriteCharacter(0xFFFE, asset, glyph) { name = m.Groups[1].Value });
+                asset.m_SpriteCharacterTable.Add(new TMP_SpriteCharacter(0xFFFE, asset, glyph) { name = m.Groups[1].Value, scale = key.characterScale });
                 index++;
             }
 
@@ -136,7 +152,11 @@ internal static class QuestGlyphs
             MaterialReferenceManager.AddSpriteAsset(hash, asset);
 
             s_built = true;
-            Log.LogInfo($"[QuestGlyphs] Sprite asset '{AssetName}' built: {index} glyphs from a {texture.width}x{texture.height} sheet.");
+            var km = key.metrics;
+            Log.LogInfo($"[QuestGlyphs] Sprite asset '{AssetName}' built: {index} glyphs from a {texture.width}x{texture.height} sheet, " +
+                        $"sized by '{GameAssetName}/{GameKeySprite}': {km.width}x{km.height} bearing ({km.horizontalBearingX},{km.horizontalBearingY}) " +
+                        $"advance {km.horizontalAdvance} glyph scale {key.glyphScale} character scale {key.characterScale} face point size {key.face.pointSize}.");
+            Refresh();
         }
         catch (Exception ex)
         {
@@ -144,6 +164,22 @@ internal static class QuestGlyphs
             Log.LogWarning($"[QuestGlyphs] Sprite asset build failed, keeping the game's glyphs: {ex}");
         }
         return s_built;
+    }
+
+    private static (FaceInfo face, GlyphMetrics metrics, float glyphScale, float characterScale)? FindGameKey()
+    {
+        TMP_SpriteAsset? game = null;
+        foreach (var o in Resources.FindObjectsOfTypeAll(Il2CppType.Of<TMP_SpriteAsset>()))
+        {
+            var a = o.TryCast<TMP_SpriteAsset>();
+            if (a != null && a.name == GameAssetName) { game = a; break; }
+        }
+        if (game == null) return null;
+        int i = game.GetSpriteIndexFromName(GameKeySprite);
+        if (i < 0) return null;
+        var character = game.spriteCharacterTable[i];
+        var glyph = character.glyph;
+        return (game.faceInfo, glyph.metrics, glyph.scale, character.scale);
     }
 
     private static byte[] ReadResource(string name)
