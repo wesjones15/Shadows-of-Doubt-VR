@@ -76,7 +76,7 @@ internal static class VRSettings
         s_stallFrames = config.Bind("Rendering", "StallFrames", true,
             "Keep the headset smooth through the loading screens' freezes: a captured view of the loading screen stays fixed in the room while the game can't draw.");
         s_panelLayers = config.Bind("Rendering", "PanelLayers", true,
-            "Hand the panels (menus, HUD, hints, labels, popups) to the headset as layers of their own: crisper text than drawn into the eye image.");
+            "Hand menus, popups, the HUD, hints and labels to the headset as layers of their own: crisper text than drawn into the eye image.");
     }
 
     public static bool SmoothTurn => s_smoothTurn!.Value;
