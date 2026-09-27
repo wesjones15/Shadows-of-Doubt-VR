@@ -10,12 +10,14 @@ internal readonly struct OverlayDraw
     public readonly Mesh Mesh;
     public readonly Matrix4x4 LocalToWorld;
     public readonly Material Material;
+    public readonly LayerRank Rank;
 
-    public OverlayDraw(Mesh mesh, Matrix4x4 localToWorld, Material material)
+    public OverlayDraw(Mesh mesh, Matrix4x4 localToWorld, Material material, LayerRank rank)
     {
         Mesh = mesh;
         LocalToWorld = localToWorld;
         Material = material;
+        Rank = rank;
     }
 }
 
@@ -76,8 +78,8 @@ internal sealed class PostFXOverlayCompositor
         _dots.Clear();
     }
 
-    public void AddPanel(Mesh mesh, Matrix4x4 localToWorld, Material material, PanelLayer layer) =>
-        _bands[(int)layer].Add(new OverlayDraw(mesh, localToWorld, material));
+    public void AddPanel(Mesh mesh, Matrix4x4 localToWorld, Material material, PanelLayer layer, LayerRank rank) =>
+        _bands[(int)layer].Add(new OverlayDraw(mesh, localToWorld, material, rank));
 
     public void AddLaser(Vector3 origin, Vector3 end)
     {

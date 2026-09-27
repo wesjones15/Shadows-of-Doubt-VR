@@ -75,7 +75,7 @@ internal sealed class VRControlsPanel : IRTGripTarget
 
     public VRControlsPanel(int quadLayer, RTPanelInput input, RTPanelGrip grip)
     {
-        _panel = new RTCanvasPanel("VRControls", quadLayer, input);
+        _panel = new RTCanvasPanel("VRControls", quadLayer, input, LayerRank.Controls);
         _grip = grip;
         _grip.Register(this);
         PanelLayouts.Reset += () => _layout = null;

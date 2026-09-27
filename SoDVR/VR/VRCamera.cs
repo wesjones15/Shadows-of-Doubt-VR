@@ -816,7 +816,7 @@ public class VRCamera : MonoBehaviour
                     // Crisp panels: quad layers under the eyes, which are see-through where they are.
                     _panelCopy.BeginFrame(_leftCam.transform.position, _leftEye);
                     int layers = VRSettings.PanelLayers && _overlay.Panels.Count > 0 && _overlay.CanOpenOverPanels
-                        ? _mainLayers.Build(_cameraOffset, _overlay.Panels, _panelCopy)
+                        ? _mainLayers.Build(_cameraOffset, _overlay.Panels, _panelCopy, _leftCam, _rightCam)
                         : 0;
                     var layered = layers > 0 ? _mainLayers.Layered : null;
                     if (layered != null && VRSettings.MonitorMirror) mirrorImage = _mainLayers.MirrorWorld(_leftRT);

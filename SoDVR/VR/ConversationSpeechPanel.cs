@@ -31,7 +31,7 @@ internal sealed class ConversationSpeechPanel
     public ConversationSpeechPanel(int quadLayer, RTPanelInput input, float screenWorldWidth)
     {
         _screenWorldWidth = screenWorldWidth;
-        _panel = new RTCanvasPanel("ConversationSpeech", quadLayer, input);
+        _panel = new RTCanvasPanel("ConversationSpeech", quadLayer, input, LayerRank.Board);
     }
 
     /// <param name="dialogueView">The dialogue window while a conversation is open, else null.</param>

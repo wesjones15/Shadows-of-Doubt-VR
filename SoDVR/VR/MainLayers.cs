@@ -7,11 +7,11 @@ using UnityEngine;
 namespace SoDVR.VR;
 
 /// <summary>
-/// The layers each normal frame submits under the eyes, for crisp panels: the RT panels as quad
-/// layers, sampled by the compositor at full resolution. The eye image goes over them, see-through
-/// where they are (<see cref="PostFXOverlayCompositor"/>), so the lasers stay in it, drawn as they
-/// always were, and still cover the panels. The world, the world dots and any panel that isn't
-/// layered stay in the eye image too, under every layered panel. See docs/postfx_immune_ui.md,
+/// The layers each normal frame submits under the eyes, for crisp panels: RT panels as quad layers,
+/// sampled by the compositor at full resolution. The eye image goes over them, see-through where
+/// they are (<see cref="PostFXOverlayCompositor"/>), so the lasers stay in it, drawn as they always
+/// were, and still cover the panels. The world, the world dots and every panel that isn't layered
+/// stay in the eye image too, under every layered panel. See docs/postfx_immune_ui.md,
 /// "Sharper panels: OpenXR quad layers".
 /// </summary>
 internal sealed class MainLayers
@@ -20,11 +20,18 @@ internal sealed class MainLayers
 
     // Beside the eyes' own layer.
     private const int MaxPanels = OpenXRManager.MaxFrameLayers - 1;
+    private static readonly Rect Everywhere = Rect.MinMaxRect(-1e6f, -1e6f, 1e6f, 1e6f);
+    private static readonly Vector4[] Corners =
+        { new(-0.5f, -0.5f, 0f, 1f), new(0.5f, -0.5f, 0f, 1f), new(0.5f, 0.5f, 0f, 1f), new(-0.5f, 0.5f, 0f, 1f) };
 
     private readonly IntPtr _quads = Alloc(XrQuadLayer.Size * MaxPanels);
     private readonly IntPtr _pointers = Alloc(IntPtr.Size * MaxPanels);
     private readonly List<bool> _layered = new();
+    private readonly List<PanelImage?> _chosen = new();
+    private readonly List<int> _candidates = new();
+    private readonly List<(Rect left, Rect right)> _eyeBounds = new();
     private readonly HashSet<int> _excluded = new();
+    private bool _overBudget;
     private RenderTexture? _mirror;
 
     /// <summary>This frame's layer pointers, for xrEndFrame before the eyes' layer.</summary>
@@ -34,24 +41,50 @@ internal sealed class MainLayers
     public IReadOnlyList<bool> Layered => _layered;
 
     /// <summary>
-    /// Makes quad layers of the topmost panels that can be one, as many as fit, and writes them
-    /// bottom first. The eye image must hold every other panel: all of them are then under the
-    /// layered ones, as the order has them, unless one in between couldn't be layered.
-    /// Returns how many.
+    /// Makes quad layers of the highest-ranked panels that can be one, as many as fit, and writes
+    /// them bottom first. Every other panel stays in the eye image, under the layers, so a chosen
+    /// panel that is below one of those in the stacking order and overlaps it on screen stays there
+    /// too. Returns how many.
     /// </summary>
-    public int Build(Transform rig, IReadOnlyList<OverlayDraw> panels, PanelLayerCopy copy)
+    public int Build(Transform rig, IReadOnlyList<OverlayDraw> panels, PanelLayerCopy copy, Camera leftEye, Camera rightEye)
     {
         _layered.Clear();
-        for (int i = 0; i < panels.Count; i++) _layered.Add(false);
+        _chosen.Clear();
+        _candidates.Clear();
+        for (int i = 0; i < panels.Count; i++)
+        {
+            _layered.Add(false);
+            _chosen.Add(null);
+            if (panels[i].Rank != LayerRank.Never) _candidates.Add(i);
+        }
+        // Within a rank the topmost first, so the stacking order holds among the chosen.
+        _candidates.Sort((a, b) => panels[a].Rank != panels[b].Rank ? panels[a].Rank.CompareTo(panels[b].Rank) : b.CompareTo(a));
 
+        int picked = 0;
+        foreach (int i in _candidates)
+        {
+            if (picked == MaxPanels) break;
+            if (Image(panels[i]) is not { } image) continue;
+            _chosen[i] = image;
+            picked++;
+        }
+        LogBudget(_candidates.Count);
+
+        var leftViewProjection = leftEye.projectionMatrix * leftEye.worldToCameraMatrix;
+        var rightViewProjection = rightEye.projectionMatrix * rightEye.worldToCameraMatrix;
+        _eyeBounds.Clear();
         // Filled from the top slot down, so the written slots end up bottom first.
         int count = 0;
-        for (int i = panels.Count - 1; i >= 0 && count < MaxPanels; i--)
+        for (int i = panels.Count - 1; i >= 0; i--)
         {
-            if (Image(panels[i]) is not { } image || copy.Layer(rig, image) is not { } desc) continue;
-            XrQuadLayer.Write(Slot(MaxPanels - 1 - count), desc, XrQuadLayer.BlendTextureSourceAlpha);
-            _layered[i] = true;
-            count++;
+            var bounds = (ScreenExtent(panels[i].LocalToWorld, leftViewProjection), ScreenExtent(panels[i].LocalToWorld, rightViewProjection));
+            if (_chosen[i] is { } image && !UnderEyePanel(bounds) && copy.Layer(rig, image) is { } desc)
+            {
+                XrQuadLayer.Write(Slot(MaxPanels - 1 - count), desc, XrQuadLayer.BlendTextureSourceAlpha);
+                _layered[i] = true;
+                count++;
+            }
+            else _eyeBounds.Add(bounds);
         }
         for (int k = 0; k < count; k++)
             Marshal.WriteIntPtr(_pointers, k * IntPtr.Size, Slot(MaxPanels - count + k));
@@ -70,6 +103,40 @@ internal sealed class MainLayers
     }
 
     private IntPtr Slot(int index) => _quads + index * XrQuadLayer.Size;
+
+    private bool UnderEyePanel((Rect left, Rect right) bounds)
+    {
+        foreach (var above in _eyeBounds)
+            if (above.left.Overlaps(bounds.left) || above.right.Overlaps(bounds.right)) return true;
+        return false;
+    }
+
+    /// <summary>A unit quad's extent in an eye's normalized device coordinates; everywhere if any
+    /// of it is behind the eye.</summary>
+    private static Rect ScreenExtent(Matrix4x4 localToWorld, Matrix4x4 viewProjection)
+    {
+        var toClip = viewProjection * localToWorld;
+        Vector2 min = new(float.MaxValue, float.MaxValue), max = new(float.MinValue, float.MinValue);
+        foreach (var corner in Corners)
+        {
+            Vector4 clip = toClip * corner;
+            if (clip.w <= 1e-4f) return Everywhere;
+            var ndc = new Vector2(clip.x / clip.w, clip.y / clip.w);
+            min = Vector2.Min(min, ndc);
+            max = Vector2.Max(max, ndc);
+        }
+        return Rect.MinMaxRect(min.x, min.y, max.x, max.y);
+    }
+
+    private void LogBudget(int candidates)
+    {
+        bool over = candidates > MaxPanels;
+        if (over == _overBudget) return;
+        _overBudget = over;
+        Log.LogInfo(over
+            ? $"[MainLayers] {candidates} crisp candidates: the {MaxPanels} ranked highest are layers, the rest stay in the eye image."
+            : "[MainLayers] Every crisp candidate fits as a layer again.");
+    }
 
     /// <summary>The panel as a layer's source, or null if it has to stay in the eye image: a layer
     /// is blended as premultiplied colour, so only a premultiplied panel texture looks the same as one.</summary>

@@ -147,7 +147,7 @@ internal sealed class LooseCanvasPanels
             // Parent included: the splash and mod.io canvases are both just "Canvas".
             var parent = canvas.transform.parent;
             _name = parent != null ? $"{parent.name}/{canvas.gameObject.name}" : canvas.gameObject.name;
-            _panel = new RTCanvasPanel($"Loose:{_name}", owner._quadLayer, owner._input);
+            _panel = new RTCanvasPanel($"Loose:{_name}", owner._quadLayer, owner._input, LayerRank.Popup);
             Log.LogInfo($"[LooseCanvas] Claimed '{_name}' ({canvas.renderMode}).");
         }
 

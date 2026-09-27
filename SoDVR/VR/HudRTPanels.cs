@@ -85,7 +85,7 @@ internal sealed class HudRTPanels
 
     public HudRTPanels(int quadLayer, RTPanelInput input)
     {
-        _panel = new RTCanvasPanel("HudRTPanels", quadLayer, input);
+        _panel = new RTCanvasPanel("HudRTPanels", quadLayer, input, LayerRank.Hints);
     }
 
     /// <param name="boardExtent">The case board's outline, anchor-local metres (<see cref="CaseBoardRTController.BoardExtent"/>).</param>

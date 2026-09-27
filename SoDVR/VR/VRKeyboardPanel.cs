@@ -75,7 +75,7 @@ internal sealed class VRKeyboardPanel : IRTGripTarget, IRTPointerExtension
     {
         _layer = layer;
         _grip = grip;
-        _panel = new RTCanvasPanel("VRKeyboard", layer, input, PanelLayer.Top);
+        _panel = new RTCanvasPanel("VRKeyboard", layer, input, LayerRank.Popup, PanelLayer.Top);
         PanelLayouts.Reset += () => _headLocalLayout = (DefaultHeadOffset, Quaternion.LookRotation(DefaultHeadOffset));
     }
 

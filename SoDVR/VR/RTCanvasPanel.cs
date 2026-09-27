@@ -32,14 +32,16 @@ internal sealed class RTCanvasPanel
     private readonly RTPanelInput _input;
     private readonly List<RTPanelView> _views = new();
 
-    public RTCanvasPanel(string logTag, int quadLayer, RTPanelInput input, PanelLayer layer = PanelLayer.Normal)
+    public RTCanvasPanel(string logTag, int quadLayer, RTPanelInput input, LayerRank rank, PanelLayer layer = PanelLayer.Normal)
     {
         _logTag = logTag;
         _quadLayer = quadLayer;
         _input = input;
+        Rank = rank;
         Layer = layer;
     }
 
+    public LayerRank Rank { get; }
     public PanelLayer Layer { get; }
 
     private const int AdditiveSweepFrames = 3;
@@ -171,7 +173,7 @@ internal sealed class RTCanvasPanel
 
     public void AppendOverlay(PostFXOverlayCompositor overlay)
     {
-        foreach (var view in _views) view.AppendOverlay(overlay, Layer);
+        foreach (var view in _views) view.AppendOverlay(overlay, Layer, Rank);
     }
 
     /// <summary>A RectTransform's on-screen rect within this panel's texture, in RT pixels
@@ -485,9 +487,9 @@ internal sealed class RTPanelView
         return Mathf.Abs(local.x) <= half && Mathf.Abs(local.y) <= half;
     }
 
-    public void AppendOverlay(PostFXOverlayCompositor overlay, PanelLayer layer)
+    public void AppendOverlay(PostFXOverlayCompositor overlay, PanelLayer layer, LayerRank rank)
     {
-        if (Visible) overlay.AddPanel(_mesh, _quad.transform.localToWorldMatrix, _material, layer);
+        if (Visible) overlay.AddPanel(_mesh, _quad.transform.localToWorldMatrix, _material, layer, rank);
     }
 
     public void Destroy()

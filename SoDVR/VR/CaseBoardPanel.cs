@@ -91,7 +91,7 @@ internal sealed class CaseBoardPanel : IRTGripTarget
         _draggable = draggable;
         _grip = grip;
         _regionPaths = regions != null ? Array.ConvertAll(regions, p => (string?)p) : new string?[] { null };
-        _panel = new RTCanvasPanel($"CaseBoard:{canvasName}", quadLayer, input);
+        _panel = new RTCanvasPanel($"CaseBoard:{canvasName}", quadLayer, input, LayerRank.Board);
     }
 
     public Canvas? Canvas => _panel.Canvas;

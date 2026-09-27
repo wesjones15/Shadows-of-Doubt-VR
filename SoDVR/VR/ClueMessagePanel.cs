@@ -34,7 +34,7 @@ internal sealed class ClueMessagePanel
 
     public ClueMessagePanel(int quadLayer, RTPanelInput input)
     {
-        _panel = new RTCanvasPanel("ClueMessage", quadLayer, input);
+        _panel = new RTCanvasPanel("ClueMessage", quadLayer, input, LayerRank.Board);
     }
 
     /// <param name="dialogueView">The dialogue window while a conversation is open, else null.</param>

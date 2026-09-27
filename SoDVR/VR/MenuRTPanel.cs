@@ -184,7 +184,7 @@ internal sealed class MenuRTPanel
     public void AppendOverlay(PostFXOverlayCompositor overlay)
     {
         if (!IsInteractable || _quadMesh == null || _quadMaterial == null) return;
-        overlay.AddPanel(_quadMesh, _quadGO!.transform.localToWorldMatrix, _quadMaterial, PanelLayer.Menu);
+        overlay.AddPanel(_quadMesh, _quadGO!.transform.localToWorldMatrix, _quadMaterial, PanelLayer.Menu, LayerRank.Menu);
     }
 
     /// <summary>The two MenuCanvas-specific click behaviors: the Settings button opens

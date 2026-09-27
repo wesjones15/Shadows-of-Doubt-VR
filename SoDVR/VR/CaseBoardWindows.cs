@@ -53,7 +53,7 @@ internal sealed class CaseBoardWindows
 
     public CaseBoardWindows(int quadLayer, RTPanelInput input, RTPanelGrip grip)
     {
-        _panel = new RTCanvasPanel("CaseBoard:WindowCanvas", quadLayer, input);
+        _panel = new RTCanvasPanel("CaseBoard:WindowCanvas", quadLayer, input, LayerRank.Notes);
         _grip = grip;
     }
 

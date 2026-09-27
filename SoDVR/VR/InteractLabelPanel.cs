@@ -43,7 +43,7 @@ internal sealed class InteractLabelPanel
     public InteractLabelPanel(int layer, RTPanelInput input)
     {
         _layer = layer;
-        _panel = new RTCanvasPanel("InteractLabel", layer, input);
+        _panel = new RTCanvasPanel("InteractLabel", layer, input, LayerRank.Hints);
     }
 
     public void Tick(HudRTPanels hud)

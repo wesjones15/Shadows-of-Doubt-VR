@@ -56,7 +56,7 @@ internal sealed class RadialMenuPanel
     public RadialMenuPanel(int layer, RTPanelInput input)
     {
         _layer = layer;
-        _panel = new RTCanvasPanel("RadialMenu", layer, input);
+        _panel = new RTCanvasPanel("RadialMenu", layer, input, LayerRank.Popup);
     }
 
     public bool IsOpen => _open;

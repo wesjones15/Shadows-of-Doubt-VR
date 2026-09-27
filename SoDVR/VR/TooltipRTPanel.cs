@@ -68,7 +68,7 @@ internal sealed class TooltipRTPanel
     public TooltipRTPanel(int quadLayer, RTPanelInput input, RTPanelGrip grip, Action onSaveLoadButtonClicked,
         Action<PinnedItemController> onNewLink)
     {
-        _panel = new RTCanvasPanel("TooltipRTPanel", quadLayer, input, PanelLayer.Top);
+        _panel = new RTCanvasPanel("TooltipRTPanel", quadLayer, input, LayerRank.Popup, PanelLayer.Top);
         _grip = grip;
         _onSaveLoadButtonClicked = onSaveLoadButtonClicked;
         _onNewLink = onNewLink;

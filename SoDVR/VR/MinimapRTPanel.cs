@@ -56,7 +56,7 @@ internal sealed class MinimapRTPanel : IRTGripTarget
     public MinimapRTPanel(int quadLayer, RTPanelInput input, RTPanelGrip grip)
     {
         _grip = grip;
-        _panel = new RTCanvasPanel("MinimapRTPanel", quadLayer, input);
+        _panel = new RTCanvasPanel("MinimapRTPanel", quadLayer, input, LayerRank.Board);
         PanelLayouts.Reset += () =>
         {
             _boardLayout = null;
