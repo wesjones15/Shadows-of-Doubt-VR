@@ -172,7 +172,7 @@ public class VRCamera : MonoBehaviour
         _keyboard = new VRKeyboardPanel(UILayer, _rtPanelInput, _rtPanelGrip);
         _hudRT = new HudRTPanels(UILayer, _rtPanelInput);
         _clueRT = new ClueMessagePanel(UILayer, _rtPanelInput);
-        _controlsRT = new VRControlsPanel(UILayer, _rtPanelInput);
+        _controlsRT = new VRControlsPanel(UILayer, _rtPanelInput, _rtPanelGrip);
         _worldMarks = new WorldMarksPanel(UILayer, _rtPanelInput);
         _interactLabel = new InteractLabelPanel(UILayer, _rtPanelInput);
         _vrSettingsRT = new VRSettingsRTPanel(UILayer, _rtPanelInput, _rtPanelGrip);
@@ -302,7 +302,7 @@ public class VRCamera : MonoBehaviour
 
         try { _clueRT.Tick(_hudRT, _dialogueRT.OpenView); }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] ClueMessagePanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
-        try { _controlsRT.Tick(_hudRT, _caseBoardRT.ShowsBoard, _rtPanelInput, _rtPanelGrip); }
+        try { _controlsRT.Tick(_hudRT, _caseBoardRT.ShowsBoard, _rtPanelInput); }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] VRControlsPanel.Tick: {ex.GetType().Name}: {ex.Message}"); }
 
         try { _worldMarks.Tick(_hudRT); }

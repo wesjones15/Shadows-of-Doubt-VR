@@ -13,9 +13,10 @@ namespace SoDVR.VR;
 /// world" switch, and above them live rows for what the laser is on (a pin, a string, the map, a
 /// window to grab); in the world, when switched on, the World page alone. The rows are drawn on a
 /// canvas of our own and the view is posed as if they hung just under the key hints, so they move
-/// with them — folded beside the board, or on the walking sheet.
+/// with them — folded beside the board, or on the walking sheet. With the board open it can be
+/// grip-dragged; the move is kept relative to that spot, so it holds in the world too.
 /// </summary>
-internal sealed class VRControlsPanel
+internal sealed class VRControlsPanel : IRTGripTarget
 {
     private static ManualLogSource Log => Plugin.Log;
 
@@ -29,6 +30,7 @@ internal sealed class VRControlsPanel
     private const float DimAlpha = 0.45f;
     // Only if the game's row prefab has no height of its own (a layout sizes it).
     private const float RowHeightPerFontSize = 1.6f;
+    private const float GripMargin = 1.1f;
 
     private enum Page { Menus, World }
 
@@ -47,15 +49,30 @@ internal sealed class VRControlsPanel
     private Rect? _lastHintsRect;
     private bool _loggedPlacement;
 
-    public VRControlsPanel(int quadLayer, RTPanelInput input)
+    private readonly RTPanelGrip _grip;
+    private bool _boardOpen;
+    // Where the HUD would put the panel this frame: its top edge's centre, facing, and scale.
+    private Vector3 _baseTop;
+    private Quaternion _baseRotation = Quaternion.identity;
+    private float _baseMetersPerPixel;
+    // Where it was dragged to, relative to that: in texture pixels at the HUD's scale, so it holds
+    // beside the board and on the walking sheet alike.
+    private (Vector3 topOffset, Quaternion rotation)? _layout;
+    private (Vector3 position, Quaternion rotation)? _held;
+
+    public VRControlsPanel(int quadLayer, RTPanelInput input, RTPanelGrip grip)
     {
         _panel = new RTCanvasPanel("VRControls", quadLayer, input);
+        _grip = grip;
+        _grip.Register(this);
+        PanelLayouts.Reset += () => _layout = null;
     }
 
     /// <param name="boardOpen">The case board is up: the full panel, with its buttons, and the live
     /// rows for what the laser is on.</param>
-    public void Tick(HudRTPanels hud, bool boardOpen, RTPanelInput input, RTPanelGrip grip)
+    public void Tick(HudRTPanels hud, bool boardOpen, RTPanelInput input)
     {
+        _boardOpen = boardOpen;
         if (!_panel.IsAttached || _box == null)
         {
             if (_view != null) Teardown();
@@ -74,7 +91,7 @@ internal sealed class VRControlsPanel
         if (!boardOpen || input.Focus != _view!.Pointer)
         {
             _live.Clear();
-            if (boardOpen) CollectLive(input, grip);
+            if (boardOpen) CollectLive(input);
         }
         Rebuild(boardOpen ? _page : Page.World, withButtons: boardOpen);
         var rect = _panel.ContentPixelRect(_box, 0f, out int count);
@@ -82,6 +99,7 @@ internal sealed class VRControlsPanel
         _view!.SetPixelRect(rect);
         var under = new Rect(hints.xMax - rect.width, hints.yMin - GapPixels - rect.height, rect.width, rect.height);
         _view.Visible = hud.PlaceAt(_view, under);
+        if (_view.Visible) ApplyLayout();
         // In the world it's only looked at: the laser and the world pointer pass through it.
         _view.Interactive = boardOpen;
         if (!boardOpen) _view.Pointer.Enabled = false;
@@ -90,6 +108,23 @@ internal sealed class VRControlsPanel
         _loggedPlacement = true;
         Log.LogInfo($"[VRControls] Under the key hints at {hints}: box {rect} posed as {under}.");
     }
+
+    /// <summary>Moves the panel from where the HUD put it to where it was dragged.</summary>
+    private void ApplyLayout()
+    {
+        var view = _view!;
+        _baseRotation = view.Transform.rotation;
+        _baseMetersPerPixel = view.MetersPerPixel;
+        _baseTop = view.Transform.position + HalfHeight(_baseRotation);
+        if (_held is { } held) { view.SetPose(held.position, held.rotation); return; }
+        if (_layout is not { } layout) return;
+        var rotation = _baseRotation * layout.rotation;
+        var top = _baseTop + _baseRotation * (layout.topOffset * _baseMetersPerPixel);
+        view.SetPose(top - HalfHeight(rotation), rotation);
+    }
+
+    private Vector3 HalfHeight(Quaternion rotation) =>
+        rotation * new Vector3(0f, 0.5f * _view!.WorldSize.y, 0f);
 
     public void Render() => _panel.Render();
     public void AppendOverlay(PostFXOverlayCompositor overlay) => _panel.AppendOverlay(overlay);
@@ -107,12 +142,12 @@ internal sealed class VRControlsPanel
 
     /// <summary>What the controls do on what the laser is on: the focused panel's own gestures, and
     /// grabbing it.</summary>
-    private void CollectLive(RTPanelInput input, RTPanelGrip grip)
+    private void CollectLive(RTPanelInput input)
     {
         input.Focus?.Extension?.AddHints(_live);
         if (RTPanelGrip.DraggingHandIsRight is { } dragging)
             _live.Add(new(new[] { QuestGlyphs.GripName(dragging), dragging ? "quest_stick_r_vertical" : "quest_stick_l_vertical" }, "Push / pull the window"));
-        else if (input.LaserRay is { } ray && grip.CanGripAt(ray))
+        else if (input.LaserRay is { } ray && _grip.CanGripAt(ray))
             _live.Add(new(new[] { QuestGlyphs.GripName(MainHand.IsRight) }, "Hold: move this window"));
     }
 
@@ -299,6 +334,34 @@ internal sealed class VRControlsPanel
             Log.LogWarning($"[VRControls] Setup failed: {ex.Message}");
             Teardown();
         }
+    }
+
+    // ── IRTGripTarget: draggable while the board is open ─────────────────────────────────
+
+    public string GripName => CanvasName;
+    public Vector3 GripPosition => _view != null ? _view.Transform.position : Vector3.zero;
+    public Quaternion GripRotation => _view != null ? _view.Transform.rotation : Quaternion.identity;
+
+    public bool TryGripHit(Ray ray, out float distance)
+    {
+        distance = 0f;
+        return _boardOpen && _view != null && _view.Visible && _view.RaycastWithMargin(ray, GripMargin, out distance);
+    }
+
+    public void SetGripPose(Vector3 position, Quaternion rotation)
+    {
+        _held = (position, rotation);
+        _view?.SetPose(position, rotation);
+    }
+
+    public void OnGripReleased()
+    {
+        if (_held is not { } held || _baseMetersPerPixel <= 0f) { _held = null; return; }
+        _held = null;
+        var inverse = Quaternion.Inverse(_baseRotation);
+        var top = held.position + HalfHeight(held.rotation);
+        _layout = (inverse * (top - _baseTop) / _baseMetersPerPixel, inverse * held.rotation);
+        Log.LogInfo($"[VRControls] Moved: {_layout.Value.topOffset} px from under the key hints.");
     }
 
     private void Teardown()
