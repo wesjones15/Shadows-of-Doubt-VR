@@ -5,7 +5,7 @@ namespace SoDVR.VR;
 
 /// <summary>
 /// Coordinates the case board's RT panels. Owns the one verified board-open signal
-/// (<c>ActionPanelCanvas.activeInHierarchy</c> — see caseboard_findings.md §6) and the board anchor:
+/// (<c>ActionPanelCanvas.activeInHierarchy</c> — see docs/caseboard_findings.md §6) and the board anchor:
 /// a transform captured in front of the player each time the board opens, which every case-board
 /// panel is laid out relative to. Grip-dragging the navbar moves the anchor, so the whole board and
 /// everything laid out on it moves as one; where it was left, relative to the head's facing, is where

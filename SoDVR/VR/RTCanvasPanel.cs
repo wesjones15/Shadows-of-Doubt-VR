@@ -8,7 +8,7 @@ namespace SoDVR.VR;
 
 /// <summary>
 /// One game canvas rendered post-FX-immune: its own projector camera and mipmapped RenderTexture
-/// (see postfx_immune_ui.md), shown in the world through any number of <see cref="RTPanelView"/>s,
+/// (see docs/postfx_immune_ui.md), shown in the world through any number of <see cref="RTPanelView"/>s,
 /// each drawing a sub-rectangle of the texture. A mostly-empty canvas gets a view tight to its real
 /// content instead of a full-size opaque quad, and several windows laid out on one canvas are each
 /// a view drawn from a single projector render.
@@ -90,7 +90,7 @@ internal sealed class RTCanvasPanel
         Detach();
 
         // Unity only honours renderMode on a root canvas, and the case-board canvases start out
-        // nested under GameCanvas — which the HUD pipeline also manages (v1_findings.md §1).
+        // nested under GameCanvas — which the HUD pipeline also manages (docs/v1_findings.md §1).
         // Detaching is what frees the canvas from both.
         if (canvas.transform.parent != null)
         {

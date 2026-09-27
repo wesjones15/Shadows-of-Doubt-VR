@@ -89,7 +89,7 @@ internal sealed class VoidRoomController
     /// SessionData.startedGame, inverted. MainMenuController.mainMenuActive reads True for both
     /// the title screen AND an in-game ESC pause, so it can't tell them apart — startedGame is
     /// the field that actually differs, staying true from the moment a save loads through every
-    /// later pause. See v1_findings.md §1/§4 for the logged proof this was verified against.
+    /// later pause. See docs/v1_findings.md §1/§4 for the logged proof this was verified against.
     /// </summary>
     private bool TryGetMainMenuActive(out bool active)
     {

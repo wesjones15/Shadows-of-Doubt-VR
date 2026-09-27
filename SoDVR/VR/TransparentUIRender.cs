@@ -10,7 +10,7 @@ namespace SoDVR.VR;
 /// <summary>
 /// Renders a projector camera's UI straight into its target texture, bypassing HDRP's own render of
 /// that camera: HDRP's colour buffer has no alpha, so anything it renders comes out opaque however
-/// the camera clears (postfx_immunity_investigation.md §2b saw the same). Drawing the canvases
+/// the camera clears (docs/postfx_immunity_investigation.md §2b saw the same). Drawing the canvases
 /// ourselves into the ARGB32 texture keeps their coverage in alpha.
 /// </summary>
 internal static class TransparentUIRender

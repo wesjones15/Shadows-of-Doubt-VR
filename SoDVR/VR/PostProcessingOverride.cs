@@ -8,7 +8,7 @@ namespace SoDVR.VR;
 
 /// <summary>
 /// Global switch that forces HDRP DepthOfField off. The mod's panels are drawn after HDRP's post stack
-/// (postfx_immune_ui.md) and never need it; it remains as a player preference.
+/// (docs/postfx_immune_ui.md) and never need it; it remains as a player preference.
 /// </summary>
 internal static class PostProcessingOverride
 {

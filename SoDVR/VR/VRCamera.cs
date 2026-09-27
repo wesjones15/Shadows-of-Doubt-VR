@@ -619,7 +619,7 @@ public class VRCamera : MonoBehaviour
 
         // ── Scene cameras — render EVERYTHING including UI layer ────────────────
         // One camera per eye, never a second camera contributing to the same frame: HDRP doesn't
-        // support camera stacking (see postfx_immunity_investigation.md, Era 2e).
+        // support camera stacking (see docs/postfx_immunity_investigation.md, Era 2e).
         var leftGO = new GameObject("LeftEye");
         leftGO.transform.SetParent(_cameraOffset, false);
         _leftCam = leftGO.AddComponent<Camera>();

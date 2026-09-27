@@ -7,7 +7,7 @@ namespace SoDVR.VR;
 
 /// <summary>
 /// One case-board canvas on the RT pipeline: found by name wherever it lives (they start nested
-/// under GameCanvas — caseboard_findings.md §6), attached to its own RTCanvasPanel, and shown
+/// under GameCanvas — docs/caseboard_findings.md §6), attached to its own RTCanvasPanel, and shown
 /// through views cropped to whatever content is visibly up. Laid out relative to the board anchor;
 /// a draggable panel remembers where the player grip-dragged it, in anchor-local space, so the
 /// arrangement survives reopening the board facing a different way.

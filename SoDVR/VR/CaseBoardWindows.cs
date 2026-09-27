@@ -12,7 +12,7 @@ namespace SoDVR.VR;
 /// WindowCanvas carrying its own Canvas; names are dynamic, so nothing matches on them.
 ///
 /// The game stacks windows on top of each other and parks them past the canvas edges
-/// (caseboard_findings.md §6), so they can't be rendered where the game puts them. Instead
+/// (docs/caseboard_findings.md §6), so they can't be rendered where the game puts them. Instead
 /// WindowCanvas becomes a large sheet and each window is moved into its own slot on it, re-applied
 /// every frame right before the projector renders; one render then serves every open window, each
 /// shown through its own view. Each view is placed, and grip-dragged, independently in the world.

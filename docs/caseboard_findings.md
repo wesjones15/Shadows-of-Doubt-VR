@@ -328,7 +328,7 @@ worked. The base mod skipped the game's path to avoid double fire because it als
 clicks; RT panels send none. `RTPanelPointer` now sends down/up/click exactly like Unity's input
 module, with no `submit` (which ran `Button.Press` a second time) and no listener-state changes
 (the old code switched persistent listeners Off after invoking them). The game's `mouseInputMode`
-guard accepts these events. The legacy router still has the old behaviour (`__pending_tasks.md` §7).
+guard accepts these events. The legacy router still has the old behaviour (`pending_tasks.md` §7).
 
 **Projector precision (`3b292cf`).** Projectors parked at y=-10000 quantised canvas positions to
 about 2 px: the corkboard's vertical pan moved in steps, the 24 px note minus button failed its hit

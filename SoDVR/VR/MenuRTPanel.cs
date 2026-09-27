@@ -13,7 +13,7 @@ namespace SoDVR.VR;
 /// PostFXOverlayCompositor draws after HDRP's post stack — immune to scene post-processing both in
 /// the texture's content (the projector camera has none) and in how it's displayed.
 ///
-/// MenuCanvas is the pause menu too — the game reuses one Canvas for both (see v1_findings.md §2),
+/// MenuCanvas is the pause menu too — the game reuses one Canvas for both (see docs/v1_findings.md §2),
 /// so this class owns both states; there is no separate "PauseCanvas" to migrate later.
 ///
 /// Also redirects the menu's Settings button to the VR Settings panel and hides the menu while that

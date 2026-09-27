@@ -1,8 +1,8 @@
 # SoDVR file map
 
 Quick reference for how `SoDVR/VR/*.cs` fits together. A reference doc, not a design spec — see
-`CLAUDE.md` for the splitting rules, `v1_findings.md` for what has been tried and disqualified, and
-`postfx_immune_ui.md` for how the RT panels work.
+`CLAUDE.md` for the splitting rules, `docs/v1_findings.md` for what has been tried and disqualified, and
+`docs/postfx_immune_ui.md` for how the RT panels work.
 
 All of the game's UI goes through one pipeline, **RT panels**: a game canvas is rendered by its own
 projector camera into a texture and shown through world quads that `PostFXOverlayCompositor` draws

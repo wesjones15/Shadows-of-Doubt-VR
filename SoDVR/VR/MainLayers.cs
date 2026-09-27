@@ -11,7 +11,7 @@ namespace SoDVR.VR;
 /// (popups, tooltips, the keyboard, VR Settings) as quad layers, sampled by the compositor at full
 /// resolution, then the lasers in a transparent projection layer on top, since anything drawn in the
 /// eye image would sit under the panel layers. The world, the normal-band panels and the world dots
-/// stay in the eye image. See postfx_immune_ui.md, "Sharper panels: OpenXR quad layers".
+/// stay in the eye image. See docs/postfx_immune_ui.md, "Sharper panels: OpenXR quad layers".
 /// </summary>
 internal sealed class MainLayers
 {
