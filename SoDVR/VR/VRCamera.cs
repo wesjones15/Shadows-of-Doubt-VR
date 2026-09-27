@@ -401,6 +401,7 @@ public class VRCamera : MonoBehaviour
             }
         }
 
+        LoadStallLog.BeforeFrameWait();
         _displayTime = OpenXRManager.FrameWaitPublic(out int waitRc);
         if (waitRc < 0)
         {
@@ -426,6 +427,7 @@ public class VRCamera : MonoBehaviour
         if (beginRc != 0 && (_frameCount < 5 || (_frameCount % 300) == 0))
             Log.LogWarning($"[VRCamera] xrBeginFrame rc={beginRc} (non-fatal)");
         _frameOpen = true;
+        LoadStallLog.FrameOpened();
 
         if (OpenXRManager.LocateViews(_displayTime, out _leftEye, out _rightEye))
         {
@@ -677,6 +679,7 @@ public class VRCamera : MonoBehaviour
     {
         if (!_stereoReady || !_frameOpen) return;
         _frameOpen = false;
+        LoadStallLog.FrameClosing();
 
         try
         {
