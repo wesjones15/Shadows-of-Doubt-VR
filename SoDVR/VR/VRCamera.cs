@@ -690,21 +690,12 @@ public class VRCamera : MonoBehaviour
                 return;
             }
 
-            // Skip full renders when:
-            // (a) the game camera is absent (scene transition / world gen), OR
-            // (b) we are inside a save-reload grace period that was triggered while a game
-            //     camera was live (_prevGameCamValid) — same GPU-overload risk as (a),
-            //     because city generation runs during the reload.
-            // ATW holds the last valid frame in the headset so the transition is invisible.
+            // The city is never rendered while it has no camera or a load is under way (the grace
+            // that follows a load click while a game camera is live) — generating it and drawing it
+            // at once overloads the GPU. The void room stands in for it: the eye cameras are masked
+            // to the room's layer, so the render path below draws only the room and the panels.
+            // With the room disabled in config, those frames are submitted empty instead.
             bool inReloadGrace = _sceneLoadGrace > 0 && _prevGameCamValid;
-
-            // No game camera means the pre-game screens (press-any-key, loading, early
-            // startup) — and the main menu counts too, since its real backdrop is the game's
-            // skybox, which costs more and looks worse in a headset than the void room it's
-            // otherwise replaced by. Tick() shows/hides the room and masks the eye cameras to
-            // it accordingly; when it reports void mode we still fall through to the normal
-            // render path below so the room itself gets rendered, rather than submitting an
-            // empty frame.
             bool voidMode = _voidRoom.Tick(_gameCam, _leftCam, _rightCam, inReloadGrace);
             if (!voidMode && (_gameCam == null || inReloadGrace))
             {

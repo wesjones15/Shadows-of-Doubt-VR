@@ -126,11 +126,9 @@ internal sealed class VoidRoomController
     {
         bool atMainMenu = (ShowOnMainMenu?.Value ?? true) && TryGetMainMenuActive(out bool mm) && mm;
 
-        // inReloadGrace protects against rendering the raw scene while a city is generating —
-        // it must not also suppress the void room, since the room only ever draws itself
-        // (eye cameras are masked off the city's layer entirely) and costs the same regardless.
-        bool voidMode = (gameCam == null || atMainMenu)
-                      && (!inReloadGrace || atMainMenu)
+        // A load from in game keeps its old camera until the scene is torn down; the room covers
+        // that stretch too, rather than leaving it black, since it never draws the city.
+        bool voidMode = (gameCam == null || atMainMenu || inReloadGrace)
                       && (Enabled?.Value ?? true);
 
         if (voidMode != InVoidMode)
