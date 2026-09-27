@@ -1088,7 +1088,8 @@ public static class OpenXRManager
     }
 
     /// <summary>
-    /// xrEndFrame with a XrCompositionLayerProjection for both eyes.
+    /// xrEndFrame with a XrCompositionLayerProjection for both eyes, over any layers given, which
+    /// then show through wherever the eye image's alpha lets them (premultiplied).
     /// XrCompositionLayerProjectionView layout (x64, 96 bytes):
     ///   type(4) pad(4) next(8) pose(28) fov(16) [pad 4] subImage(28+4pad) = 96 bytes
     ///   subImage: swapchain(8) at +64, rect.offset(8) at +72, rect.extent(8) at +80, arrayIdx(4) at +88
@@ -1096,15 +1097,17 @@ public static class OpenXRManager
     ///   type(4) pad(4) next(8) layerFlags(8) space(8) viewCount(4) pad(4) views*(8)
     /// </summary>
     public static void FrameEndStereo(long displayTime,
-        EyePose leftEye, EyePose rightEye, uint leftIdx, uint rightIdx, IntPtr extraLayers = default, int extraCount = 0)
+        EyePose leftEye, EyePose rightEye, uint leftIdx, uint rightIdx, IntPtr underLayers = default, int underCount = 0)
     {
         if (_dEndFrame == null || _session == 0) return;
         try
         {
-            extraCount = Math.Min(extraCount, MaxFrameLayers - 1);
-            for (int i = 0; i < extraCount; i++)
-                Marshal.WriteIntPtr(_bLayerPtr, (1 + i) * IntPtr.Size, Marshal.ReadIntPtr(extraLayers, i * IntPtr.Size));
-            Marshal.WriteInt32(_bFrameEndInfo, 28, 1 + extraCount); // layerCount: the eyes, then the extras on top
+            underCount = Math.Min(underCount, MaxFrameLayers - 1);
+            for (int i = 0; i < underCount; i++)
+                Marshal.WriteIntPtr(_bLayerPtr, i * IntPtr.Size, Marshal.ReadIntPtr(underLayers, i * IntPtr.Size));
+            Marshal.WriteIntPtr(_bLayerPtr, underCount * IntPtr.Size, _bProjLayer);
+            Marshal.WriteInt64(_bProjLayer, 16, underCount > 0 ? (long)SoDVR.VR.XrQuadLayer.BlendTextureSourceAlpha : 0);
+            Marshal.WriteInt32(_bFrameEndInfo, 28, underCount + 1);
             const int projViewSz = 96;
             // Write eye poses + swapchain indices into pre-allocated projection-view buffers.
             WriteProjectionView(_bProjViews,              leftEye,  LeftSwapchain,  leftIdx);
@@ -1134,21 +1137,6 @@ public static class OpenXRManager
                 Log.LogWarning($"  xrEndFrame(stereo)#{_stereoCallCount} rc={rc}  space=0x{ReferenceSpace:X} L-sc=0x{LeftSwapchain:X} R-sc=0x{RightSwapchain:X} lidx={leftIdx} ridx={rightIdx}");
         }
         catch (Exception ex) { Log.LogWarning($"  FrameEndStereo: {ex.Message}"); }
-    }
-
-    /// <summary>A second projection layer over the eyes' (the lasers): same poses and fields of
-    /// view, its own swapchains of the eyes' size.</summary>
-    internal static void WriteProjectionLayer(IntPtr layer, IntPtr views, EyePose leftEye, EyePose rightEye,
-        ulong leftSwapchain, ulong rightSwapchain, ulong layerFlags)
-    {
-        const int projViewSz = 96;
-        WriteProjectionView(views,              leftEye,  leftSwapchain,  0);
-        WriteProjectionView(views + projViewSz, rightEye, rightSwapchain, 0);
-        Marshal.WriteInt32(layer, 0, 35);                        // XR_TYPE_COMPOSITION_LAYER_PROJECTION
-        Marshal.WriteInt64(layer, 16, (long)layerFlags);
-        Marshal.WriteInt64(layer, 24, (long)ReferenceSpace);
-        Marshal.WriteInt32(layer, 32, 2);                        // viewCount
-        Marshal.WriteIntPtr(layer, 40, views);
     }
 
     private static void WriteProjectionView(IntPtr p, EyePose eye, ulong sc, uint imgIdx)

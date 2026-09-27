@@ -738,7 +738,7 @@ public class VRCamera : MonoBehaviour
             }
 
             RenderTexture mirrorImage = _leftRT;
-            int extraLayers = 0;
+            int underLayers = 0;
             if ((_frameCount % RenderEveryNFrames) == 0)
             {
                 if ((_frameCount % (RenderEveryNFrames * 4)) == 0)
@@ -813,26 +813,19 @@ public class VRCamera : MonoBehaviour
                     _keyboard.AppendOverlay(_overlay);
                     _handPointer.AppendOverlay(_overlay, _leftCam);
                     _rtPanelInput.AppendOverlay(_overlay);
-                    // Crisp menus: the menu and top bands as quad layers over the eyes, the lasers
-                    // in a layer above them; everything else stays in the eye image.
+                    // Crisp menus: the menu and top bands as quad layers under the eyes, which are
+                    // see-through where those panels are; everything else stays in the eye image.
                     _panelCopy.BeginFrame(_leftCam.transform.position, _leftEye);
-                    var above = VRSettings.PanelLayers && _overlay.HasPanelsAbove
+                    var above = VRSettings.PanelLayers && _overlay.HasPanelsAbove && _overlay.CanOpenOverPanels
                         ? _mainLayers.PanelLayers(_cameraOffset, _overlay.PanelsAbove(_leftCam.transform.position), _panelCopy)
                         : null;
                     bool panelLayers = above != null;
-                    var laserTargets = panelLayers && _overlay.HasLasers ? _mainLayers.LaserTargets(_leftRT.width, _leftRT.height) : null;
-                    bool laserLayer = laserTargets != null;
                     if (panelLayers && VRSettings.MonitorMirror) mirrorImage = _mainLayers.MirrorWorld(_leftRT);
 
-                    _overlay.Composite(_rightCam, _rightRT, panelLayers, laserLayer);
-                    _overlay.Composite(_leftCam, _leftRT, panelLayers, laserLayer);
+                    _overlay.Composite(_rightCam, _rightRT, panelLayers);
+                    _overlay.Composite(_leftCam, _leftRT, panelLayers);
                     if (mirrorImage != _leftRT) _overlay.Composite(_leftCam, mirrorImage);
-                    if (laserTargets is { } lasers)
-                    {
-                        _overlay.CompositeLasers(_rightCam, lasers.right);
-                        _overlay.CompositeLasers(_leftCam, lasers.left);
-                    }
-                    if (panelLayers) extraLayers = _mainLayers.Build(above!, laserLayer, _leftEye, _rightEye);
+                    if (panelLayers) underLayers = _mainLayers.Build(above!);
                 }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] PostFXOverlay: {ex.Message}"); }
             }
@@ -856,7 +849,7 @@ public class VRCamera : MonoBehaviour
             }
 
             HangWatch.Mark("xrEndFrame");
-            OpenXRManager.FrameEndStereo(_displayTime, _leftEye, _rightEye, leftIdx, rightIdx, _mainLayers.Layers, extraLayers);
+            OpenXRManager.FrameEndStereo(_displayTime, _leftEye, _rightEye, leftIdx, rightIdx, _mainLayers.Layers, underLayers);
 
             // Set Camera.main rotation to controller AFTER all HDRP rendering is done.
             // HDRP reads Camera.main.rotation during Update/Render to compute shadows,

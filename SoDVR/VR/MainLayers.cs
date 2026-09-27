@@ -1,39 +1,29 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using BepInEx.Logging;
 using UnityEngine;
 
 namespace SoDVR.VR;
 
 /// <summary>
-/// The layers each normal frame submits over the eyes, for crisp menus: the menu and top panel bands
-/// (popups, tooltips, the keyboard, VR Settings) as quad layers, sampled by the compositor at full
-/// resolution, then the lasers in a transparent projection layer on top, since anything drawn in the
-/// eye image would sit under the panel layers. The world, the normal-band panels and the world dots
-/// stay in the eye image. See docs/postfx_immune_ui.md, "Sharper panels: OpenXR quad layers".
+/// The layers each normal frame submits under the eyes, for crisp menus: the menu and top panel
+/// bands (popups, tooltips, the keyboard, VR Settings) as quad layers, sampled by the compositor
+/// at full resolution. The eye image goes over them, see-through where they are
+/// (<see cref="PostFXOverlayCompositor"/>), so the lasers stay in it, drawn as they always were, and
+/// still cover the panels. The world, the normal-band panels and the world dots stay in the eye
+/// image too. See docs/postfx_immune_ui.md, "Sharper panels: OpenXR quad layers".
 /// </summary>
 internal sealed class MainLayers
 {
-    private static ManualLogSource Log => Plugin.Log;
-
-    // Beside the eyes' own layer and the lasers'.
-    private const int MaxPanels = OpenXRManager.MaxFrameLayers - 2;
-    private const int ProjectionLayerSize = 48;
-    private const int ProjectionViewsSize = 2 * 96;
+    // Beside the eyes' own layer.
+    private const int MaxPanels = OpenXRManager.MaxFrameLayers - 1;
 
     private readonly IntPtr _quads = Alloc(XrQuadLayer.Size * MaxPanels);
-    private readonly IntPtr _laserLayer = Alloc(ProjectionLayerSize);
-    private readonly IntPtr _laserViews = Alloc(ProjectionViewsSize);
-    private readonly IntPtr _pointers = Alloc(IntPtr.Size * (MaxPanels + 1));
+    private readonly IntPtr _pointers = Alloc(IntPtr.Size * MaxPanels);
     private readonly List<QuadLayerDesc> _panels = new();
+    private RenderTexture? _mirror;
 
-    private RenderTexture? _laserLeft, _laserRight, _mirror;
-    private ulong _laserSwapLeft, _laserSwapRight;
-    private IntPtr[] _laserImagesLeft = Array.Empty<IntPtr>(), _laserImagesRight = Array.Empty<IntPtr>();
-    private bool _laserFailed;
-
-    /// <summary>This frame's layer pointers, for xrEndFrame after the eyes' layer.</summary>
+    /// <summary>This frame's layer pointers, for xrEndFrame before the eyes' layer.</summary>
     public IntPtr Layers => _pointers;
 
     /// <summary>The menu and top panels as this frame's quad layers, or null when one of them can't
@@ -50,27 +40,6 @@ internal sealed class MainLayers
         return _panels;
     }
 
-    /// <summary>Transparent eye-sized targets for the lasers' layer, or null if its swapchains
-    /// can't be made (the lasers then stay in the eye image, under the panel layers).</summary>
-    public (RenderTexture left, RenderTexture right)? LaserTargets(int width, int height)
-    {
-        if (_laserFailed) return null;
-        if (_laserLeft == null)
-        {
-            if (!OpenXRManager.CreateLayerSwapchain(width, height, out _laserSwapLeft, out _laserImagesLeft) ||
-                !OpenXRManager.CreateLayerSwapchain(width, height, out _laserSwapRight, out _laserImagesRight))
-            {
-                Log.LogWarning("[MainLayers] No swapchains for the lasers' layer — lasers stay under panel layers.");
-                _laserFailed = true;
-                return null;
-            }
-            _laserLeft = EyeTexture(width, height, "SoDVR_LaserLayer_L");
-            _laserRight = EyeTexture(width, height, "SoDVR_LaserLayer_R");
-            Log.LogInfo($"[MainLayers] Lasers' layer {width}x{height}.");
-        }
-        return (_laserLeft, _laserRight!);
-    }
-
     /// <summary>
     /// The monitor mirror shows the left eye, whose image no longer holds the layered panels: it gets
     /// a copy of the eye's world image, over which the caller composites every panel.
@@ -82,9 +51,8 @@ internal sealed class MainLayers
         return _mirror;
     }
 
-    /// <summary>Writes this frame's layers: the panels, then the lasers if they were drawn.
-    /// Returns how many.</summary>
-    public int Build(List<QuadLayerDesc> panels, bool lasers, OpenXRManager.EyePose leftEye, OpenXRManager.EyePose rightEye)
+    /// <summary>Writes this frame's panel layers. Returns how many.</summary>
+    public int Build(List<QuadLayerDesc> panels)
     {
         int count = 0;
         foreach (var desc in panels)
@@ -92,14 +60,6 @@ internal sealed class MainLayers
             IntPtr q = _quads + count * XrQuadLayer.Size;
             XrQuadLayer.Write(q, desc, XrQuadLayer.BlendTextureSourceAlpha);
             Marshal.WriteIntPtr(_pointers, count++ * IntPtr.Size, q);
-        }
-        if (lasers && _laserLeft != null &&
-            CameraRig.CopyEye("LaserL", _laserSwapLeft, _laserImagesLeft, _laserLeft, int.MaxValue, out _) &&
-            CameraRig.CopyEye("LaserR", _laserSwapRight, _laserImagesRight, _laserRight!, int.MaxValue, out _))
-        {
-            OpenXRManager.WriteProjectionLayer(_laserLayer, _laserViews, leftEye, rightEye,
-                _laserSwapLeft, _laserSwapRight, XrQuadLayer.BlendTextureSourceAlpha);
-            Marshal.WriteIntPtr(_pointers, count++ * IntPtr.Size, _laserLayer);
         }
         return count;
     }

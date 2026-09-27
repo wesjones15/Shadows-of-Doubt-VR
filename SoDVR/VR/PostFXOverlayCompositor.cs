@@ -56,6 +56,11 @@ internal sealed class PostFXOverlayCompositor
     private Mesh? _laserMesh;
     private Material? _laserMaterial;
     private Vector3 _sortEyePos;
+    private Mesh? _screenMesh;
+    private Material? _clearAlphaMaterial, _dimMaterial;
+    private MaterialPropertyBlock? _openingProps;
+    private bool _openingFailed;
+    private static readonly int MainTexId = Shader.PropertyToID("_MainTex");
 
     public void BeginFrame()
     {
@@ -86,18 +91,17 @@ internal sealed class PostFXOverlayCompositor
         _dots.Add((Matrix4x4.TRS(position, Quaternion.LookRotation(facing), Vector3.one * diameter), material));
     }
 
-    /// <param name="panelsAboveAsLayers">The menu and top bands go to quad layers over the eyes
-    /// (<see cref="MainLayers"/>): draw only the bands beneath them.</param>
-    /// <param name="lasersAsLayer">The lasers go to their own layer on top.</param>
-    public void Composite(Camera eye, RenderTexture target, bool panelsAboveAsLayers = false, bool lasersAsLayer = false)
+    /// <param name="panelsAboveUnderneath">The menu and top bands go to quad layers under the eyes
+    /// (<see cref="MainLayers"/>): the bands beneath them are drawn, then the eye image is made
+    /// see-through where those panels cover it, so the lasers drawn after still sit on top.</param>
+    public void Composite(Camera eye, RenderTexture target, bool panelsAboveUnderneath = false)
     {
-        int bands = panelsAboveAsLayers ? (int)PanelLayer.Menu : _layers.Length;
-        bool lasers = !lasersAsLayer && _lasers.Count > 0;
+        int bands = panelsAboveUnderneath ? (int)PanelLayer.Menu : _layers.Length;
         int panels = 0;
         for (int i = 0; i < bands; i++) panels += _layers[i].Count;
-        if (panels == 0 && !lasers && _dots.Count == 0) return;
+        if (panels == 0 && _lasers.Count == 0 && _dots.Count == 0 && !panelsAboveUnderneath) return;
 
-        BeginDraw(eye, target, clearColour: false);
+        BeginDraw(eye, target);
         // Dots mark world surfaces, so any panel in front of one covers it.
         foreach (var (transform, material) in _dots)
             _cb!.DrawMesh(_dotMesh, transform, material, 0, 0);
@@ -107,19 +111,67 @@ internal sealed class PostFXOverlayCompositor
             foreach (var draw in _layers[i])
                 _cb!.DrawMesh(draw.Mesh, draw.LocalToWorld, draw.Material, 0, 0);
         }
-        if (lasers) DrawLasers();
-        Graphics.ExecuteCommandBuffer(_cb);
-    }
-
-    /// <summary>The lasers alone, over transparent black: the top layer, above the panel layers.</summary>
-    public void CompositeLasers(Camera eye, RenderTexture target)
-    {
-        BeginDraw(eye, target, clearColour: true);
+        if (panelsAboveUnderneath) OpenOverPanelsAbove(eye);
         DrawLasers();
         Graphics.ExecuteCommandBuffer(_cb);
     }
 
-    public bool HasLasers => _lasers.Count > 0;
+    /// <summary>Whether the eye image can be opened over panel layers; without it they'd be hidden.</summary>
+    public bool CanOpenOverPanels => EnsureOpeningResources();
+
+    /// <summary>
+    /// The eye layer is blended over the panel layers as premultiplied colour: alpha 0 everywhere
+    /// lets them through, and the world is dimmed by each panel's coverage so what shows is the
+    /// panel over the world. Whatever is drawn after with alpha (the lasers) covers the panels.
+    /// </summary>
+    private void OpenOverPanelsAbove(Camera eye)
+    {
+        if (!EnsureOpeningResources()) return;
+        _cb!.SetViewProjectionMatrices(Matrix4x4.identity, Matrix4x4.identity);
+        _cb.DrawMesh(_screenMesh, Matrix4x4.identity, _clearAlphaMaterial, 0, 0);
+        _cb.SetViewProjectionMatrices(eye.worldToCameraMatrix, FlipY * eye.projectionMatrix);
+        _openingProps ??= new MaterialPropertyBlock();
+        foreach (var band in AboveBands)
+            foreach (var draw in _layers[(int)band])
+            {
+                if (draw.Material.mainTexture is not { } texture) continue;
+                _openingProps.SetTexture(MainTexId, texture);
+                _cb.DrawMesh(draw.Mesh, draw.LocalToWorld, _dimMaterial, 0, 0, _openingProps);
+            }
+    }
+
+    private bool EnsureOpeningResources()
+    {
+        if (_screenMesh != null && _clearAlphaMaterial != null && _dimMaterial != null) return true;
+        if (_openingFailed) return false;
+        var colored = Shader.Find("Hidden/Internal-Colored");
+        var ui = Shader.Find("UI/Default");
+        if (colored == null || ui == null)
+        {
+            Log.LogWarning($"[PostFXOverlay] Hidden/Internal-Colored found={colored != null}, UI/Default found={ui != null} — panels stay in the eye image.");
+            _openingFailed = true;
+            return false;
+        }
+        // Zero × source + destination × source colour: colour × 1 is kept, alpha × 0 is cleared.
+        _clearAlphaMaterial = new Material(colored) { name = "SoDVR_OverlayClearAlphaMat", color = new Color(1f, 1f, 1f, 0f), hideFlags = KeepAcrossLoads };
+        _clearAlphaMaterial.SetInt("_SrcBlend", (int)BlendMode.Zero);
+        _clearAlphaMaterial.SetInt("_DstBlend", (int)BlendMode.SrcColor);
+        _clearAlphaMaterial.SetInt("_ZWrite", 0);
+        _clearAlphaMaterial.SetInt("_ZTest", (int)CompareFunction.Always);
+        _clearAlphaMaterial.SetInt("_Cull", (int)CullMode.Off);
+        // Black at the texture's alpha, blended over the world with alpha untouched: world × (1 − coverage).
+        _dimMaterial = new Material(ui) { name = "SoDVR_OverlayDimMat", color = Color.black, hideFlags = KeepAcrossLoads };
+        _dimMaterial.SetInt("_ColorMask", (int)ColorWriteMask.All & ~(int)ColorWriteMask.Alpha);
+        Log.LogInfo("[PostFXOverlay] Eye image opens over panel layers: blend properties " +
+                    $"{_clearAlphaMaterial.HasProperty("_SrcBlend") && _clearAlphaMaterial.HasProperty("_DstBlend")}, " +
+                    $"colour mask {_dimMaterial.HasProperty("_ColorMask")}.");
+
+        _screenMesh = new Mesh { name = "SoDVR_OverlayScreenMesh", hideFlags = KeepAcrossLoads };
+        _screenMesh.vertices = new[] { new Vector3(-1f, -1f, 0f), new Vector3(1f, -1f, 0f), new Vector3(1f, 1f, 0f), new Vector3(-1f, 1f, 0f) };
+        _screenMesh.colors = new[] { Color.white, Color.white, Color.white, Color.white };
+        _screenMesh.triangles = new[] { 0, 1, 2, 0, 2, 3 };
+        return true;
+    }
 
     public bool HasPanelsAbove => _layers[(int)PanelLayer.Menu].Count + _layers[(int)PanelLayer.Top].Count > 0;
 
@@ -157,12 +209,12 @@ internal sealed class PostFXOverlayCompositor
         return Rect.MinMaxRect(min.x * texture.width, min.y * texture.height, max.x * texture.width, max.y * texture.height);
     }
 
-    private void BeginDraw(Camera eye, RenderTexture target, bool clearColour)
+    private void BeginDraw(Camera eye, RenderTexture target)
     {
         _cb ??= new CommandBuffer { name = "SoDVR_PostFXOverlay" };
         _cb.Clear();
         _cb.SetRenderTarget(target);
-        _cb.ClearRenderTarget(true, clearColour, Color.clear);
+        _cb.ClearRenderTarget(true, false, Color.clear);
         _cb.SetViewProjectionMatrices(eye.worldToCameraMatrix, FlipY * eye.projectionMatrix);
         _sortEyePos = eye.transform.position;
     }
