@@ -166,9 +166,10 @@ internal sealed class HudRTPanels
     /// <summary>
     /// Poses <paramref name="view"/> as if its content were drawn at <paramref name="hudRect"/> of the
     /// HUD texture — which may run past the screen's edge, e.g. just under the key hints at its
-    /// bottom — so it moves with the HUD elements there. False when the HUD isn't showing.
+    /// bottom — so it moves with the HUD elements there: those on <paramref name="sideOf"/>'s side.
+    /// False when the HUD isn't showing.
     /// </summary>
-    public bool PlaceAt(RTPanelView view, Rect hudRect)
+    public bool PlaceAt(RTPanelView view, Rect hudRect, Rect sideOf)
     {
         if (_panel.Texture == null) return false;
         switch (_placement)
@@ -177,7 +178,7 @@ internal sealed class HudRTPanels
                 return PlaceOnSheet(view, hudRect.center);
             case Placement.CaseBoard:
             case Placement.Computer:
-                var side = SideOf(hudRect);
+                var side = SideOf(sideOf);
                 if (!_frameShifts.TryGetValue(side, out var shift)) shift = ShiftClearOfFrame(side, hudRect);
                 PlaceInFrame(view, hudRect, side, shift);
                 return true;
