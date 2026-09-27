@@ -352,8 +352,9 @@ public static class VRSettingsPanel
         ConfigFloat(t, "HUD Size", VRSettings.HudSizeEntry, HudSizeOptions, v => $"{v:0.##}×");
         ConfigFloat(t, "HUD Height", VRSettings.HudVerticalOffsetEntry, HudHeightOptions, v => $"{v:+0.00;-0.00;0} m");
 
-        SectionHeader(t, "─── RENDERING · NEXT LAUNCH ───");
-        ConfigFloat(t, "Render Scale", VRSettings.RenderScaleEntry, RenderScaleOptions, v => $"{v:0.0}×");
+        SectionHeader(t, "─── RENDERING ───");
+        ConfigToggle(t, "Monitor Mirror", VRSettings.MonitorMirrorEntry);
+        ConfigFloat(t, "Scale (restart)", VRSettings.RenderScaleEntry, RenderScaleOptions, v => $"{v:0.0}×");
     }
 
     // ── Rows ──────────────────────────────────────────────────────────────────

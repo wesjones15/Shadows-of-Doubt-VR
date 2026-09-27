@@ -79,6 +79,7 @@ public class VRCamera : MonoBehaviour
     private readonly HandPointer _handPointer = new();
     private readonly CompassDisplay _compass = new(UILayer);
     private readonly PostFXOverlayCompositor _overlay = new();
+    private readonly MonitorMirror _mirror = new();
     // Render throttle: call Camera.Render() every N stereo frames.
     // 1 = every frame (full quality). 2 = every other frame (half GPU load, slight judder).
     // The swapchain copy still runs every frame, so head tracking stays smooth via ATW.
@@ -804,6 +805,8 @@ public class VRCamera : MonoBehaviour
                 }
                 catch (Exception ex) { Log.LogWarning($"[VRCamera] PostFXOverlay: {ex.Message}"); }
             }
+
+            _mirror.Tick(_leftRT, _leftEye);
 
             HangWatch.Mark("swapchain copy");
             bool leftOk = CameraRig.CopyEye("L", OpenXRManager.LeftSwapchain, OpenXRManager.LeftSwapchainImages, _leftRT, _frameCount, out uint leftIdx);
