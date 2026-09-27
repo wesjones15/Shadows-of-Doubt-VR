@@ -86,15 +86,29 @@ internal sealed class GameFrameBox
             _title.GetPreferredValues(title).x,
             detail.Length > 0 ? _detail.GetPreferredValues(detail).x : 0f));
         float titleHeight = _title.GetPreferredValues(title, width, 0f).y;
-        float detailHeight = detail.Length > 0 ? _detail.GetPreferredValues(detail, width, 0f).y : 0f;
+        float detailHeight = 0f, above = 0f, below = 0f;
+        if (detail.Length > 0)
+        {
+            detailHeight = _detail.GetPreferredValues(detail, width, 0f).y;
+            _detail.rectTransform.sizeDelta = new Vector2(width, detailHeight);
+            (above, below) = Overhang(_detail, detailHeight);
+        }
         float gap = detail.Length > 0 ? LineGap : 0f;
 
-        var box = new Vector2(width + 2f * PaddingX, titleHeight + gap + detailHeight + 2f * PaddingY);
+        var box = new Vector2(width + 2f * PaddingX, titleHeight + gap + above + detailHeight + below + 2f * PaddingY);
         _frame.sizeDelta = box;
         _title.rectTransform.sizeDelta = new Vector2(width, titleHeight);
         _title.rectTransform.anchoredPosition = new Vector2(0f, 0.5f * box.y - PaddingY - 0.5f * titleHeight);
-        _detail.rectTransform.sizeDelta = new Vector2(width, detailHeight);
-        _detail.rectTransform.anchoredPosition = new Vector2(0f, -0.5f * box.y + PaddingY + 0.5f * detailHeight);
+        _detail.rectTransform.anchoredPosition = new Vector2(0f, -0.5f * box.y + PaddingY + below + 0.5f * detailHeight);
+    }
+
+    /// <summary>How far the drawn text stands above and below its measured lines: a button glyph
+    /// is taller than the line it sits in, and would otherwise touch the title.</summary>
+    private static (float above, float below) Overhang(TextMeshProUGUI text, float height)
+    {
+        text.ForceMeshUpdate(true, true);
+        var bounds = text.textBounds;
+        return (Mathf.Max(0f, bounds.max.y - 0.5f * height), Mathf.Max(0f, -bounds.min.y - 0.5f * height));
     }
 
     private static TextMeshProUGUI AddText(Transform parent, string name, int layer, TMP_FontAsset font, float size, Color colour)
