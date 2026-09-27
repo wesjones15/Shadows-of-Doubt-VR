@@ -839,11 +839,12 @@ public class VRCamera : MonoBehaviour
         try { _rtPanelGrip.Update(_rightControllerGO, _leftControllerGO, MainHand.IsRight); }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] RTPanelGrip.Update: {ex.Message}"); }
 
+        bool menuOpen = _menuRTPanel.Canvas != null && _menuRTPanel.Canvas.isActiveAndEnabled;
+        bool inMenu = menuOpen || _caseBoardRT.IsOpen || VRSettingsPanel.RootGO?.activeSelf == true;
         try
         {
-            bool menuOpen = _menuRTPanel.Canvas != null && _menuRTPanel.Canvas.isActiveAndEnabled;
             bool laserOnPanel = _rtPanelInput.HasFocus || _rtPanelInput.IsCapturing;
-            bool pointerHidden = menuOpen || ComputerUse.InUse || VRSettingsPanel.RootGO?.activeSelf == true || laserOnPanel;
+            bool pointerHidden = inMenu || ComputerUse.InUse || laserOnPanel;
             _handPointer.Update(MainHand.Pick(_rightControllerGO, _leftControllerGO), _gameCamRef, _interactionLayerMask, _baseInteractionRange, pointerHidden);
         }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] HandPointer.Update: {ex.Message}"); }
@@ -851,7 +852,7 @@ public class VRCamera : MonoBehaviour
         try
         {
             _rtPanelInput.Update(_rightControllerGO, _leftControllerGO,
-                new RTPanelClickContext(field => _keyboard.OpenFor(field, _leftCam)));
+                new RTPanelClickContext(field => _keyboard.OpenFor(field, _leftCam)), laserOffPanels: inMenu);
         }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] RTPanelInput.Update: {ex.Message}"); }
 

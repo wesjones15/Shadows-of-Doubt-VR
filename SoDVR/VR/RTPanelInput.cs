@@ -22,6 +22,7 @@ internal sealed class RTPanelInput
     private const float MaxRayDistance = 15f;
     private const float ScrollDeadZone = 0.2f;
     private const float ScrollPerSecond = 6f;
+    private const float MissLaserLength = 3f;
 
     private readonly List<RTPanelPointer> _pointers = new();
 
@@ -60,7 +61,9 @@ internal sealed class RTPanelInput
         if (_captured == pointer) _captured = null;
     }
 
-    public void Update(GameObject? rightControllerGO, GameObject? leftControllerGO, in RTPanelClickContext ctx)
+    /// <param name="laserOffPanels">In a menu: the laser shows even pointing past every panel, so it
+    /// can always be found.</param>
+    public void Update(GameObject? rightControllerGO, GameObject? leftControllerGO, in RTPanelClickContext ctx, bool laserOffPanels)
     {
         OpenXRManager.GetTriggerState(true, out bool rightTrigger);
         OpenXRManager.GetTriggerState(false, out bool leftTrigger);
@@ -114,7 +117,12 @@ internal sealed class RTPanelInput
         }
 
         if (input.Press || input.SecondaryClick) Pressed?.Invoke(nearest);
-        if (nearest == null) { DropFocus(); return; }
+        if (nearest == null)
+        {
+            DropFocus();
+            if (laserOffPanels) ShowLaser(ray.origin, ray.GetPoint(MissLaserLength));
+            return;
+        }
 
         if (_focus != nearest) _focus?.LoseFocus();
         _focus = nearest;
