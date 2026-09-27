@@ -116,27 +116,6 @@ internal static class QuestGlyphs
         }
     }
 
-    // Evidence for the hint rows' text box with a glyph in it (once per key); removed once they show.
-    private static readonly HashSet<InteractionKey> s_loggedRows = new();
-
-    [HarmonyPatch(typeof(ControlDisplayController), nameof(ControlDisplayController.SetControlText))]
-    private static class RowText
-    {
-        private static void Postfix(ControlDisplayController __instance, InteractionKey key)
-        {
-            try
-            {
-                var t = __instance.controlText;
-                if (t == null || !s_loggedRows.Add(key)) return;
-                t.ForceMeshUpdate(true, false);
-                Log.LogInfo($"[QuestGlyphs] Row {key}: overflow {t.overflowMode} wrap {t.enableWordWrapping} rect {t.rectTransform.rect.size} " +
-                            $"preferred ({t.preferredWidth:F0},{t.preferredHeight:F0}) lines {t.textInfo?.lineCount} chars {t.textInfo?.characterCount} " +
-                            $"truncated {t.isTextTruncated} text '{t.text}'");
-            }
-            catch (Exception ex) { Log.LogWarning($"[QuestGlyphs] Row log: {ex.Message}"); }
-        }
-    }
-
     private static bool EnsureBuilt()
     {
         if (s_built) return true;
