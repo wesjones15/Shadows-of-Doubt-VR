@@ -29,6 +29,8 @@ internal static class QuestGlyphs
     private const string SheetResource = "QuestGlyphs.meta-quest_sheet_double.png";
     private const string AtlasResource = "QuestGlyphs.meta-quest_sheet_double.xml";
     private const float BaselineFraction = 0.85f;   // of a glyph's height above the baseline
+    // Without it, UpdateLookupTables runs TMP's upgrade of an old-format asset, which has no data.
+    private const string SpriteAssetVersion = "1.1.0";
     private const HideFlags KeepAcrossLoads = HideFlags.DontUnloadUnusedAsset;
 
     private static bool s_built;
@@ -123,6 +125,7 @@ internal static class QuestGlyphs
             var material = asset.GetDefaultSpriteMaterial();
             material.hideFlags |= KeepAcrossLoads;
             asset.material = material;
+            asset.m_Version = SpriteAssetVersion;
             asset.UpdateLookupTables();
             int hash = TMP_TextUtilities.GetSimpleHashCode(AssetName);
             asset.hashCode = hash;
