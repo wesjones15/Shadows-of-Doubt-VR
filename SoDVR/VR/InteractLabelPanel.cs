@@ -6,9 +6,9 @@ using UnityEngine.UI;
 namespace SoDVR.VR;
 
 /// <summary>
-/// The name and actions of what the left hand points at, in the game's decorated frame on a canvas
-/// of our own, drawn on a transparent RT panel just above the hit point and kept at the HUD's
-/// apparent size.
+/// The name and actions of what the main hand points at, in the game's decorated frame on a canvas
+/// of our own, drawn on a transparent RT panel just above the hit point: 1.5x the HUD's apparent
+/// size at a metre, smaller further off, so it doesn't dwarf a distant object.
 /// </summary>
 internal sealed class InteractLabelPanel
 {
@@ -16,8 +16,11 @@ internal sealed class InteractLabelPanel
 
     public const string CanvasName = "SoDVR_InteractLabelCanvas";
     // Bigger than the HUD, so the button glyphs read at a glance; drawn at that size, not stretched.
-    private const float LabelScale = 2.5f;
-    private static readonly Vector2Int SheetSize = new(2560, 1280);
+    private const float LabelScale = 1.5f;
+    private static readonly Vector2Int SheetSize = new(2048, 1024);
+    // The apparent size falls off with the square root of the distance: LabelScale at this distance,
+    // half that at four times it.
+    private const float ReferenceDistance = 1f;
     // Metres per sheet pixel are set by this width, not the sheet's: a bigger sheet only makes room.
     private const float ReferenceSheetWidth = 1024f;
     private const int DiscoveryRetryFrames = 90;
@@ -70,7 +73,9 @@ internal sealed class InteractLabelPanel
         // A menu or the board in front of it covers it, as it covers the world behind.
         if (RTCanvasPanel.IsBehindInteractivePanel(headPos, l.point)) { _view.Visible = false; return; }
         float distance = Mathf.Max(0.3f, Vector3.Distance(headPos, l.point));
-        _view.Scale = HudRTPanels.SheetMetersPerPixelAt(distance, Screen.width) * _gameScaleFactor / _panel.MetersPerPixel;
+        // Sized as a HUD label would be at the geometric mean of the distance and the reference one.
+        float sizedAt = Mathf.Sqrt(distance * ReferenceDistance);
+        _view.Scale = HudRTPanels.SheetMetersPerPixelAt(sizedAt, Screen.width) * _gameScaleFactor / _panel.MetersPerPixel;
         var position = l.point + Vector3.up * (AboveHitMeters + 0.5f * _view.WorldSize.y);
         _view.SetPose(position, Quaternion.LookRotation(position - headPos));
         _view.Visible = true;
