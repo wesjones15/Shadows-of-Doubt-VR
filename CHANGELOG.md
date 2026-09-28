@@ -11,6 +11,16 @@ Sharper panels everywhere, a VR-friendly pursuit warning, and fixes for facing, 
 **Tested on:** Quest 3, wireless over Virtual Desktop (VDXR OpenXR runtime), RTX 3080 Ti (driver
 591.86), Ryzen 7 7800X3D, 32 GB RAM.
 
+### At a glance
+
+- **Sharper everything.** Crisp Panels now covers the HUD, key hints, controls list, labels and the
+  case board, and thin frames no longer shimmer.
+- **A VR pursuit warning.** A red glow at the edge of your vision replaces the flat game's flashing
+  bars, with an optional heartbeat rumble.
+- **Fixes** for the black HUD after waking in hospital, which way you face after waking, loading or
+  sitting, tutorial popups leaving the game half-paused, and menus blurring your hands.
+- Smaller save/exit and tutorial popups.
+
 ### Sharper panels
 - **Crisp Panels** now covers the HUD, key hints, the controls list, labels and the case board, not
   just menus and popups. Up to 15 panels are sharpened at once; any beyond that are drawn as before.
