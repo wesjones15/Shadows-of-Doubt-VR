@@ -231,12 +231,11 @@ internal sealed class PostFXOverlayCompositor
     }
 
     // Clear across the middle of the view, rising towards its edges: full by the middle of each side,
-    // which the lenses still show (the corners they mostly don't). Only on each eye's outer side: where
-    // the eyes' views overlap, a glow seen by both reads as a haze in front of the face, not at the
-    // edge of vision.
+    // which the lenses still show (the corners they mostly don't). Round only on each eye's outer side:
+    // where the eyes' views overlap, a ring seen by both reads as a haze in front of the face, so there
+    // it runs straight along the top and bottom, joining the two eyes' halves.
     private const float GlowInnerRadius = 0.45f;
     private const float GlowOuterRadius = 0.95f;
-    private const float GlowSideFade = 0.3f;
     private const int GlowTextureSize = 128;
 
     private bool EnsureGlowResources()
@@ -254,8 +253,8 @@ internal sealed class PostFXOverlayCompositor
             for (int x = 0; x < GlowTextureSize; x++)
             {
                 var p = new Vector2((x + 0.5f) / GlowTextureSize * 2f - 1f, (y + 0.5f) / GlowTextureSize * 2f - 1f);
-                float a = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(GlowInnerRadius, GlowOuterRadius, p.magnitude));
-                a *= Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(GlowSideFade, -GlowSideFade, p.x));
+                float r = p.x < 0f ? p.magnitude : Mathf.Abs(p.y);
+                float a = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(GlowInnerRadius, GlowOuterRadius, r));
                 pixels[y * GlowTextureSize + x] = new Color32(255, 255, 255, (byte)(a * 255f));
             }
         texture.SetPixels32(pixels);
