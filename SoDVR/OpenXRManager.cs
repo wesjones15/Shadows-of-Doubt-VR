@@ -59,8 +59,10 @@ public static class OpenXRManager
     private static IntPtr _pfnCreateActionSpace, _pfnAttachSessionActionSets;
     private static IntPtr _pfnSyncActions, _pfnLocateSpace, _pfnGetActionStateBoolean;
     private static IntPtr _pfnGetActionStateVector2f, _pfnGetActionStateFloat;
+    private static IntPtr _pfnApplyHapticFeedback;
     private static ulong  _actionSet, _poseAction, _triggerAction, _thumbAction, _menuButtonAction, _gripAction;
     private static ulong  _buttonAAction, _buttonBAction, _buttonXAction, _thumbClickAction, _yButtonAction;
+    private static ulong  _hapticAction;
     private static ulong  _rightAimSpace, _leftAimSpace;
     private static ulong  _rightHandPath, _leftHandPath;
     public  static bool   ActionSetsReady { get; private set; }
@@ -209,6 +211,8 @@ public static class OpenXRManager
     private delegate int XrGetActionStateVector2fDelegate(ulong session, IntPtr getInfo, IntPtr state);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int XrGetActionStateFloatDelegate(ulong session, IntPtr getInfo, IntPtr state);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int XrApplyHapticFeedbackDelegate(ulong session, IntPtr hapticActionInfo, IntPtr hapticFeedback);
     // D3D11 vtable helpers
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate void D3D11GetImmediateContextDelegate(IntPtr device, out IntPtr context);
@@ -429,6 +433,7 @@ public static class OpenXRManager
             GetFn("xrGetActionStateBoolean",             out _pfnGetActionStateBoolean);
             GetFn("xrGetActionStateVector2f",            out _pfnGetActionStateVector2f);
             GetFn("xrGetActionStateFloat",              out _pfnGetActionStateFloat);
+            GetFn("xrApplyHapticFeedback",               out _pfnApplyHapticFeedback);
 
             // Cache per-frame delegates and pre-allocate struct buffers (eliminates per-frame
             // GetDelegateForFunctionPointer and AllocHGlobal overhead in hot render path).
@@ -1276,6 +1281,37 @@ public static class OpenXRManager
         finally { Marshal.FreeHGlobal(info); Marshal.FreeHGlobal(pathArr); }
     }
 
+    private static XrApplyHapticFeedbackDelegate? _dApplyHaptic;
+    private static IntPtr _bHapticInfo, _bHapticVibration;
+    private static bool _hapticFailureLogged;
+
+    /// <summary>A vibration on one controller at the runtime's default frequency.</summary>
+    public static void Vibrate(bool right, float seconds, float amplitude)
+    {
+        if (_pfnApplyHapticFeedback == IntPtr.Zero || _hapticAction == 0 || _session == 0) return;
+        _dApplyHaptic ??= Marshal.GetDelegateForFunctionPointer<XrApplyHapticFeedbackDelegate>(_pfnApplyHapticFeedback);
+        if (_bHapticInfo == IntPtr.Zero)
+        {
+            // XrHapticActionInfo: type(59)+pad+next(8)+action(8)+subactionPath(8) = 32
+            _bHapticInfo = Marshal.AllocHGlobal(32); Zero(_bHapticInfo, 32);
+            Marshal.WriteInt32(_bHapticInfo, 0, 59);
+            // XrHapticVibration: type(13)+pad+next(8)+duration ns(8)+frequency(4)+amplitude(4) = 32
+            _bHapticVibration = Marshal.AllocHGlobal(32); Zero(_bHapticVibration, 32);
+            Marshal.WriteInt32(_bHapticVibration, 0, 13);
+        }
+        Marshal.WriteInt64(_bHapticInfo, 16, (long)_hapticAction);
+        Marshal.WriteInt64(_bHapticInfo, 24, (long)(right ? _rightHandPath : _leftHandPath));
+        Marshal.WriteInt64(_bHapticVibration, 16, (long)(seconds * 1e9));
+        WriteFloat(_bHapticVibration, 24, 0f);   // XR_FREQUENCY_UNSPECIFIED
+        WriteFloat(_bHapticVibration, 28, Math.Clamp(amplitude, 0f, 1f));
+        int rc = _dApplyHaptic(_session, _bHapticInfo, _bHapticVibration);
+        if (rc < 0 && !_hapticFailureLogged)
+        {
+            _hapticFailureLogged = true;
+            Log.LogWarning($"  xrApplyHapticFeedback rc={rc}");
+        }
+    }
+
     private static ulong CreateActionSpace(ulong action, ulong subactionPath)
     {
         if (_pfnCreateActionSpace == IntPtr.Zero || _session == 0) return 0;
@@ -1348,6 +1384,7 @@ public static class OpenXRManager
             _buttonBAction     = CreateAction("button_b",     "B Button",     1, _rightHandPath);
             _buttonXAction     = CreateAction("button_x",     "X Button",     1, _leftHandPath);
             _thumbClickAction  = CreateAction("thumb_click",  "Thumb Click",  1, _leftHandPath, _rightHandPath);
+            _hapticAction      = CreateAction("haptic",       "Haptic",       100, _leftHandPath, _rightHandPath); // VIBRATION_OUTPUT
             if (_poseAction == 0 || _triggerAction == 0)
             { Log.LogWarning("  SetupActionSetsInstance: action creation failed"); return; }
 
@@ -1371,6 +1408,8 @@ public static class OpenXRManager
         {
             (_poseAction,       "/user/hand/right/input/aim/pose"),
             (_poseAction,       "/user/hand/left/input/aim/pose"),
+            (_hapticAction,     "/user/hand/right/output/haptic"),
+            (_hapticAction,     "/user/hand/left/output/haptic"),
             (_triggerAction,    "/user/hand/right/input/trigger/value"),
             (_triggerAction,    "/user/hand/left/input/trigger/value"),
             (_thumbAction,      "/user/hand/right/input/thumbstick"),
@@ -1391,6 +1430,8 @@ public static class OpenXRManager
         {
             (_poseAction,       "/user/hand/right/input/aim/pose"),
             (_poseAction,       "/user/hand/left/input/aim/pose"),
+            (_hapticAction,     "/user/hand/right/output/haptic"),
+            (_hapticAction,     "/user/hand/left/output/haptic"),
             (_triggerAction,    "/user/hand/right/input/trigger/value"),
             (_triggerAction,    "/user/hand/left/input/trigger/value"),
             (_thumbAction,      "/user/hand/right/input/thumbstick"),
@@ -1411,6 +1452,8 @@ public static class OpenXRManager
         {
             (_poseAction,       "/user/hand/right/input/aim/pose"),
             (_poseAction,       "/user/hand/left/input/aim/pose"),
+            (_hapticAction,     "/user/hand/right/output/haptic"),
+            (_hapticAction,     "/user/hand/left/output/haptic"),
             (_triggerAction,    "/user/hand/right/input/trigger/value"),
             (_triggerAction,    "/user/hand/left/input/trigger/value"),
             (_thumbAction,      "/user/hand/right/input/trackpad"),
@@ -1425,6 +1468,8 @@ public static class OpenXRManager
         {
             (_poseAction,       "/user/hand/right/input/aim/pose"),
             (_poseAction,       "/user/hand/left/input/aim/pose"),
+            (_hapticAction,     "/user/hand/right/output/haptic"),
+            (_hapticAction,     "/user/hand/left/output/haptic"),
             (_triggerAction,    "/user/hand/right/input/trigger/value"),
             (_triggerAction,    "/user/hand/left/input/trigger/value"),
             (_thumbAction,      "/user/hand/right/input/thumbstick"),
@@ -1441,6 +1486,8 @@ public static class OpenXRManager
         {
             (_poseAction,       "/user/hand/right/input/aim/pose"),
             (_poseAction,       "/user/hand/left/input/aim/pose"),
+            (_hapticAction,     "/user/hand/right/output/haptic"),
+            (_hapticAction,     "/user/hand/left/output/haptic"),
             (_triggerAction,    "/user/hand/right/input/select/click"),
             (_triggerAction,    "/user/hand/left/input/select/click"),
             (_menuButtonAction, "/user/hand/left/input/menu/click"),
