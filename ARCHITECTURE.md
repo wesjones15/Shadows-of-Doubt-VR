@@ -43,6 +43,7 @@ classDiagram
     VRCamera *-- DialogueRTPanel : _dialogueRT
     VRCamera *-- MinimapRTPanel : _minimapRT
     VRCamera *-- HudRTPanels : _hudRT
+    VRCamera *-- ScreenOverlays : _screenOverlays
     VRCamera *-- WorldMarksPanel : _worldMarks
     VRCamera *-- InteractLabelPanel : _interactLabel
     VRCamera *-- RadialMenuPanel : _radialMenu
@@ -119,6 +120,7 @@ classDiagram
 | `VRControlsPanel.cs` | The mod's own controls, under the game's key hints: Menus and World pages on the case board, the World page in the world if switched on. |
 | `MinimapRTPanel.cs` / `MapPointerExtension.cs` | The map window, body-locked or on the board; its drag, zoom and node picking. |
 | `HudRTPanels.cs` | GameCanvas as one transparent sheet following the head's heading, laid out around the case board or a computer screen when one is up. |
+| `ScreenOverlays.cs` | Culls the game's fades to black on GameCanvas (death, hospital) and logs any other screen-wide overlay the HUD sheet would carry. |
 | `WorldMarksPanel.cs` / `WorldMarksHeadView.cs` | Objective pointers, NPC reaction indicators and speech bubbles at their targets in the world, judged on-screen from the head. |
 | `InteractLabelPanel.cs` / `GameFrameBox.cs` | The name and actions of what the main hand points at, in the game's tooltip style. |
 | `RadialMenuPanel.cs` / `SoloScreens.cs` | Y: tap opens the board; hold for a radial menu opening the inventory, upgrades, notebook or map on its own. |
