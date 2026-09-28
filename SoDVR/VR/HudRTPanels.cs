@@ -35,6 +35,7 @@ internal sealed class HudRTPanels
     // transitions and dev overlays.
     private static readonly string[] FrameElementCanvases =
         { "StatusDisplayCanvas", "MessageSystemCanvas", "CentreDisplayCanvas", "ControlsDisplayCanvas", "InteractionProgressCanvas" };
+    private const string WorldMarksCanvas = "GameWorldDisplayCanvas";
     private const float ElementMarginPixels = 6f;
     // Elements whose centre is within this fraction of the screen width from a side belong to it.
     private const float SideFraction = 0.35f;
@@ -80,6 +81,7 @@ internal sealed class HudRTPanels
 
     public Canvas? Canvas => _panel.Canvas;
     public Camera? Projector => _panel.ProjectorCamera;
+    public RenderTexture? Texture => _panel.Texture;
     /// <summary>The HUD is on show (walking sheet, or laid out around a frame).</summary>
     public bool IsShowing { get; private set; }
 
@@ -191,6 +193,9 @@ internal sealed class HudRTPanels
     /// texture (RT pixels); <paramref name="graphicCount"/> is 0 when none show.</summary>
     public Rect ContentPixelRect(Transform content, out int graphicCount) =>
         _panel.ContentPixelRect(content, 0f, out graphicCount);
+
+    /// <summary>Whether a GameCanvas child is one of the HUD canvases the mod lays out.</summary>
+    public static bool IsKnownCanvas(string name) => name == WorldMarksCanvas || Array.IndexOf(FrameElementCanvases, name) >= 0;
 
     /// <summary>A HUD RectTransform's rect on the HUD texture (RT pixels), unclamped.</summary>
     public Rect PixelRectOf(RectTransform rt) => _panel.UnclampedPixelRectOf(rt);

@@ -248,7 +248,7 @@ internal sealed class RTCanvasPanel
         try
         {
             var cr = g.canvasRenderer;
-            return g.color.a * cr.GetAlpha() * cr.GetInheritedAlpha() > 0.01f;
+            return !cr.cull && g.color.a * cr.GetAlpha() * cr.GetInheritedAlpha() > 0.01f;
         }
         catch { return g.color.a > 0.01f; }
     }
