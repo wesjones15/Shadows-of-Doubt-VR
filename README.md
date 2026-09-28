@@ -157,10 +157,10 @@ Windows remember where you put them; "Window Positions: Reset" on the VR tab put
 While the pause menu or case board is open you can still walk, but only within 2 m of where you
 opened it. On the pre-game screens and the main menu you can't walk or turn.
 
-**In-headset help:** with the case board open, a **VR controls** list sits under the game's key
-hints, with Menus and World pages, plus live rows showing what the laser's current target accepts.
-Its "Show in world" switch (`ControlsInWorld`, "Controls in World" on the VR tab) keeps the World
-page up while you walk around.
+**In-headset help:** with the case board open, a **VR controls** list sits on the HUD's right side
+beside the board, with Menus and World pages, and a live row under the game's key hints shows what
+the laser's current target accepts. The list's "Show in world" switch (`ControlsInWorld`,
+"Controls in World" on the VR tab) keeps the World page up while you walk around.
 
 ### Keyboard
 
@@ -207,14 +207,14 @@ This version is a rewrite of most of the mod, built on Blah64's OpenXR foundatio
   point-and-trigger dialogue; stick zoom on the case board and map; a VR keyboard for text boxes;
   Quest button glyphs in the game's key hints; an in-headset controls list.
 - **HUD** on a transparent sheet that follows your head and makes room for the case board or a
-  computer screen. The awareness compass sits at your feet, and objective markers, NPC reactions
-  and speech bubbles appear at their targets in the world. Being chased shows a red glow at the
-  edge of your vision instead of the flat game's flashing bars.
+  computer screen. The awareness compass sits just under the HUD, a metre ahead, and objective
+  markers, NPC reactions and speech bubbles appear at their targets in the world. Being chased
+  shows a red glow at the edge of your vision instead of the flat game's flashing bars.
 - **Comfort and stability:** a simple room replaces blank frames on the pre-game screens and main
   menu, loading freezes no longer stutter the headset, the monitor mirrors the headset, and
   render scale is adjustable.
 - **Movement:** fall damage and knockdown work (optional knockdown), you can jump from a
-  standstill, and air vents allow 3D movement.
+  standstill, and jump speed and gravity are adjustable.
 - **VR Settings** rebuilt on the game's own settings, with Apply / Reset Defaults and a VR tab for
   all of the mod's options.
 - **Code:** the original 9,000-line `VRCamera.cs` is split into ~70 files by subsystem. See

@@ -60,6 +60,7 @@ Copy-Item $PreloadDll "$TmpDir\BepInEx\patchers\SoDVR\SoDVR.Preload.dll"
 Copy-Item $LoaderDll  "$TmpDir\BepInEx\patchers\SoDVR\RuntimeDeps\Native\openxr_loader.dll"
 Copy-Item $ConfigFile "$TmpDir\BepInEx\config\com.sodvr.mod.cfg"
 Copy-Item "$Root\README.md" "$TmpDir\README.md"
+Copy-Item "$Root\CHANGELOG.md" "$TmpDir\CHANGELOG.md"
 Copy-Item "$Root\LICENSE" "$TmpDir\LICENSE"
 Copy-Item "$Root\licenses" "$TmpDir\licenses" -Recurse
 
