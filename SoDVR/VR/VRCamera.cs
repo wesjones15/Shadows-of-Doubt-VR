@@ -72,6 +72,7 @@ public class VRCamera : MonoBehaviour
     private HudRTPanels _hudRT = null!;
     private readonly ScreenOverlays _screenOverlays = new();
     private readonly GameTurns _gameTurns = new();
+    private readonly PauseBlur _pauseBlur = new();
     private ClueMessagePanel _clueRT = null!;
     private VRControlsPanel _controlsRT = null!;
     private WorldMarksPanel _worldMarks = null!;
@@ -300,6 +301,7 @@ public class VRCamera : MonoBehaviour
 
         try { _hudRT.Tick(_leftCam, _caseBoardRT.ShowsBoard, _caseBoardRT.Anchor, _caseBoardRT.BoardExtent); }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] HudRTPanels.Tick: {ex.GetType().Name}: {ex.Message}"); }
+        _pauseBlur.Tick();
         try { _screenOverlays.Tick(_hudRT); }
         catch (Exception ex) { Log.LogWarning($"[VRCamera] ScreenOverlays.Tick: {ex.GetType().Name}: {ex.Message}"); }
         try { _compass.Tick(); }
