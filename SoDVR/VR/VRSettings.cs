@@ -69,7 +69,7 @@ internal static class VRSettings
             "Height of the HUD's centre relative to the eyes, in metres (negative is lower).");
         s_controlsInWorld = config.Bind("HUD", "ControlsInWorld", false,
             "Show the VR controls list (the one under the key hints on the case board) in the world too.");
-        s_pursuitGlow = config.Bind("HUD", "PursuitGlow", 0.6f,
+        s_pursuitGlow = config.Bind("HUD", "PursuitGlow", 1f,
             "Strength of the red glow at the edge of view while you're being pursued (0 = off), in place of the flat game's flashing bars.");
         s_pursuitRumble = config.Bind("HUD", "PursuitRumble", false,
             "A heartbeat on both controllers while you're being pursued.");
