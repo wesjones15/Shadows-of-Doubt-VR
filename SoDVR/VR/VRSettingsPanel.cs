@@ -57,7 +57,7 @@ public static class VRSettingsPanel
     private static readonly float[] JumpSpeedOptions   = { 3f, 4f, 5f, 6f, 7f };
     private static readonly float[] GravityOptions     = { 9.8f, 12f, 15f, 20f };
     private static readonly float[] HudSizeOptions     = { 0.6f, 0.75f, 0.9f, 1f, 1.1f, 1.25f, 1.5f };
-    private static readonly float[] PursuitGlowOptions = { 0f, 0.3f, 0.6f, 1f };
+    private static readonly float[] MovieBarsOptions   = { 0f, 0.5f, 0.75f, 1f };
     private static readonly float[] HudHeightOptions   = { -0.3f, -0.2f, -0.15f, -0.1f, 0f, 0.1f, 0.2f, 0.3f };
     private static readonly float[] RenderScaleOptions = { 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1f, 1.2f, 1.4f };
 
@@ -354,7 +354,7 @@ public static class VRSettingsPanel
         ConfigFloat(t, "HUD Size", VRSettings.HudSizeEntry, HudSizeOptions, v => $"{v:0.##}×");
         ConfigFloat(t, "HUD Height", VRSettings.HudVerticalOffsetEntry, HudHeightOptions, v => $"{v:+0.00;-0.00;0} m");
         ConfigToggle(t, "Controls in World", VRSettings.ControlsInWorldEntry);
-        ConfigFloat(t, "Pursuit Glow", VRSettings.PursuitGlowEntry, PursuitGlowOptions, v => v == 0f ? "Off" : $"{v:0.#}×");
+        ConfigFloat(t, "Movie Bars", VRSettings.MovieBarsEntry, MovieBarsOptions, v => v == 0f ? "Off" : $"{v:P0}");
         ConfigToggle(t, "Pursuit Rumble", VRSettings.PursuitRumbleEntry);
 
         SectionHeader(t, "─── RENDERING ───");

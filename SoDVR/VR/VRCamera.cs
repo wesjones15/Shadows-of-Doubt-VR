@@ -73,7 +73,7 @@ public class VRCamera : MonoBehaviour
     private readonly ScreenOverlays _screenOverlays = new();
     private readonly GameTurns _gameTurns = new();
     private readonly PauseBlur _pauseBlur = new();
-    private readonly PursuitAlarm _pursuitAlarm = new();
+    private readonly MovieBars _movieBars = new();
     private ClueMessagePanel _clueRT = null!;
     private VRControlsPanel _controlsRT = null!;
     private WorldMarksPanel _worldMarks = null!;
@@ -820,7 +820,7 @@ public class VRCamera : MonoBehaviour
                     _keyboard.AppendOverlay(_overlay);
                     _handPointer.AppendOverlay(_overlay, _leftCam);
                     _rtPanelInput.AppendOverlay(_overlay);
-                    _pursuitAlarm.AppendOverlay(_overlay);
+                    _movieBars.AppendOverlay(_overlay);
                     // Crisp panels: quad layers under the eyes, which are see-through where they are.
                     _panelCopy.BeginFrame(_leftCam.transform.position, _leftEye);
                     int layers = VRSettings.PanelLayers && _overlay.Panels.Count > 0 && _overlay.CanOpenOverPanels
