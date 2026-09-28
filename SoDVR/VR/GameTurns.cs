@@ -58,4 +58,50 @@ internal sealed class GameTurns
 
     /// <summary>The yaw written to the player this frame.</summary>
     public void Wrote(float yaw) => _writtenYaw = yaw;
+
+    private const int TransitionLogFrames = 10;
+    private bool _inTransition;
+    private int _transitionFrame;
+
+    /// <summary>
+    /// Diagnostic, before the head's yaw is written: while the game runs a player transition (sitting,
+    /// lying down, hiding), logs every facing it might be setting, to find which one it turns.
+    /// </summary>
+    public void LogTransition(Transform player, Transform? pivot, float headYaw)
+    {
+        Player? game;
+        try { game = Player.Instance; }
+        catch { return; }
+        if (game == null) return;
+        bool active = game.transitionActive;
+        if (!active && !_inTransition) return;
+
+        if (active && !_inTransition)
+        {
+            _transitionFrame = 0;
+            var preset = game.currentTransition;
+            var interactable = game.transitionInteractable;
+            var at = interactable?.controller != null ? interactable.controller.transform : null;
+            Log.LogInfo($"[GameTurns] Transition '{preset?.name}' started: lookRelativity={preset?.lookRelativity} " +
+                        $"useYLook={preset?.useYLook} time={(preset != null ? preset.transitionTime.ToString("F2") : "?")}s interactable='{interactable?.name}' " +
+                        $"at yaw {(at != null ? at.eulerAngles.y.ToString("F0") : "?")}°.");
+        }
+        _inTransition = active;
+        if (active && _transitionFrame++ % TransitionLogFrames != 0) return;
+
+        var fpc = game.fps;
+        string mouseLook = "?", fpcYaw = "?";
+        try
+        {
+            if (fpc != null)
+            {
+                mouseLook = fpc.m_MouseLook != null ? fpc.m_MouseLook.m_CharacterTargetRot.eulerAngles.y.ToString("F0") : "none";
+                fpcYaw = $"m_YRotation={fpc.m_YRotation:F0} _camRotY={fpc._camRotY:F0}";
+            }
+        }
+        catch { }
+        Log.LogInfo($"[GameTurns] {(active ? $"Transition frame {_transitionFrame - 1}" : "Transition ended")}: " +
+                    $"player yaw {player.eulerAngles.y:F0}° (wrote {_writtenYaw:F0}°), head {headYaw:F0}°, " +
+                    $"pivot {(pivot != null ? pivot.localEulerAngles.ToString("F0") : "?")}, mouse-look target {mouseLook}°, {fpcYaw}.");
+    }
 }
