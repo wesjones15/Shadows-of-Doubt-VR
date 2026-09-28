@@ -477,7 +477,6 @@ public class VRCamera : MonoBehaviour
             {
                 try
                 {
-                    _gameTurns.LogTransition(_fpsControllerTransform, _cameraPivotTransform, _leftCam.transform.eulerAngles.y);
                     float turn = _gameTurns.TurnFor(_fpsControllerTransform, _leftCam.transform.eulerAngles.y);
                     if (turn != 0f) transform.Rotate(Vector3.up, turn, Space.World);
                     Vector3 headEuler = _leftCam.transform.eulerAngles;
