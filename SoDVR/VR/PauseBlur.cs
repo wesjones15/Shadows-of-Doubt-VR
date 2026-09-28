@@ -4,24 +4,27 @@ using BepInEx.Logging;
 namespace SoDVR.VR;
 
 /// <summary>
-/// The game blurs the view while paused with GameplayControls' "paused" depth-of-field distances,
-/// which blur the player's own hands in VR. Its "talking" distances, used in conversations, leave
-/// the hands sharp, so the paused ones are replaced with them; InterfaceController.UpdateDOF reads
-/// them afresh on each pause.
+/// The game blurs the view while paused, and on the main menu, with GameplayControls' "paused"
+/// depth-of-field distances (0 m: everything, the player's hands included). Its "talking" distances,
+/// used in conversations, leave the hands sharp, so the paused ones are replaced with them.
+/// InterfaceController.UpdateDOF reads them on each pause; it's also called once here, since the
+/// main menu's blur was set before the replacement.
 /// </summary>
 internal sealed class PauseBlur
 {
     private static ManualLogSource Log => Plugin.Log;
 
-    private const int CheckIntervalFrames = 120;
+    private const int RecheckIntervalFrames = 120;
 
     private GameplayControls? _applied;
     private int _checkCountdown;
+    private bool _refreshPending;
 
     public void Tick()
     {
-        if (--_checkCountdown > 0) return;
-        _checkCountdown = CheckIntervalFrames;
+        if (_refreshPending) _refreshPending = !Refresh();
+        if (_applied != null && --_checkCountdown > 0) return;
+        _checkCountdown = RecheckIntervalFrames;
         try
         {
             var controls = GameplayControls.Instance;
@@ -35,7 +38,26 @@ internal sealed class PauseBlur
             controls.dofPausedNearEnd = controls.dofTalkingNearEnd;
             controls.dofPausedFarStart = controls.dofTalkingFarStart;
             controls.dofPausedFarEnd = controls.dofTalkingFarEnd;
+            _refreshPending = !Refresh();
         }
         catch (Exception ex) { Log.LogWarning($"[PauseBlur] {ex.Message}"); }
+    }
+
+    private static bool Refresh()
+    {
+        try { return TryRefresh(); }
+        catch (Exception ex) { Log.LogWarning($"[PauseBlur] Refresh: {ex.Message}"); return true; }
+    }
+
+    private static bool TryRefresh()
+    {
+        var ui = InterfaceController.Instance;
+        if (ui == null) return false;
+        ui.UpdateDOF();
+        var dof = SessionData.Instance?.dof;
+        if (dof != null)
+            Log.LogInfo($"[PauseBlur] Blur recomputed: near {dof.nearFocusStart.value:F2}–{dof.nearFocusEnd.value:F2} m, " +
+                        $"far {dof.farFocusStart.value:F2}–{dof.farFocusEnd.value:F2} m.");
+        return true;
     }
 }
