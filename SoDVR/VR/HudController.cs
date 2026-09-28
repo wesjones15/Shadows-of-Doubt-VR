@@ -79,6 +79,62 @@ internal sealed class HudController
             _prevDesktopMode = _interfaceCtrl.desktopMode;
         }
         catch { }
+        ResumeAfterPopup();
+    }
+
+    // Frames after the popup closes to let the game's own resume run first.
+    private const int ResumeCheckFrames = 10;
+    private const int ResumeRetryFrames = 60;
+    private bool _popupShowing;
+    private bool _popupPausedGame;
+    private int _resumeCheckIn = -1;
+    private int _resumeRetriesLeft;
+
+    /// <summary>
+    /// A popup or tutorial that pauses a running game (PopupMessageController.affectPauseState) is
+    /// meant to resume it when closed, but in VR the game was left paused on the desktop view.
+    /// If it's still paused shortly after such a popup closes, resume it.
+    /// </summary>
+    private void ResumeAfterPopup()
+    {
+        PopupMessageController? popup;
+        try { popup = PopupMessageController.Instance; }
+        catch { return; }
+        if (popup == null) return;
+
+        bool showing = popup.active || popup.tutorialActive;
+        if (showing)
+        {
+            _popupPausedGame |= popup.affectPauseState;
+            _resumeCheckIn = -1;
+        }
+        else if (_popupShowing && _popupPausedGame)
+        {
+            _resumeCheckIn = ResumeCheckFrames;
+            _resumeRetriesLeft = ResumeRetryFrames;
+        }
+        if (!showing) _popupPausedGame = false;
+        _popupShowing = showing;
+
+        if (_resumeCheckIn < 0 || --_resumeCheckIn > 0) return;
+        var session = SessionData.Instance;
+        if (session == null || session.play) { _resumeCheckIn = -1; return; }
+
+        if (_resumeRetriesLeft == ResumeRetryFrames)
+            Log.LogInfo($"[HudController] Popup closed but the game stayed paused (pauseUnpauseDelay={session.pauseUnpauseDelay}, " +
+                        $"disableCaseBoardClose={Game.Instance?.disableCaseBoardClose}, desktopMode={_interfaceCtrl?.desktopMode}) — resuming it.");
+        session.ResumeGame();
+        if (session.play)
+        {
+            Log.LogInfo($"[HudController] Resumed the game after the popup (desktopMode={_interfaceCtrl?.desktopMode}).");
+            _resumeCheckIn = -1;
+        }
+        else if (--_resumeRetriesLeft > 0) _resumeCheckIn = 1;
+        else
+        {
+            Log.LogWarning("[HudController] The game refused to resume after the popup.");
+            _resumeCheckIn = -1;
+        }
     }
 
     /// <summary>
