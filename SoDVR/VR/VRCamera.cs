@@ -641,6 +641,7 @@ public class VRCamera : MonoBehaviour
         _rightRT  = new RenderTexture(w, h, 24, RenderTextureFormat.ARGB32) { name = "SoDVR_Right" };
         _rightRT.Create();
         CameraRig.SetupEyeCam(_rightCam, _rightRT);
+        _overlay.RightEye = _rightCam;
 
         _voidRoom.CaptureNeutralEnv(_leftCam);
         _heldItem.SetOrigin(transform);

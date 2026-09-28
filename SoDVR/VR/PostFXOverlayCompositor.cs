@@ -97,6 +97,9 @@ internal sealed class PostFXOverlayCompositor
     /// its alpha the strength; head-locked, as it's drawn in the eyes' own screen space.</summary>
     public void AddScreenGlow(Color colour) => _screenGlow = colour;
 
+    /// <summary>The right eye's camera, so the glow knows which side of each eye is outer.</summary>
+    public Camera? RightEye { get; set; }
+
     /// <summary>A flat round dot of <paramref name="diameter"/> metres at <paramref name="position"/>,
     /// facing <paramref name="viewer"/>.</summary>
     public void AddDot(Vector3 position, Vector3 viewer, float diameter, Color colour)
@@ -221,14 +224,19 @@ internal sealed class PostFXOverlayCompositor
         if (_screenGlow.a <= 0f || !EnsureGlowResources()) return;
         _glowMaterial!.color = _screenGlow;
         _cb!.SetViewProjectionMatrices(Matrix4x4.identity, Matrix4x4.identity);
-        _cb.DrawMesh(_glowMesh, Matrix4x4.identity, _glowMaterial, 0, 0);
+        // The texture glows on a left eye's outer side; the right eye's is its mirror image.
+        var side = eye == RightEye ? Matrix4x4.Scale(new Vector3(-1f, 1f, 1f)) : Matrix4x4.identity;
+        _cb.DrawMesh(_glowMesh, side, _glowMaterial, 0, 0);
         _cb.SetViewProjectionMatrices(eye.worldToCameraMatrix, FlipY * eye.projectionMatrix);
     }
 
     // Clear across the middle of the view, rising towards its edges: full by the middle of each side,
-    // which the lenses still show (the corners they mostly don't).
+    // which the lenses still show (the corners they mostly don't). Only on each eye's outer side: where
+    // the eyes' views overlap, a glow seen by both reads as a haze in front of the face, not at the
+    // edge of vision.
     private const float GlowInnerRadius = 0.45f;
     private const float GlowOuterRadius = 0.95f;
+    private const float GlowSideFade = 0.3f;
     private const int GlowTextureSize = 128;
 
     private bool EnsureGlowResources()
@@ -247,6 +255,7 @@ internal sealed class PostFXOverlayCompositor
             {
                 var p = new Vector2((x + 0.5f) / GlowTextureSize * 2f - 1f, (y + 0.5f) / GlowTextureSize * 2f - 1f);
                 float a = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(GlowInnerRadius, GlowOuterRadius, p.magnitude));
+                a *= Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(GlowSideFade, -GlowSideFade, p.x));
                 pixels[y * GlowTextureSize + x] = new Color32(255, 255, 255, (byte)(a * 255f));
             }
         texture.SetPixels32(pixels);
