@@ -290,8 +290,7 @@ no compiled reference exists (see `ContextMenuController` below).
 |---|---|---|
 | `SessionData.Instance` | Session/game-state; `.startedGame` (bool) | Main-menu-vs-in-game-pause detection (inverted) — the one signal that actually works (§1, §4). Also `.enableTutorialText` is force-set `false` to suppress tutorial popups that fight VR canvas handling. |
 | `MapController.Instance` | Drives the in-game map/minimap: pan/zoom, cursor-to-node mapping | `.zoomController.desiredZoom`/`.zoomLimit` set the map's VR starting zoom; `.mapCursorNode` is driven manually every frame (the game's own screen-to-map cursor mapping breaks for the mod's world-space/RT canvases); `.MapToNode()` resolves a screen point to a graph node; `.directionalArrow(Container)` read for the route-arrow. |
-| `PopupMessageController.Instance` | Modal popup/tutorial dialogs | `.active` distinguishes a popup-triggered desktop-mode flip (force-reverted) from a real ESC pause. |
-| `InterfaceController.Instance` (also once via `FindObjectOfType`) | Top-level UI/HUD controller | `.SpawnWindow(evidence, DataKey)` opens evidence windows directly, bypassing normal click routing; `.desktopMode`/`.SetDesktopMode()` force-reverted when the game auto-enters desktop mode; `.firstPersonUI`/`.compassContainer` read for HUD placement. |
+| `InterfaceController.Instance` (also once via `FindObjectOfType`) | Top-level UI/HUD controller | `.SpawnWindow(evidence, DataKey)` opens evidence windows directly, bypassing normal click routing; `.firstPersonUI`/`.compassContainer` read for HUD placement. |
 | `Toolbox.Instance` | Shared gameplay constants | `.interactionRayLayerMask` — the raycast layer mask for the mod's own interaction ray. |
 | `GameplayControls.Instance` | Tunable gameplay parameters | `.interactionRange` — base interaction distance. |
 | `PathFinder.Instance` | Map-node graph | `.nodeMap` looked up to resolve a screen point to a graph node for manual `mapCursorNode` driving. |

@@ -119,7 +119,7 @@ public class VRCamera : MonoBehaviour
     // which starts a DesktopModeTransition coroutine that modifies canvas scales/alpha
     // every frame.  This fights our WorldSpace canvas enforcement and can deadlock the
     // render pipeline → permanent hang (xrWaitFrame blocks forever).
-    // Defence: disable tutorials, and immediately undo desktopMode=true each frame.
+    // Defence: disable tutorials.
     private bool _tutorialsDisabled;
 
     // ── Scene-change guard ────────────────────────────────────────────────────
@@ -558,9 +558,6 @@ public class VRCamera : MonoBehaviour
         // call doesn't run.  Without this, room culling uses a stale currentRoom and areas
         // don't load properly when the player moves between rooms.
         _locomotion.UpdateGameLocationIfActive(_sceneLoadGrace);
-
-        // -- Prevent popup/tutorial desktop-mode hang ---------------------
-        _hud.GuardAgainstPopupDesktopMode(_movementDiscoveryDone);
 
         // One-shot movement system discovery (runs once after stereo is ready and game cam found).
         // Skip discovery when game camera has cullingMask=0 — that means we're on the main menu,
