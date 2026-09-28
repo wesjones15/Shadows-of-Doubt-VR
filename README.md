@@ -24,7 +24,7 @@ This is a heavily reworked continuation of [Blah64's SoDVR](https://github.com/B
 
 - **Headset:** Meta Quest 3, wireless over **Virtual Desktop**, using Virtual Desktop's **OpenXR**
   runtime (VDXR)
-- **PC:** NVIDIA RTX 3080 Ti, AMD Ryzen 7 7800X3D, 32 GB RAM, Windows 10
+- **PC:** NVIDIA RTX 3080 Ti (driver 591.86), AMD Ryzen 7 7800X3D, 32 GB RAM, Windows 10
 - **Game:** Shadows of Doubt, current Steam build (Unity 2021.3.45f2)
 - **Mod loader:** BepInEx 6.0.0-be.788 (IL2CPP)
 
