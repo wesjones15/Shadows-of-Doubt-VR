@@ -23,7 +23,7 @@ internal static class VRSettings
     private static ConfigEntry<float>? s_hudDistance;
     private static ConfigEntry<float>? s_hudSize;
     private static ConfigEntry<float>? s_hudVerticalOffset;
-    private static ConfigEntry<float>? s_movieBars;
+    private static ConfigEntry<float>? s_pursuitGlow;
     private static ConfigEntry<bool>? s_pursuitRumble;
     private static ConfigEntry<bool>? s_controlsInWorld;
     private static ConfigEntry<float>? s_renderScale;
@@ -69,8 +69,8 @@ internal static class VRSettings
             "Height of the HUD's centre relative to the eyes, in metres (negative is lower).");
         s_controlsInWorld = config.Bind("HUD", "ControlsInWorld", false,
             "Show the VR controls list (the one under the key hints on the case board) in the world too.");
-        s_movieBars = config.Bind("HUD", "MovieBars", 1f,
-            "Opacity of the flat game's movie bars across the top and bottom of your view: red and black while you're pursued, black in cutscenes (0 = off).");
+        s_pursuitGlow = config.Bind("HUD", "PursuitGlow", 0.6f,
+            "Strength of the red glow at the edge of view while you're being pursued (0 = off), in place of the flat game's flashing bars.");
         s_pursuitRumble = config.Bind("HUD", "PursuitRumble", false,
             "A heartbeat on both controllers while you're being pursued.");
 
@@ -100,7 +100,7 @@ internal static class VRSettings
     public static float HudSize => s_hudSize!.Value;
     public static float HudVerticalOffset => s_hudVerticalOffset!.Value;
     public static bool ControlsInWorld => s_controlsInWorld!.Value;
-    public static float MovieBars => s_movieBars!.Value;
+    public static float PursuitGlow => s_pursuitGlow!.Value;
     public static bool PursuitRumble => s_pursuitRumble!.Value;
     public static float RenderScale => s_renderScale!.Value;
     public static bool MonitorMirror => s_monitorMirror!.Value;
@@ -123,7 +123,7 @@ internal static class VRSettings
     public static ConfigEntry<float> HudSizeEntry => s_hudSize!;
     public static ConfigEntry<float> HudVerticalOffsetEntry => s_hudVerticalOffset!;
     public static ConfigEntry<bool> ControlsInWorldEntry => s_controlsInWorld!;
-    public static ConfigEntry<float> MovieBarsEntry => s_movieBars!;
+    public static ConfigEntry<float> PursuitGlowEntry => s_pursuitGlow!;
     public static ConfigEntry<bool> PursuitRumbleEntry => s_pursuitRumble!;
     public static ConfigEntry<float> RenderScaleEntry => s_renderScale!;
     public static ConfigEntry<bool> MonitorMirrorEntry => s_monitorMirror!;
