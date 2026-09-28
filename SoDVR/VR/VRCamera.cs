@@ -71,6 +71,7 @@ public class VRCamera : MonoBehaviour
     private VRKeyboardPanel _keyboard = null!;
     private HudRTPanels _hudRT = null!;
     private readonly ScreenOverlays _screenOverlays = new();
+    private readonly GameTurns _gameTurns = new();
     private ClueMessagePanel _clueRT = null!;
     private VRControlsPanel _controlsRT = null!;
     private WorldMarksPanel _worldMarks = null!;
@@ -476,9 +477,12 @@ public class VRCamera : MonoBehaviour
             {
                 try
                 {
+                    float turn = _gameTurns.TurnFor(_fpsControllerTransform, _leftCam.transform.eulerAngles.y);
+                    if (turn != 0f) transform.Rotate(Vector3.up, turn, Space.World);
                     Vector3 headEuler = _leftCam.transform.eulerAngles;
                     // FPSController handles yaw — this is what the game reads for player facing
                     _fpsControllerTransform.rotation = Quaternion.Euler(0f, headEuler.y, 0f);
+                    _gameTurns.Wrote(headEuler.y);
                     // Camera pivot handles pitch
                     if (_cameraPivotTransform != null)
                         _cameraPivotTransform.localRotation = Quaternion.Euler(headEuler.x, 0f, 0f);

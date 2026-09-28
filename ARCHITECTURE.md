@@ -44,6 +44,7 @@ classDiagram
     VRCamera *-- MinimapRTPanel : _minimapRT
     VRCamera *-- HudRTPanels : _hudRT
     VRCamera *-- ScreenOverlays : _screenOverlays
+    VRCamera *-- GameTurns : _gameTurns
     VRCamera *-- WorldMarksPanel : _worldMarks
     VRCamera *-- InteractLabelPanel : _interactLabel
     VRCamera *-- RadialMenuPanel : _radialMenu
@@ -121,6 +122,7 @@ classDiagram
 | `MinimapRTPanel.cs` / `MapPointerExtension.cs` | The map window, body-locked or on the board; its drag, zoom and node picking. |
 | `HudRTPanels.cs` | GameCanvas as one transparent sheet following the head's heading, laid out around the case board or a computer screen when one is up. |
 | `ScreenOverlays.cs` | Culls the game's fades to black on GameCanvas (death, hospital) and logs any other screen-wide overlay the HUD sheet would carry. |
+| `GameTurns.cs` | Turns the rig when the game moves and turns the player itself (waking in the hospital bed, loads), since the head's yaw overwrites the player's facing every frame. |
 | `WorldMarksPanel.cs` / `WorldMarksHeadView.cs` | Objective pointers, NPC reaction indicators and speech bubbles at their targets in the world, judged on-screen from the head. |
 | `InteractLabelPanel.cs` / `GameFrameBox.cs` | The name and actions of what the main hand points at, in the game's tooltip style. |
 | `RadialMenuPanel.cs` / `SoloScreens.cs` | Y: tap opens the board; hold for a radial menu opening the inventory, upgrades, notebook or map on its own. |
