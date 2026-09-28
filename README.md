@@ -49,7 +49,7 @@ Vive and WMR controllers have no A/B/X/Y buttons, so several actions are unavail
    `Shadows of Doubt.exe`, usually `C:\Program Files (x86)\Steam\steamapps\common\Shadows of Doubt`).
 2. **Run the game once without the mod** and wait for the main menu. The first launch with BepInEx
    takes several minutes while it generates its interop assemblies. Then quit.
-3. **Install SoDVR.** Download `SoDVR-2.0.0.zip` from the
+3. **Install SoDVR.** Download `SoDVR-2.1.0.zip` from the
    [Releases](https://github.com/wesjones15/Shadows-of-Doubt-VR/releases) page and extract it into
    the same game folder, merging its `BepInEx` folder with the existing one. You should end up with:
    ```
@@ -182,7 +182,9 @@ press **Apply**; **Reset Defaults** resets the current tab.
     damage without the view dropping to the floor)
   - Controls: Main Hand: Right, World Laser (draws a beam from the main hand into the world)
   - Windows: Menu Distance, Window Positions: Reset
-  - HUD: HUD Distance, HUD Size, HUD Height, Controls in World
+  - HUD: HUD Distance, HUD Size, HUD Height, Controls in World, Pursuit Glow (the red glow at the
+    edge of your view while you're chased; 0 turns it off), Pursuit Rumble (a controller heartbeat
+    while you're chased)
   - Rendering: Monitor Mirror, Smooth Loading, Crisp Panels, Scale (render resolution; applies
     after a restart)
 
@@ -194,8 +196,9 @@ This version is a rewrite of most of the mod, built on Blah64's OpenXR foundatio
 
 - **UI rebuilt from scratch.** Every game canvas (menus, popups, tooltips, case board, notes, map,
   dialogue, HUD) is rendered to its own texture and drawn after the game's post-processing, so
-  panels stay sharp and depth of field never blurs them. Menus, popups and tooltips go to the
-  headset as their own compositor layers for crisper text. Blah64's world-space canvas system is gone.
+  panels stay sharp and depth of field never blurs them. Menus, popups, the HUD and most other panels
+  go to the headset as their own compositor layers for crisper text. Blah64's world-space canvas
+  system is gone.
 - **Grab any window** with the grip, move it in 3D and push or pull it with the stick. Positions
   are remembered. The whole case board moves by its top bar.
 - **One main hand, swappable with the other trigger.** Your item and arm follow the main hand, and
@@ -205,7 +208,8 @@ This version is a rewrite of most of the mod, built on Blah64's OpenXR foundatio
   Quest button glyphs in the game's key hints; an in-headset controls list.
 - **HUD** on a transparent sheet that follows your head and makes room for the case board or a
   computer screen. The awareness compass sits at your feet, and objective markers, NPC reactions
-  and speech bubbles appear at their targets in the world.
+  and speech bubbles appear at their targets in the world. Being chased shows a red glow at the
+  edge of your vision instead of the flat game's flashing bars.
 - **Comfort and stability:** a simple room replaces blank frames on the pre-game screens and main
   menu, loading freezes no longer stutter the headset, the monitor mirrors the headset, and
   render scale is adjustable.
