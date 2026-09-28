@@ -64,6 +64,9 @@ internal sealed class PostFXOverlayCompositor
     private Material? _clearAlphaMaterial, _dimMaterial;
     private MaterialPropertyBlock? _openingProps;
     private bool _openingFailed;
+    private Color _screenGlow;
+    private Mesh? _glowMesh;
+    private Material? _glowMaterial;
     private static readonly int MainTexId = Shader.PropertyToID("_MainTex");
 
     /// <param name="head">Where panels are ordered from, farthest first, for the whole frame: both
@@ -76,6 +79,7 @@ internal sealed class PostFXOverlayCompositor
         _head = head;
         _lasers.Clear();
         _dots.Clear();
+        _screenGlow = Color.clear;
     }
 
     public void AddPanel(Mesh mesh, Matrix4x4 localToWorld, Material material, PanelLayer layer, LayerRank rank) =>
@@ -88,6 +92,10 @@ internal sealed class PostFXOverlayCompositor
         if (length < 1e-4f) return;
         _lasers.Add(Matrix4x4.TRS(origin, Quaternion.LookRotation(span / length), new Vector3(1f, 1f, length)));
     }
+
+    /// <summary>A glow of <paramref name="colour"/> around the edge of each eye's view this frame,
+    /// its alpha the strength; head-locked, as it's drawn in the eyes' own screen space.</summary>
+    public void AddScreenGlow(Color colour) => _screenGlow = colour;
 
     /// <summary>A flat round dot of <paramref name="diameter"/> metres at <paramref name="position"/>,
     /// facing <paramref name="viewer"/>.</summary>
@@ -123,12 +131,14 @@ internal sealed class PostFXOverlayCompositor
     public void Composite(Camera eye, RenderTexture target, IReadOnlyList<bool>? layered = null)
     {
         var panels = Panels;
-        if (panels.Count == 0 && _lasers.Count == 0 && _dots.Count == 0) return;
+        if (panels.Count == 0 && _lasers.Count == 0 && _dots.Count == 0 && _screenGlow.a <= 0f) return;
 
         BeginDraw(eye, target);
         // Dots mark world surfaces, so any panel in front of one covers it.
         foreach (var (transform, material) in _dots)
             _cb!.DrawMesh(_dotMesh, transform, material, 0, 0);
+        // Under every panel, as the world is: it frames the view, it doesn't cover what's read.
+        DrawScreenGlow(eye);
         for (int i = 0; i < panels.Count; i++)
         {
             if (layered != null && layered[i]) continue;
@@ -204,6 +214,51 @@ internal sealed class PostFXOverlayCompositor
         _cb.SetRenderTarget(target);
         _cb.ClearRenderTarget(true, false, Color.clear);
         _cb.SetViewProjectionMatrices(eye.worldToCameraMatrix, FlipY * eye.projectionMatrix);
+    }
+
+    private void DrawScreenGlow(Camera eye)
+    {
+        if (_screenGlow.a <= 0f || !EnsureGlowResources()) return;
+        _glowMaterial!.color = _screenGlow;
+        _cb!.SetViewProjectionMatrices(Matrix4x4.identity, Matrix4x4.identity);
+        _cb.DrawMesh(_glowMesh, Matrix4x4.identity, _glowMaterial, 0, 0);
+        _cb.SetViewProjectionMatrices(eye.worldToCameraMatrix, FlipY * eye.projectionMatrix);
+    }
+
+    // Clear across the middle of the view, rising towards its edges: full by the middle of each side,
+    // which the lenses still show (the corners they mostly don't).
+    private const float GlowInnerRadius = 0.45f;
+    private const float GlowOuterRadius = 0.95f;
+    private const int GlowTextureSize = 128;
+
+    private bool EnsureGlowResources()
+    {
+        if (_glowMesh != null && _glowMaterial != null) return true;
+        var shader = Shader.Find("UI/Default");
+        if (shader == null) return false;
+
+        var texture = new Texture2D(GlowTextureSize, GlowTextureSize, TextureFormat.RGBA32, false)
+        {
+            name = "SoDVR_ScreenGlow", wrapMode = TextureWrapMode.Clamp, hideFlags = KeepAcrossLoads,
+        };
+        var pixels = new Color32[GlowTextureSize * GlowTextureSize];
+        for (int y = 0; y < GlowTextureSize; y++)
+            for (int x = 0; x < GlowTextureSize; x++)
+            {
+                var p = new Vector2((x + 0.5f) / GlowTextureSize * 2f - 1f, (y + 0.5f) / GlowTextureSize * 2f - 1f);
+                float a = Mathf.SmoothStep(0f, 1f, Mathf.InverseLerp(GlowInnerRadius, GlowOuterRadius, p.magnitude));
+                pixels[y * GlowTextureSize + x] = new Color32(255, 255, 255, (byte)(a * 255f));
+            }
+        texture.SetPixels32(pixels);
+        texture.Apply();
+
+        _glowMaterial = new Material(shader) { name = "SoDVR_ScreenGlowMat", mainTexture = texture, hideFlags = KeepAcrossLoads };
+        _glowMesh = new Mesh { name = "SoDVR_ScreenGlowMesh", hideFlags = KeepAcrossLoads };
+        _glowMesh.vertices = new[] { new Vector3(-1f, -1f, 0f), new Vector3(1f, -1f, 0f), new Vector3(1f, 1f, 0f), new Vector3(-1f, 1f, 0f) };
+        _glowMesh.uv = new[] { new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(1f, 1f), new Vector2(0f, 1f) };
+        _glowMesh.colors = new[] { Color.white, Color.white, Color.white, Color.white };
+        _glowMesh.triangles = new[] { 0, 1, 2, 0, 2, 3 };
+        return true;
     }
 
     private void DrawLasers()
