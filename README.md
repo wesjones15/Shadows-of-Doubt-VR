@@ -6,6 +6,18 @@ game's whole UI (menus, case board, notes, map, dialogue, HUD) on panels you can
 This is a heavily reworked continuation of [Blah64's SoDVR](https://github.com/Blah64/Shadows-of-Doubt-VR)
 (v1.0.0). See [How this version differs](#how-this-version-differs-from-blah64s) below.
 
+## Project status
+
+The mod's original scope of work is complete. I haven't played through the whole game, so I may
+have missed some things. If you find a problem,
+[open an issue](https://github.com/wesjones15/Shadows-of-Doubt-VR/issues) and I'll fix it (see
+[Known issues](#known-issues) for which logs to attach).
+
+### Future plans
+
+Eventually I'd like to overhaul the remaining UI to be more diegetic and VR-friendly, built into
+the world rather than floating menus. That's outside the current scope.
+
 ## Credits
 
 - **[Blah64](https://github.com/Blah64)** created the original SoDVR mod
@@ -19,6 +31,11 @@ This is a heavily reworked continuation of [Blah64's SoDVR](https://github.com/B
   with the mod (Apache 2.0).
 - **ColePowered Games** made [Shadows of Doubt](https://store.steampowered.com/app/986130/Shadows_of_Doubt/).
 - This version by Wesley ([wesjones15](https://github.com/wesjones15)).
+
+### AI disclosure
+
+- This version's code was written by Claude (Anthropic's Claude Code), working from user stories
+  I wrote. I directed the design and tested every change in the headset.
 
 ## Tested on
 
@@ -224,9 +241,9 @@ This version is a rewrite of most of the mod, built on Blah64's OpenXR foundatio
 
 - blurry text in some menus.
 
-If something goes wrong, `BepInEx/LogOutput.log` (in the game folder) and
-`%USERPROFILE%\AppData\LocalLow\ColePowered Games\Shadows of Doubt\Player.log` are the logs to
-attach to a bug report.
+If something goes wrong, [open an issue](https://github.com/wesjones15/Shadows-of-Doubt-VR/issues)
+and attach `BepInEx/LogOutput.log` (in the game folder) and
+`%USERPROFILE%\AppData\LocalLow\ColePowered Games\Shadows of Doubt\Player.log`.
 
 ## Building from source
 
