@@ -1,8 +1,33 @@
 # Changelog
 
-What changed in each SoDVR release. 2.0.0 is compared with
+What changed in each SoDVR release, compared with
 [Blah64's SoDVR v1.0.0](https://github.com/Blah64/Shadows-of-Doubt-VR), the version this one
-continues from.
+continues from. 2.1.0 is the first full release; 2.0.0 was a pre-release.
+
+## At a glance (since Blah64's v1.0.0)
+
+**UI**
+- **Sharp, stable UI.** Every screen (menus, popups, tooltips, case board, notes, map, dialogue, keyboard, HUD) is drawn as one flat image after the game's post-processing, so depth of field, bloom and exposure never smear it and nothing on it z-fights. Crisp Panels hands menus, popups, the HUD, key hints, labels and the case board to the headset as their own layers for crisper text.
+- **A case board made for VR.** Drag pins, link them with B, pan and zoom the cork, open notes as separate windows, and hold Y for a radial menu of Inventory, Upgrades, Notebook and Map.
+- **Talking, the map and typing.** Point at a dialogue option and pull the trigger to say it, zoom the map with the stick, and type into text boxes on a VR keyboard.
+- **A HUD for a headset.** It's see-through, follows your head loosely, and steps aside for the case board and computer screens. Objective markers, NPC reactions and overheard speech float at their targets.
+- **A VR pursuit warning.** A red glow at the edge of your vision replaces the flat game's flashing bars, with an optional heartbeat rumble on the controllers.
+
+**Stability**
+- **Launch and loading stability.** A simple room replaces black frames while the game starts up, and the headset stays smooth through loading freezes.
+- **Loading a save from the pause menu no longer crashes.** The loading screen shows, and the menus, case board and your arms all survive the load.
+
+**Controls**
+- **One main hand.** The right hand (by default) points, clicks, interacts and holds your item. Pull the other hand's trigger to swap. The world dot lands where your controller points.
+- **Quest button prompts.** The game's key hints and the interaction label show Quest controller buttons instead of keyboard keys, following whichever hand is your main hand. An in-headset VR controls list covers what the mod adds.
+- **Grab any menu window** with the grip, move it in 3D, and push or pull it with the stick. The whole case board moves by its top bar.
+- **Jump from a standstill.** Blah64's version turned off standing jumps because of a bug they caused. That bug is fixed, so standing jumps are back on. Jump speed and gravity are adjustable.
+  - **Fall damage re-enabled.** Blah64's version had also turned it off because of a bug. It's back, with an option to keep the damage but skip the knockdown.
+
+**Settings and modding**
+- **VR Settings rebuilt** on the game's own settings, with Apply and Reset Defaults. Every VR option, including render scale, lives in the config file.
+- **For modders:** the 9,000-line `VRCamera.cs` is split into ~70 files around a single render-texture panel pipeline, with architecture notes and design docs in the repo.
+- **Headset view on your monitor.** The game window shows what you see in the headset, panels included.
 
 ## 2.1.0 (2026-09-27)
 
@@ -10,16 +35,6 @@ Sharper panels everywhere, a VR-friendly pursuit warning, and fixes for facing, 
 
 **Tested on:** Quest 3, wireless over Virtual Desktop (VDXR OpenXR runtime), RTX 3080 Ti (driver
 591.86), Ryzen 7 7800X3D, 32 GB RAM.
-
-### At a glance
-
-- **Sharper everything.** Crisp Panels now covers the HUD, key hints, controls list, labels and the
-  case board, and thin frames no longer shimmer.
-- **A VR pursuit warning.** A red glow at the edge of your vision replaces the flat game's flashing
-  bars, with an optional heartbeat rumble.
-- **Fixes** for the black HUD after waking in hospital, which way you face after waking, loading or
-  sitting, tutorial popups leaving the game half-paused, and menus blurring your hands.
-- Smaller save/exit and tutorial popups.
 
 ### Sharper panels
 - **Crisp Panels** now covers the HUD, key hints, the controls list, labels and the case board, not
@@ -47,7 +62,9 @@ changed settings: the new ones are added to it with their defaults.
 
 ## 2.0.0 (2026-09-27)
 
-The first release of this continuation of Blah64's SoDVR. Most of the mod is rebuilt: the whole UI,
+Pre-release.
+
+The first build of this continuation of Blah64's SoDVR. Most of the mod is rebuilt: the whole UI,
 how you point and click, the case board, the HUD and the settings panel. Blah64's OpenXR
 foundation, head and controller tracking, locomotion and preloader carry over.
 
@@ -55,41 +72,6 @@ foundation, head and controller tracking, locomotion and preloader carry over.
 Ryzen 7 7800X3D, 32 GB RAM, Windows 10, Shadows of Doubt (Unity 2021.3.45f2), BepInEx
 6.0.0-be.788. Bindings for Valve Index, HTC Vive, Windows Mixed Reality and the KHR simple
 controller are still included but untested.
-
-### At a glance
-
-- **Sharp UI, free of the game's blur.** Every screen (menus, popups, tooltips, case board, notes,
-  map, dialogue, keyboard, HUD) is drawn on its own panel after the game's post-processing, so depth
-  of field, bloom and exposure never smear it. Menus, popups and tooltips go to the headset as their
-  own layers for crisper text.
-- **No more z-fighting.** In Blah64's version every panel was a stack of 3D layers that flickered
-  against each other. Each panel is now one flat image, so text, icons and backgrounds hold still.
-- **Quest button prompts.** The game's key hints and the interaction label show Quest controller
-  buttons instead of keyboard keys, and they follow whichever hand is your main hand. An in-headset
-  VR controls list covers what the mod adds.
-- **One main hand.** The right hand (by default) points, clicks, interacts and holds your item. Pull
-  the other hand's trigger to swap. The world dot now lands where your controller points.
-- **Grab any window** with the grip, move it in 3D, and push or pull it with the stick. The whole
-  case board moves by its top bar.
-- **A case board made for VR.** Drag pins, link them with B, pan and zoom the cork, open notes as
-  separate windows, and hold Y for a radial menu of Inventory, Upgrades, Notebook and Map.
-- **Talking, the map and typing.** Point at a dialogue option and pull the trigger to say it, zoom
-  the map with the stick, and type into text boxes on a VR keyboard.
-- **A HUD for a headset.** It's see-through, follows your head loosely, and steps aside for the case
-  board and computer screens. Objective markers, NPC reactions and overheard speech float at their
-  targets.
-- **Usable computers.** You stand back from the screen and the cursor follows your controller.
-- **Jump from a standstill.** Standing jumps used to fail, and walking jumps went twice as high.
-  Both now behave like the flat game, and jump speed and gravity are adjustable.
-- **Fall damage and knockdown work**, with an option to keep the damage but skip the knockdown.
-- **Loading a save from the pause menu no longer crashes.** The loading screen shows, and the menus,
-  case board and your arms all survive the load.
-- **Comfort and stability.** A simple room instead of black frames before the game starts, smooth
-  headset tracking through loading freezes, a monitor mirror, and adjustable render scale.
-- **VR Settings rebuilt** on the game's own settings, with Apply and Reset Defaults. Every VR option
-  lives in the config file.
-- **For modders:** the 9,000-line `VRCamera.cs` is split into ~70 files around a single
-  render-texture panel pipeline, with architecture notes and design docs in the repo.
 
 ### Installing and upgrading
 
@@ -136,7 +118,9 @@ controller are still included but untested.
 
 ### Everything that changed
 
-#### Rendering and image quality
+#### UI
+
+##### Rendering and image quality
 
 - **UI is drawn after the game's post-processing.** Each screen is rendered to its own texture by a
   dedicated camera and drawn into each eye after depth of field, bloom, auto-exposure, tonemapping
@@ -165,78 +149,8 @@ controller are still included but untested.
   bloomed into a glowing halo. It ends exactly where it hits, with no separate cursor dot, and always
   shows on top of the panel it points at. In the pause and main menu, the case board and VR Settings
   it stays visible, 3 m long, when it misses every panel, so you can always find it.
-- **Render scale** is a setting (VR tab → Rendering → "Scale (restart)", 0.5× to 1.4×, default 0.7×,
-  the value Blah64's version had fixed). It's capped at the headset's maximum and applies on the
-  next launch.
-- **Monitor mirror** (VR tab → Rendering, on by default): the game window shows the left eye's
-  finished image, panels included, cropped to the monitor's shape and upright. Toggles live.
 
-#### Pointing and the main hand
-
-- **One main hand** does all the pointing: the panel laser, the world dot and its label, interact
-  (trigger, left mouse), secondary interact (grip, right mouse), your held item and its animations,
-  and the game camera's aim. It's the right hand by default.
-- Pulling the other hand's trigger swaps the main hand. That pull only swaps. A swap can't happen
-  mid-click or mid-drag. The choice is saved in the config (VR tab → "Main Hand: Right"), where
-  Blah64's "Item Hand" was per session and defaulted to the left hand.
-- With the left hand as main hand, the arms are mirrored, so your item and its animations appear in
-  the left hand.
-- **The world dot and the game's interaction aim where the controller points.** The game's ray used
-  to start at your eye and run parallel to your hand, landing off by the gap between them. Now the
-  hand's own ray finds the spot, and the game's interaction is aimed through it, so the dot shows
-  exactly what you'll interact with.
-- The world dot is a round dot drawn after post-processing, so depth of field no longer blurs it. It
-  hides behind any panel in front of it, while a menu, the case board or VR Settings is up, and while
-  you use a computer. It replaces Blah64's pink aim dots.
-- **World Laser** (VR tab → Controls, off by default) draws a beam from the main hand into the
-  world. It replaces "Left Laser", whose beam never actually drew in the headset.
-- A and B work on panels from whichever hand is pointing.
-- **Controller presses no longer reach the flat game window behind a menu.** World clicks, grip
-  right-clicks and stick-click middle-clicks are held back while the laser is on UI. Before, a world
-  click with a menu up could hit whatever flat-screen button sat under the mouse cursor, such as the
-  exit prompt behind the pause menu.
-- **Panels behave like a real mouse:** hover highlights, press, drag (starting after 1.5 cm of
-  movement on the panel), click on release, A as right-click, and stick scrolling. A panel you
-  pressed keeps the pointer until you let go.
-- Buttons now run the game's own click handling, so buttons that ignored the old simulated clicks
-  work, such as the eye toggle that hides a fact on a note.
-- Overlapping panels no longer both take one click: the nearest gets the pointer. Within a window,
-  the pointer goes to whatever is drawn on top.
-- **The game stays in mouse-and-keyboard mode.** A virtual gamepad appearing mid-session (Virtual
-  Desktop can create one) used to switch the game to gamepad mode: pause, the case board and
-  interaction stopped responding, and the hints showed gamepad buttons.
-- NPC reaction icons and speech bubbles fade in and out by where your head looks, not where your
-  hand points.
-
-#### Quest button prompts
-
-- **The game's key hints show Quest controller buttons** instead of keyboard keys, for every key the
-  mod binds. Keys the mod doesn't bind keep the game's own glyph.
-- They follow your main hand, so swapping hands updates the prompts.
-- Case board and notebook show Y; the map, create string and weapon select show B; Back shows the
-  menu button; the case board's zoom shows the right stick. Right-click shows A on menus and the
-  case board, and the main grip in the world.
-- The interaction label shows the button beside each action it lists.
-- The glyphs are drawn at twice the text size, centred on the words, and still fit inside the game's
-  hint rows, so every hint keeps its text.
-- The glyphs are Kenney's Input Prompts (CC0).
-
-#### Grabbing and moving windows
-
-- **Grip any panel** with the laser hand to grab it. The grabbed point stays under the laser, and the
-  drag stays with the hand that started it.
-- While dragging, that hand's stick pushes the window away (up) or pulls it closer (down), from 0.2 m
-  to 15 m. Meanwhile the stick does nothing else: no turning, scrolling or dialogue stepping on the
-  right, no walking on the left.
-- Positions are remembered for the rest of the session: the case board (where it reopens, each panel
-  on it, open notes), the dialogue window, the keyboard, the map (on the board and while walking),
-  the VR controls panel and any other screen.
-- **Window Positions: Reset** (VR tab → Windows) puts them all back at once, without waiting for
-  Apply.
-- Menus and windows open 1.5 m from your head by default, down from 1.8 m (VR tab → Windows → Menu
-  Distance, 0.5 to 3.5 m).
-
-#### Main menu, pause menu and popups
+##### Main menu, pause menu and popups
 
 - The main and pause menu is a 1.6 m wide panel (Blah64's was 1.2 m) that opens in front of you at
   the menu distance.
@@ -252,7 +166,7 @@ controller are still included but untested.
 - Menus the game places for a mouse cursor that isn't there, off the edge of the screen, are moved
   back into view. Context-menu text renders properly instead of as solid blocks.
 
-#### Case board
+##### Case board
 
 **Opening and layout**
 - The board opens in front of you each time: the navbar 1.85 m away and the corkboard 2.0 m (Blah64's
@@ -301,7 +215,7 @@ controller are still included but untested.
   corkboard. Tap Y to close it. If the game opened the board along with it, the board closes again
   afterwards. Moving a single screen doesn't change your board layout.
 
-#### Map
+##### Map
 
 - The map is its own panel, cropped to the map window.
 - It has two places: **hold B** and it's locked in front of your body; on the case board it sits where
@@ -313,7 +227,7 @@ controller are still included but untested.
   and the map clips at its edges as in the flat game.
 - B no longer opens the map while you're talking to someone, or right after ending the conversation.
 
-#### Conversations
+##### Conversations
 
 - The dialogue window is its own see-through panel, 0.75 m in front of you at eye level, where it no
   longer covers the citizen's face. Grip-drag it and it keeps that spot for later conversations.
@@ -326,7 +240,7 @@ controller are still included but untested.
   window during a conversation, and in their HUD spot otherwise. Their flight into the status icon
   still lands.
 
-#### VR keyboard (new)
+##### VR keyboard (new)
 
 - A QWERTY keyboard opens whenever a text box gets focus, whether you click one or the game focuses
   it (as the save-name popup does). Neither Virtual Desktop's runtime nor the game offers one in VR.
@@ -337,7 +251,7 @@ controller are still included but untested.
 - It opens low and tilted up at arm's length, draws above other panels, and can be grip-dragged
   (remembered).
 
-#### HUD
+##### HUD
 
 **While walking**
 - The HUD is one see-through sheet at a fixed apparent size, drawn after post-processing. It follows
@@ -380,32 +294,22 @@ controller are still included but untested.
   above the point so it doesn't cover what it labels.
 - It hides behind any menu, window or case-board panel in front of it, and while you use a computer.
 
-#### Computers
+##### Computers
 
-- Using an in-game computer, you stand 30 cm further back from the screen than the game seats you,
-  so it fits in view. The cursor goes where your controller points, and the main trigger clicks.
+- **Reworked onto the mod's panel and pointer system**, replacing the old approach. You stand 30 cm
+  further back from the screen than the game seats you, so it fits in view. The cursor goes where
+  your controller points, and the main trigger clicks.
 - The HUD is laid out around the screen; the world dot and interaction label are hidden.
 
-#### Other game screens
+##### Other game screens
 
 - Any other screen the game shows (the splash screen, "press any key", the prototype builder, others)
   gets a panel of its own: clickable, grip-draggable, opened at the menu distance, and reopened where
   you last left it.
 
-#### Movement and the body
+#### Stability
 
-- **Jumping from a standstill works.** Standing still, the ground check often missed the floor, so
-  standing jumps failed. Walking jumps no longer go twice as high, and falls are no longer twice as
-  fast. Movement now runs once per frame, as the flat game's does.
-- **Jump Speed** (default 5 m/s, 3 to 7) and **Gravity** (default 15 m/s², 9.8 to 20) are on the VR
-  tab → Movement. They used to be fixed.
-- **Fall damage** works, using the game's own landing rules: damage, broken legs, landing and impact
-  sounds, the knockdown, and the "Shafted" achievement. Loads, teleports and air vents never count
-  as falls.
-- **Fall Knockdown** (VR tab → Movement, on by default): turn it off to take the same fall damage
-  without the view dropping to the floor and getting back up.
-
-#### Loading, pre-game screens and stability
+##### Launch and loading
 
 - **Loading a save from the pause menu no longer crashes.** A load from in game reloads the whole
   scene, and the VR view didn't survive it. Now:
@@ -423,8 +327,95 @@ controller are still included but untested.
   headset keeps showing a world-fixed view of the room at full frame rate, with the live loading
   screen (or "press any key") in its own place, instead of juddering or freezing.
 
-#### VR Settings
+#### Controls
 
+##### Pointing and the main hand
+
+- **One main hand** does all the pointing: the panel laser, the world dot and its label, interact
+  (trigger, left mouse), secondary interact (grip, right mouse), your held item and its animations,
+  and the game camera's aim. It's the right hand by default.
+- Pulling the other hand's trigger swaps the main hand. That pull only swaps. A swap can't happen
+  mid-click or mid-drag. The choice is saved in the config (VR tab → "Main Hand: Right"), where
+  Blah64's "Item Hand" was per session and defaulted to the left hand.
+- With the left hand as main hand, the arms are mirrored, so your item and its animations appear in
+  the left hand.
+- **The world dot and the game's interaction aim where the controller points.** The game's ray used
+  to start at your eye and run parallel to your hand, landing off by the gap between them. Now the
+  hand's own ray finds the spot, and the game's interaction is aimed through it, so the dot shows
+  exactly what you'll interact with.
+- The world dot is a round dot drawn after post-processing, so depth of field no longer blurs it. It
+  hides behind any panel in front of it, while a menu, the case board or VR Settings is up, and while
+  you use a computer. It replaces Blah64's pink aim dots.
+- **World Laser** (VR tab → Controls, off by default) draws a beam from the main hand into the
+  world. It replaces "Left Laser", whose beam never actually drew in the headset.
+- A and B work on panels from whichever hand is pointing.
+- **Controller presses no longer reach the flat game window behind a menu.** World clicks, grip
+  right-clicks and stick-click middle-clicks are held back while the laser is on UI. Before, a world
+  click with a menu up could hit whatever flat-screen button sat under the mouse cursor, such as the
+  exit prompt behind the pause menu.
+- **Panels behave like a real mouse:** hover highlights, press, drag (starting after 1.5 cm of
+  movement on the panel), click on release, A as right-click, and stick scrolling. A panel you
+  pressed keeps the pointer until you let go.
+- Buttons now run the game's own click handling, so buttons that ignored the old simulated clicks
+  work, such as the eye toggle that hides a fact on a note.
+- Overlapping panels no longer both take one click: the nearest gets the pointer. Within a window,
+  the pointer goes to whatever is drawn on top.
+- **The game stays in mouse-and-keyboard mode.** A virtual gamepad appearing mid-session (Virtual
+  Desktop can create one) used to switch the game to gamepad mode: pause, the case board and
+  interaction stopped responding, and the hints showed gamepad buttons.
+- NPC reaction icons and speech bubbles fade in and out by where your head looks, not where your
+  hand points.
+
+##### Quest button prompts
+
+- **The game's key hints show Quest controller buttons** instead of keyboard keys, for every key the
+  mod binds. Keys the mod doesn't bind keep the game's own glyph.
+- They follow your main hand, so swapping hands updates the prompts.
+- Case board and notebook show Y; the map, create string and weapon select show B; Back shows the
+  menu button; the case board's zoom shows the right stick. Right-click shows A on menus and the
+  case board, and the main grip in the world.
+- The interaction label shows the button beside each action it lists.
+- The glyphs are drawn at twice the text size, centred on the words, and still fit inside the game's
+  hint rows, so every hint keeps its text.
+- The glyphs are Kenney's Input Prompts (CC0).
+
+##### Grabbing and moving windows
+
+- **Grip any panel** with the laser hand to grab it. The grabbed point stays under the laser, and the
+  drag stays with the hand that started it.
+- While dragging, that hand's stick pushes the window away (up) or pulls it closer (down), from 0.2 m
+  to 15 m. Meanwhile the stick does nothing else: no turning, scrolling or dialogue stepping on the
+  right, no walking on the left.
+- Positions are remembered for the rest of the session: the case board (where it reopens, each panel
+  on it, open notes), the dialogue window, the keyboard, the map (on the board and while walking),
+  the VR controls panel and any other screen.
+- **Window Positions: Reset** (VR tab → Windows) puts them all back at once, without waiting for
+  Apply.
+- Menus and windows open 1.5 m from your head by default, down from 1.8 m (VR tab → Windows → Menu
+  Distance, 0.5 to 3.5 m).
+
+##### Movement and the body
+
+- **Standing jumps re-enabled.** Blah64's version turned off jumping from a standstill because of a
+  bug it caused. That bug is fixed, so standing jumps are back on.
+- **Jump Speed** (default 5 m/s, 3 to 7) and **Gravity** (default 15 m/s², 9.8 to 20) are on the VR
+  tab → Movement. They used to be fixed.
+- **Fall damage re-enabled.** Blah64's version had also turned it off because of a bug. It uses the
+  game's own landing rules: damage, broken legs, landing and impact sounds, the knockdown, and the
+  "Shafted" achievement. Loads, teleports and air vents never count as falls.
+- **Fall Knockdown** (VR tab → Movement, on by default): turn it off to take the same fall damage
+  without the view dropping to the floor and getting back up.
+
+#### Settings and modding
+
+##### VR Settings
+
+- **Render scale** is a setting (VR tab → Rendering → "Scale (restart)", 0.5× to 1.4×, default 0.7×,
+  the value Blah64's version had fixed). It's capped at the headset's maximum and applies on the
+  next launch.
+- **Headset view on your monitor** (VR tab → Rendering → Monitor Mirror, on by default): the
+  game window shows what you see in the headset (the left eye's finished image), panels included,
+  cropped to the monitor's shape and upright. Toggles live.
 - VR Settings is a see-through panel (900 × 700) opened in front of you at the menu distance. You can
   grip-drag it, the stick scrolls the open tab, and the laser clicks everything, scroll arrows
   included. Its colours look as intended rather than over-bright, and its arrows and close button
@@ -448,7 +439,7 @@ controller are still included but untested.
   - Rendering: Monitor Mirror, Smooth Loading, Crisp Panels, Scale (restart)
 - Open it with F10 or the Settings button in the main or pause menu, as before.
 
-#### Removed
+##### Removed
 
 - Blah64's world-space UI (game screens converted into 3D geometry in the game camera) and everything
   built on it: the pink aim dots, the right-hand cursor reticle, the old laser, and the per-screen
